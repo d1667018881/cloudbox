@@ -22,36 +22,29 @@
 | 搜索 | Room 索引全盘同步，FTS（英文/数字）+ LIKE（中文）双轨查询 |
 | 其他 | 剪贴板链接自动识别、域名远程配置（Gist JSON）+ 手动覆盖 + 连通性测试、深色模式、动态取色 |
 
-## 编译步骤
+## 构建与安装（无需本地环境）
 
-### 环境要求
-- JDK 17+
-- Android SDK（compileSdk 34）
-- Android Studio Ladybug 及以上（或命令行 Gradle 8.9）
+本项目**不需要本地搭建 Android 开发环境**。日常修改流程：
 
-### 命令行构建
-```bash
-# 1. 生成 wrapper（若仓库未附带 gradle-wrapper.jar）
-gradle wrapper --gradle-version 8.9
-
-# 2. 构建 debug 包
-./gradlew assembleDebug
-
-# 3. 构建 release 包（已配置签名，见下）
-./gradlew assembleRelease
 ```
+改代码 → 推送到 main 分支 → GitHub Actions 自动构建 → 自动发布到 Release
+```
+
+- **APK 下载**：https://github.com/d1667018881/cloudbox/releases/latest （`app-release.apk`）
+- **构建状态**：仓库 Actions 页面查看 run 是否 success
+- **手动触发构建**：Actions → Build APK → Run workflow（无需 push）
 
 ### 签名说明（签名一致，可覆盖安装）
 项目内置 `app/keystore/cloudbox-release.keystore`（自用分发场景，密钥已随仓库提交），
-release 与 debug 均使用该 keystore 签名，因此：
-- CI（GitHub Actions）构建的 APK 与本地构建的 APK 签名一致，可互相覆盖安装
+debug 与 release 均使用该 keystore 签名（`app/build.gradle.kts` signingConfigs），因此：
+- CI（GitHub Actions）构建的 APK 与任何本地构建的 APK 签名一致，可互相覆盖安装
 - 升级安装不会提示"签名不一致"
-
-如需更换签名：用 `keytool -genkeypair` 生成新 keystore，替换 `app/keystore/` 下文件并修改 `app/build.gradle.kts` 中的 `signingConfigs` 密码。
+- **切勿更换/删除 keystore**：更换后所有已安装用户必须卸载重装，且无法覆盖升级
 
 ### GitHub Actions 自动构建
-推送代码到 `main` 分支（或手动触发 workflow_dispatch）即自动执行 `assembleRelease`，
-构建产物以 Artifact 形式保存（仓库 Actions 页面 → 对应 run → Artifacts → 下载 APK）。
+推送代码到 `main` 分支（或手动触发 workflow_dispatch）即自动执行 `assembleRelease` +
+`apksigner` 验签，随后 `gh release create` 将 APK 发布到 GitHub Release
+（tag 带时间戳，如 `v0.1.0-202608261113`，旧版本不会被覆盖）。
 
 ## 域名配置
 
