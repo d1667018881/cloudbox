@@ -49,8 +49,11 @@ class SearchRepositoryImpl @Inject constructor(
                     // 2) 分页拉取该文件夹全部文件
                     var page = 1
                     while (true) {
-                        val listPage = fileRepository.getPage(folderId, page).getOrNull()
-                            ?: break
+                        // #24 修复：网络错误中断时返回 failure（UI 提示"部分同步失败"），
+                        // 旧实现 getOrNull() ?: break 静默截断且报成功
+                        val listPage = fileRepository.getPage(folderId, page).getOrElse {
+                            throw IllegalStateException("同步在第 ${index + 1}/${folderIds.size} 个文件夹中断", it)
+                        }
                         if (listPage.files.isEmpty() && page == 1) break
                         db.searchIndexDao().insertAll(listPage.files.map {
                             SearchIndexEntity(
@@ -76,7 +79,7 @@ class SearchRepositoryImpl @Inject constructor(
     override suspend fun search(keyword: String): List<CloudFile> =
         withContext(Dispatchers.IO) {
             val uid = accountStore.currentUid() ?: return@withContext emptyList()
-            val kw = keyword.trim()
+            val kw = escapeLike(keyword.trim())
             if (kw.isEmpty()) return@withContext emptyList()
 
             // 索引 LIKE 查询（中文/英文统一可用，见 SearchIndexDao 注释）
@@ -97,9 +100,11 @@ class SearchRepositoryImpl @Inject constructor(
 
     override suspend fun isSynced(): Boolean {
         val uid = accountStore.currentUid() ?: return false
-        // 简单判定：存在索引数据即认为同步过（精确判定需计数，此处够用）
-        return runCatching {
-            db.fileCacheDao().allFiles(uid).isNotEmpty()
-        }.getOrDefault(false)
+        // #22/#23 修复：查索引表行数（旧实现查文件缓存表——浏览任意目录即非空，永远显示已同步）
+        return db.searchIndexDao().countForAccount(uid) > 0
     }
+
+    /** #25 修复：LIKE 通配符转义（% _ \），避免搜索词含通配符时行为异常 */
+    private fun escapeLike(kw: String): String =
+        kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 }
