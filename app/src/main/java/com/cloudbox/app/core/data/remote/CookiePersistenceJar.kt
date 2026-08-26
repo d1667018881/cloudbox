@@ -4,7 +4,6 @@ import com.cloudbox.app.core.data.local.secure.AccountSecureStore
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -16,107 +15,144 @@ import javax.inject.Singleton
  *
  * 多账号支持：每个账号一个 Cookie 槽位（key = cookies_<uid>）。
  * 切换账号 = 调 [switchAccount] 把内存缓存换成目标账号的 Cookie。
- * 写回策略：任何新 Cookie 到达即整体持久化（简单可靠，Cookie 量很小）。
+ *
+ * 审查修复记录（CODE_REVIEW #2/#5/#6/#26/#27）：
+ * - #6 线程安全：cache 读写全部 synchronized(lock)（OkHttp 线程池并发调用 + 协程切换）
+ * - #2 持久化格式：OkHttp Cookie.toString() 输出小写属性（expires=/domain=/path=），
+ *   旧实现用大写 "Domain=" 判断永不匹配，value 被属性串污染。改为结构化手工解析
+ * - #27 分桶键统一：保存/恢复都按 cookie.domain（去前导点）分桶，避免跨子域漂移
+ * - #26 过期过滤：loadForRequest 用 Cookie.matches(url) 过滤过期/域不匹配
+ * - #5 新增 putCookie()：外部计算的 cookie（如 acw_sc__v2 反爬）写入 jar 统一管理，
+ *   避免手动 Cookie 头被 OkHttp BridgeInterceptor 整体覆盖
  */
 @Singleton
 class CookiePersistenceJar @Inject constructor(
     private val accountStore: AccountSecureStore
 ) : CookieJar {
 
-    /** host -> cookies 的内存缓存（当前账号视角） */
+    /** 按 cookie.domain（去前导点）分桶的内存缓存（当前账号视角） */
     private val cache = HashMap<String, MutableList<Cookie>>()
+
+    /** 所有 cache 读写必须持锁（OkHttp 线程池并发调用 saveFromResponse/loadForRequest） */
+    private val lock = Any()
 
     /** 当前账号 uid（null = 未登录，不持久化） */
     @Volatile
     private var currentUid: String? = null
 
-    /** 登录成功后绑定账号槽位 */
+    /** 绑定账号槽位（切换账号 / 登录前预绑定） */
     fun switchAccount(uid: String?) {
-        currentUid = uid
-        cache.clear()
-        if (uid != null) {
-            // 从加密存储恢复该账号的 Cookie
-            for (line in accountStore.loadCookieLines(uid)) {
-                runCatching {
-                    val c = parseCookieLine(line) ?: return@runCatching
-                    cache.getOrPut(c.domain.removePrefix(".")) { mutableListOf() }.add(c)
+        synchronized(lock) {
+            currentUid = uid
+            cache.clear()
+            if (uid != null) {
+                // 从加密存储恢复该账号的 Cookie
+                for (line in accountStore.loadCookieLines(uid)) {
+                    runCatching {
+                        parseCookieLine(line)?.let { addCookieLocked(it) }
+                    }
                 }
             }
         }
     }
 
-    /**
-     * 解析一行 Set-Cookie 文本为 [Cookie]。
-     *
-     * 为什么手动处理"无 Domain 属性"的行：手动导入的 phpdisk_info 通常是纯键值对
-     * （"phpdisk_info=xxx"），Cookie.parse 会按传入 URL 的 host 兜底（lanzou.com），
-     * 而 phpdisk_info/ylogin 实际由 pc.woozooo.com 下发，域不对会导致请求不带 Cookie。
-     * 因此按名字约定：woozooo 体系凭证归 woozooo.com，其余归 lanzou.com。
-     */
-    private fun parseCookieLine(line: String): Cookie? {
-        if (line.contains("Domain=")) {
-            // OkHttp 4.x：HttpUrl.get(String) 已废弃（ERROR 级），改用 toHttpUrl 扩展
-            return Cookie.parse("https://www.lanzou.com/".toHttpUrl(), line)
-        }
-        val eq = line.indexOf('=')
-        if (eq <= 0) return null
-        val name = line.substring(0, eq).trim()
-        val value = line.substring(eq + 1).trim()
-        val domain = if (name == "phpdisk_info" || name == "ylogin") "woozooo.com" else "lanzou.com"
-        return Cookie.Builder()
-            .name(name)
-            .value(value)
-            .domain(domain)
-            .path("/")
-            .expiresAt(System.currentTimeMillis() + 20L * 24 * 3600 * 1000)
-            .build()
-    }
-
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         if (cookies.isEmpty()) return
-        // 只关心蓝奏云/woozooo 体系的 Cookie，避免污染第三方域
-        val host = url.host
-        if (!(host.contains("woozooo") || host.contains("lanzou"))) return
-
-        val bucket = cache.getOrPut(host) { mutableListOf() }
-        // 按 name 去重覆盖（Set-Cookie 可能重复下发同名 Cookie）
-        for (cookie in cookies) {
-            bucket.removeAll { it.name == cookie.name }
-            bucket.add(cookie)
+        synchronized(lock) {
+            for (cookie in cookies) {
+                // 只关心蓝奏云/woozooo 体系的 Cookie，避免污染第三方域
+                val host = cookie.domain
+                if (!(host.contains("woozooo") || host.contains("lanzou"))) continue
+                addCookieLocked(cookie)
+            }
+            persistLocked()
         }
-        persist()
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        val host = url.host
-        // Cookie 的 domain 常带前导点（如 .lanzou.com），且可能比请求 host 更短（父域 cookie），
-        // 因此按"host 等于 key 或 host 是 key 的子域"匹配
-        return cache
-            .filterKeys { key -> host == key || host.endsWith(".$key") }
-            .values
-            .flatten()
-            .toList()
+        synchronized(lock) {
+            val host = url.host
+            // Cookie 的 domain 常带前导点（如 .lanzou.com），且可能比请求 host 更短（父域 cookie），
+            // 因此按"host 等于 key 或 host 是 key 的子域"匹配；再用 matches 过滤过期/域不匹配（#26）
+            return cache
+                .filterKeys { key -> host == key || host.endsWith(".$key") }
+                .values
+                .flatten()
+                .filter { it.matches(url) }
+                .toList()
+        }
     }
 
     /** 当前账号是否持有指定名字的 Cookie（用于登录成功判定 / 过期检测） */
-    fun hasCookie(name: String): Boolean =
+    fun hasCookie(name: String): Boolean = synchronized(lock) {
         cache.values.flatten().any { it.name == name }
+    }
 
     /** 是否有 phpdisk_info（登录凭证） */
     fun isLoggedIn(): Boolean = hasCookie("phpdisk_info")
 
-    private fun persist() {
+    /** 把外部计算的 cookie（如 acw_sc__v2）写入 jar，由统一 Cookie 头管理（#5） */
+    fun putCookie(cookie: Cookie) {
+        synchronized(lock) {
+            addCookieLocked(cookie)
+            persistLocked()
+        }
+    }
+
+    /** 导出当前账号全部 Cookie（Set-Cookie 文本格式，每行一条） */
+    fun export(): List<String> = synchronized(lock) {
+        cache.values.flatten().map { it.toString() }
+    }
+
+    fun clearAll() {
+        synchronized(lock) {
+            cache.clear()
+            val uid = currentUid ?: return
+            accountStore.clearCookies(uid)
+        }
+    }
+
+    private fun addCookieLocked(cookie: Cookie) {
+        val key = cookie.domain.removePrefix(".")
+        val bucket = cache.getOrPut(key) { mutableListOf() }
+        // 按 name 去重覆盖（Set-Cookie 可能重复下发同名 Cookie）
+        bucket.removeAll { it.name == cookie.name }
+        bucket.add(cookie)
+    }
+
+    private fun persistLocked() {
         val uid = currentUid ?: return
         val lines = cache.values.flatten().map { it.toString() }
         accountStore.saveCookies(uid, lines)
     }
 
-    /** 导出当前账号全部 Cookie（Set-Cookie 文本格式，每行一条） */
-    fun export(): List<String> = cache.values.flatten().map { it.toString() }
+    /**
+     * 解析一行 Set-Cookie 文本为 [Cookie]（#2 修复）。
+     *
+     * 为什么手工解析而不是 Cookie.parse：
+     * 1. OkHttp 4.12 的 Cookie.toString() 输出**小写**属性（expires=/domain=/path=），
+     *    旧实现按大写 "Domain=" 判断永不命中，导致 value 被整串属性污染；
+     * 2. Cookie.parse 需要传入与 cookie domain 匹配的 URL，否则返回 null；
+     *    手动导入的纯键值对（无 domain 属性）无法用 Cookie.parse 还原域。
+     *
+     * 规则：name/value 取第一段（到第一个 ';' 为止）；domain 属性大小写不敏感；
+     * 无 domain 属性时按名字约定归属：phpdisk_info/ylogin → woozooo.com，其余 → lanzou.com。
+     * 不解析 expires：恢复为 session cookie 语义（服务端自行校验 phpdisk_info 有效性）。
+     */
+    private fun parseCookieLine(line: String): Cookie? {
+        val parts = line.split(';').map { it.trim() }
+        val first = parts.firstOrNull() ?: return null
+        val eq = first.indexOf('=')
+        if (eq <= 0) return null
+        val name = first.substring(0, eq).trim()
+        val value = first.substring(eq + 1).trim()
+        if (name.isEmpty()) return null
 
-    fun clearAll() {
-        cache.clear()
-        val uid = currentUid ?: return
-        accountStore.clearCookies(uid)
+        val builder = Cookie.Builder().name(name).value(value).path("/")
+        val domainAttr = parts.firstOrNull { it.startsWith("domain=", ignoreCase = true) }
+        val domain = domainAttr?.substringAfter('=')?.trim()?.removePrefix(".")
+            ?: if (name == "phpdisk_info" || name == "ylogin") "woozooo.com" else "lanzou.com"
+        builder.domain(domain)
+        return builder.build()
     }
 }
