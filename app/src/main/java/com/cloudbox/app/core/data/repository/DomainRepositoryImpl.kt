@@ -24,9 +24,9 @@ import javax.inject.Singleton
 /**
  * 域名配置仓库实现。
  *
- * 配置合并优先级（高→低）：
- * 1. 用户手动覆盖（DataStore，仅覆盖非空字段）
- * 2. 远程配置（启动时拉取一次，应用到"未覆盖字段"）
+ * 配置合并优先级（高→低）——审查 CODE_REVIEW #9 修复，三层独立存储：
+ * 1. 用户手动覆盖（DataStore overrides 槽位，仅覆盖非空字段）
+ * 2. 远程配置（DataStore remote 槽位，独立保存，可反复更新）
  * 3. 内置默认值
  *
  * 为什么远程配置不直接覆盖本地值：用户手动改过的域名（比如运营商 DNS 污染
@@ -40,9 +40,12 @@ class DomainRepositoryImpl @Inject constructor(
     private val domainInterceptor: LanzouDomainInterceptor
 ) : DomainRepository {
 
+    // #9 修复：合并 DEFAULT < remote < userOverride（旧实现只有两层，且远程结果
+    // 误写进 overrides 槽位导致第二次远程更新被旧值压住）
     private val _domainConfig: Flow<LanzouDomainConfig> =
-        store.observeOverrides().map { overrides ->
-            merge(LanzouDomainConfig.DEFAULT, overrides)
+        combine(store.observeOverrides(), store.observeRemote()) { overrides, remote ->
+            val base = remote?.let { merge(LanzouDomainConfig.DEFAULT, it) } ?: LanzouDomainConfig.DEFAULT
+            merge(base, overrides)
         }
 
     // 注意：必须放在 _domainConfig 声明之后，否则 init 访问未初始化属性
@@ -58,13 +61,18 @@ class DomainRepositoryImpl @Inject constructor(
 
     override suspend fun fetchAndApplyRemote(remoteUrl: String): Result<LanzouDomainConfig> {
         store.saveRemoteUrl(remoteUrl)
+        // #9 修复：远程配置存独立 remote 槽位（旧实现写进 overrides，热更新失效）
         return remoteSource.fetch(remoteUrl).onSuccess { remote ->
-            // 把远程配置写入本地（作为"未覆盖基线"），
-            // 用户手动覆盖的字段在 merge 时仍会优先
-            val overrides = store.getOverrides()
-            val merged = merge(remote, overrides)
-            store.saveOverrides(merged)
+            store.saveRemote(remote)
         }
+    }
+
+    override suspend fun refreshRemote(): Result<LanzouDomainConfig> {
+        val url = store.getRemoteUrl()
+        if (url.isBlank()) {
+            return Result.failure(IllegalStateException("未配置远程域名 URL"))
+        }
+        return fetchAndApplyRemote(url)
     }
 
     override suspend fun testConnectivity(config: LanzouDomainConfig): List<DomainLatency> =
