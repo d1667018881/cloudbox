@@ -1,5 +1,9 @@
 # 云匣（CloudBox）
 
+> ⚠️ **给 AI / 接手开发者**：接手本项目前，请**务必先阅读 [`AI_MAINTENANCE.md`](AI_MAINTENANCE.md)**。
+> 该文档包含：完整架构导航、接口逆向事实表（task 编号）、核心机制（域名重写/Cookie/直链解析/分卷上传）、
+> 历史踩坑记录、构建发布流程与常见修改指南。**不读它直接改代码，很容易踩坑。**
+
 轻量级网盘第三方 Android 客户端（自用分发）。通过 OkHttp/Retrofit 模拟网盘 Web 端（woozooo 域名体系）接口交互，绕过官方 App 对非会员手机端隐藏 APK 等格式下载入口的限制。
 
 > ⚠️ **仅供个人学习使用**。本项目的接口逆向实现基于公开开源项目（LanZouCloud-API 等，MIT 协议）与公开抓包资料，请勿用于商业用途或大规模分发。
@@ -99,3 +103,18 @@ Kotlin · Jetpack Compose (Material 3) · MVVM + Clean Architecture · Retrofit 
 ## 免责声明
 
 本项目仅用于学习 Android 开发与 Web 协议分析。使用本项目产生的任何后果（包括账号风控）由使用者自行承担。请尊重网盘平台的服务条款。
+
+---
+
+## AI / 接手开发者入口
+
+**接手本项目前必读：[`AI_MAINTENANCE.md`](AI_MAINTENANCE.md)**
+
+内容包括：
+- 完整目录结构与每层职责
+- 核心机制详解：域名动态重写、Cookie 槽位与 20 天过期机制、直链解析全流程（sign/ajaxm.php/dom+/file/+url）、分卷上传与 100MB 限制、回收站 formhash 流程、风控与 UA 伪装
+- 接口 task 编号速查表（LanZouCloud-API 源码逐字确认）
+- 历史踩坑记录（R8/AGP 版本、WorkManager 初始化器、OkHttp 废弃 API、GitHub REST 上传、artifact 配额等）
+- 签名体系与 CI 发布流程（keystore 不可更换，否则无法覆盖安装）
+- 常见修改场景的代码定位指南
+- AI 接手第一步 Checklist
