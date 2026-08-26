@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 备份规则：账号密码与 Cookie 存于 EncryptedSharedPreferences（keystore 加密），
+     备份到云端会破坏加密容器，必须排除，避免恢复后不可用 -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secure_accounts.xml" />
+    <exclude domain="sharedpref" path="secure_cookies.xml" />
+</full-backup-content>
