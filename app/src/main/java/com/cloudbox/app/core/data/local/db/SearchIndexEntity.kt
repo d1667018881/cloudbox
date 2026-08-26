@@ -1,22 +1,21 @@
 package com.cloudbox.app.core.data.local.db
 
 import androidx.room.Entity
-import androidx.room.Index
-import androidx.room.PrimaryKey
 
 /**
- * 搜索索引表（FTS4）。
+ * 搜索索引表。
  *
- * 中文分词局限说明：SQLite FTS4 默认 simple tokenizer 按空格/标点分词，
- * 中文文件名整串作为一个 token，无法做词内匹配。因此本项目搜索策略是双轨：
- * - 英文/数字文件名 → FTS4 前缀查询（快）
- * - 中文 → LIKE '%kw%' 兜底（FileCacheDao.searchLike）
- * 两者结果合并去重后展示。这是 Room FTS 在中文场景下的通用妥协方案。
+ * 说明（审查 CODE_REVIEW #18/#32 修正）：早期文档自称 FTS4，实际是普通表 + LIKE 查询
+ * （Room @Fts4 虚拟表对中文分词无效且表结构受限），统一说法避免后续维护者误用 MATCH。
+ * 主键为 (accountUid, fileId) 复合主键（文件 id 全局唯一，但多账号下可能重复）。
+ *
+ * 中文分词局限：LIKE '%kw%' 对中文/英文/数字统一可用，
+ * 个人网盘规模（千级文件）性能足够；数据量达到万级再引入 FTS 前缀加速。
  */
-@Entity(tableName = "file_search_fts")
+@Entity(tableName = "file_search_fts", primaryKeys = ["accountUid", "fileId"])
 data class SearchIndexEntity(
-    @PrimaryKey val fileId: Long,
     val accountUid: String,
+    val fileId: Long,
     val name: String,
     val parentId: Long,
     val size: String?,
