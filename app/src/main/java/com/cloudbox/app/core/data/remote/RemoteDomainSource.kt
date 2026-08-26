@@ -1,0 +1,64 @@
+package com.cloudbox.app.core.data.remote
+
+import com.cloudbox.app.common.AppConstants
+import com.cloudbox.app.common.DomainUtils
+import com.cloudbox.app.core.domain.model.LanzouDomainConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * 远程域名配置源：启动时从 GitHub Gist（或任意 HTTPS URL）拉取 JSON。
+ *
+ * 为什么用 JSONObject 而非 Gson：配置结构简单固定，避免为一次拉取引入
+ * serialization 插件依赖；解析失败/网络失败一律静默回落本地默认值，
+ * 绝不让 App 因域名配置拉不到而无法启动。
+ *
+ * 远程 JSON 格式（示例，发布到 Gist 后把 URL 填入设置页）：
+ * {
+ *   "loginEntry": "https://up.woozooo.com/",
+ *   "diskMain": "https://pc.woozooo.com/",
+ *   "shareBase": "https://www.lanzou.com/",
+ *   "uploadServer": "https://pc.woozooo.com/",
+ *   "fallbackDomains": ["https://www.lanzoui.com/", "..."]
+ * }
+ */
+@Singleton
+class RemoteDomainSource @Inject constructor(
+    private val okHttpClient: OkHttpClient
+) {
+    /**
+     * 拉取并解析远程域名配置。
+     * 防御性处理：字段缺失用默认值兜底；fallbackDomains 中的黑名单域名
+     * （lanzous.com 被抢注）直接剔除。
+     */
+    suspend fun fetch(url: String): Result<LanzouDomainConfig> = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", AppConstants.DESKTOP_UA)
+                .header("Accept", "application/json")
+                .build()
+            okHttpClient.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+                val json = JSONObject(resp.body?.string().orEmpty())
+                val fallback = json.optJSONArray(LanzouDomainConfig.KEY_FALLBACK)?.let { arr ->
+                    (0 until arr.length()).map { arr.getString(it) }
+                }?.filter { DomainUtils.normalize(it).isNotEmpty() && !DomainUtils.isForbidden(it) }
+                    ?: LanzouDomainConfig.DEFAULT.fallbackDomains
+
+                LanzouDomainConfig(
+                    loginEntry = json.optString(LanzouDomainConfig.KEY_LOGIN, LanzouDomainConfig.DEFAULT.loginEntry),
+                    diskMain = json.optString(LanzouDomainConfig.KEY_DISK, LanzouDomainConfig.DEFAULT.diskMain),
+                    shareBase = json.optString(LanzouDomainConfig.KEY_SHARE, LanzouDomainConfig.DEFAULT.shareBase),
+                    uploadServer = json.optString(LanzouDomainConfig.KEY_UPLOAD, LanzouDomainConfig.DEFAULT.uploadServer),
+                    fallbackDomains = fallback
+                )
+            }
+        }
+    }
+}
