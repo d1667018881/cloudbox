@@ -65,12 +65,13 @@ object SplitZipUtil {
         }
     }
 
-    /** 分卷顺序：.zip=0, .z01=1, .z02=2 ...（同时兼容 .001/.002） */
+    /** 分卷顺序（#29 修复）：.zip 是含中央目录的【最后】一段，排在 z 序号之后——
+     *  旧实现把 .zip 排第 0 位，一旦合并接线就是数据损坏级 bug */
     private fun volumeOrder(file: File): Int {
         val name = file.name.lowercase()
-        if (name.endsWith(".zip")) return 0
+        if (name.endsWith(".zip")) return Int.MAX_VALUE
         Regex(""".*\.z(\d{2})$""").find(name)?.let { return it.groupValues[1].toInt() }
         Regex(""".*\.(\d{3})$""").find(name)?.let { return it.groupValues[1].toInt() }
-        return Int.MAX_VALUE
+        return 0
     }
 }
