@@ -34,7 +34,10 @@ jobs:
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Verify signature
-        run: apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk
+          # 输出 SHA256 应与 keystore 一致（F3:F6:BB:C6:13:BF:C8:80...），保证可覆盖安装
 
       - name: Create Release
         env:
