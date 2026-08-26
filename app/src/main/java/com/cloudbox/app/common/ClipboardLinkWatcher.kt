@@ -78,6 +78,20 @@ class ClipboardLinkWatcher @Inject constructor(
         _pendingLink.value = null
     }
 
+    /** 外部主动通知（intent 链接 / 页面 onResume 触发） */
+    fun notifyLink(url: String) {
+        if (DomainUtils.isShareUrl(url)) {
+            _pendingLink.value = url
+        }
+    }
+
+    /** #16 修复：前台 onResume 时主动检查一次剪贴板——
+     *  Android 10+ 的 OnPrimaryClipChangedListener 只在应用持有前台焦点时回调，
+     *  用户在其他 App 复制链接再切回（最常见场景）不会触发回调，必须主动补查 */
+    fun checkNow() {
+        checkClipboard()
+    }
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         checkClipboard()
     }
