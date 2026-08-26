@@ -1,5 +1,6 @@
 package com.cloudbox.app
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -58,6 +59,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // 启动剪贴板链接监听（需求规格 9 节）
         clipboardWatcher.start(appScope)
+        // #17：外部链接唤起（intent-filter 已限 lanzou 系 host），转交剪贴板弹窗机制
+        intent?.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
 
         enableEdgeToEdge()
         setContent {
@@ -136,6 +139,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTask 模式复用 Activity：外部链接二次唤起走这里
+        intent.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // #16 修复：前台主动查一次剪贴板（弥补 Android 10+ 监听回调的局限性）
+        clipboardWatcher.checkNow()
     }
 
     override fun onDestroy() {
