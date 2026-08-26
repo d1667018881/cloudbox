@@ -31,6 +31,9 @@ jobs:
           gradle-version: 8.9
 
       - name: Build APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: "0.1.0-${{ github.run_number }}"
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Verify signature
