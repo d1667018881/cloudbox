@@ -369,3 +369,50 @@ push 到 main（或 workflow_dispatch）→
 4. ✅ 核实域名池（§7.4）是否仍可用（被墙/抢注域名及时清理）
 5. ⚠️ 改动前先看 §6 的坑列表；**改完直接 push 到 main**，CI 自动构建验证（Actions 页面看 run 结果，Release 下载 APK）
 6. ⚠️ 发布流程：push main 自动构建发 Release；**不要动 keystore**（动了就无法覆盖安装）
+
+---
+
+## 11. 代码审查修复记录（2026-08-26，外部复审 AI 全量审查）
+
+外部审查（CODE_REVIEW.md，对照 commit 83bb3d5）共 32 条问题，**全部修复**并已通过 CI 编译验证
+（release v0.1.0-202608261408 起）。逐条销账：
+
+| # | 级别 | 问题 | 修复位置 |
+|---|---|---|---|
+| 1 | P0 | 登录后 Cookie 丢失（槽位绑定时序） | AuthRepositoryImpl.login：请求前预绑定槽位 + 失败回滚 |
+| 2 | P0 | Cookie 持久化被属性串污染（大小写/截断） | CookiePersistenceJar.parseCookieLine 重构 |
+| 3 | P0 | 上传 Worker 不分卷/无延时/失败误报成功 | UploadWorker 改调 uploadBatch + 失败检测 |
+| 4 | P1 | acw_sc__v2 算法移植错误 | AcwScV2 按原版重写（unsbox + 单轮字节 XOR） |
+| 5 | P1 | acw cookie 被 CookieJar 覆盖 | CookiePersistenceJar.putCookie + 接入解析流程 |
+| 6 | P1 | CookiePersistenceJar 线程不安全 | 全部 cache 读写 synchronized(lock) |
+| 7 | P1 | createFolder 前后对比顺序写反 | before 快照移到 create 前 |
+| 8 | P1 | removeUid 误踢当前账号 | 仅当删除当前账号时才清 currentUid |
+| 9 | P1 | 远程域名配置只生效一次 | 远程配置独立槽位 + 合并 DEFAULT<remote<userOverride + 启动拉取 |
+| 10 | P1 | 远程域名无合法性校验（凭证窃取向量） | RemoteDomainSource 主字段 https+白名单校验，整份拒绝 |
+| 11 | P2 | login 响应体未消费（连接泄漏） | body 统一消费/关闭 |
+| 12 | P2 | 批量删除/移动/回收站缺防风控延时 | 循环加 1-3s 随机延时 |
+| 13 | P2 | resolveFolder 静默丢弃失败项 | 返回 ResolveFolderResult（含失败计数） |
+| 14 | P2 | Data.putStringArray 超 10KB 崩溃 | WorkContinuation 每批 50 文件串联 |
+| 15 | P2 | 下载文件名未净化（路径穿越） | enqueue 内净化 / \\ .. |
+| 16 | P2 | 剪贴板监听 Android 10+ 失效 | onResume 主动 checkNow |
+| 17 | P2 | VIEW intent-filter 无 host 过滤 | Manifest 限定 lanzou 系 host + onCreate/onNewIntent 处理 |
+| 18 | P2 | 缓存表主键错误 REPLACE 失效 | (accountUid,id) 复合主键 |
+| 19 | P2 | 批量移动静默忽略文件夹 | UI 明确提示"文件夹不支持移动" |
+| 20 | P2 | RetryInterceptor 对上传盲目重试 | fileup.php POST IOException 豁免重试 |
+| 21 | P3 | getPage 忽略 HTTP 状态码 | 非 2xx 抛 ApiError.Server |
+| 22 | P3 | isSynced 查错表 | 改查 searchIndexDao 行数 |
+| 23 | P3 | allFiles 全量加载判空 | countForAccount COUNT 查询 |
+| 24 | P3 | syncAll 失败静默截断 | 中断抛异常 → 返回 failure |
+| 25 | P3 | LIKE 查询未转义 % _ | escapeLike + ESCAPE '\' |
+| 26 | P3 | 过期 Cookie 不过滤 | loadForRequest 用 Cookie.matches 过滤 |
+| 27 | P3 | Cookie 分桶键不一致 | 统一按 cookie.domain 分桶 |
+| 28 | P3 | QrCodeUtil 逐像素 setPixel | IntArray 一次填充 |
+| 29 | P3 | 分卷 volumeOrder .zip 排位错误 | .zip 改为最后一段（Int.MAX_VALUE） |
+| 30 | P3 | 上传缓存文件覆盖/不清理 | 时间戳前缀 + Worker 完成后清理 |
+| 31 | P3 | 版本号永不递增 | CI 注入 VERSION_CODE/VERSION_NAME |
+| 32 | P3 | ksp 重复/FTS 文档误导/Referer 硬编码 | 去重 + 文档统一 + Referer 用当前配置域 |
+
+遗留说明：
+- 移动文件夹（#19 关联）：官方无接口，UI 明确提示，不实现模拟方案（LanZouCloud-API 的
+  新建+移文件+删除有数据丢失风险）
+- keystore 随仓库提交：私有仓库自用可接受；仓库转公开前必须移除并换签名（换签名 = 老用户无法覆盖安装）
