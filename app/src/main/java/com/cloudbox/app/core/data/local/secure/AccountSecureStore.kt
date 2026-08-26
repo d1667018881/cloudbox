@@ -55,14 +55,15 @@ class AccountSecureStore @Inject constructor(
 
     fun removeUid(uid: String) {
         val list = allUids().filter { it != uid }
-        prefs.edit()
+        val editor = prefs.edit()
             .putString(KEY_UID_LIST, list.joinToString("\n"))
             .remove("$PREFIX_PWD$uid")
             .remove("$PREFIX_COOKIES$uid")
             .remove("$PREFIX_ACTIVE$uid")
-            .remove(KEY_CURRENT_UID)
-            .apply()
-        if (currentUid() == uid) clearCurrentUid()
+        // #8 修复：只有删除的是【当前账号】时才清 currentUid；
+        // 旧实现无条件 remove，导致删除非当前账号 B 时把正在使用的账号 A 也登出
+        if (currentUid() == uid) editor.remove(KEY_CURRENT_UID)
+        editor.apply()
     }
 
     // ---------- 当前账号 ----------
