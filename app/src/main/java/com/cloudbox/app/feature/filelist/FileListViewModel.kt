@@ -161,7 +161,18 @@ class FileListViewModel @Inject constructor(
     }
 
     fun moveSelected(targetFolderId: Long) {
-        val fileIds = _uiState.value.files.filter { it.id in _uiState.value.selected && !it.isFolder }.map { it.id }
+        val s = _uiState.value
+        val selectedFiles = s.files.filter { it.id in s.selected }
+        val fileIds = selectedFiles.filter { !it.isFolder }.map { it.id }
+        val folderCount = selectedFiles.count { it.isFolder }
+        // #19 修复：明确提示文件夹不支持移动（官方无接口），不再静默忽略
+        if (folderCount > 0) {
+            _uiState.update { it.copy(message = "文件夹暂不支持移动（官方无接口），仅移动 ${fileIds.size} 个文件") }
+        }
+        if (fileIds.isEmpty()) {
+            exitSelection()
+            return
+        }
         viewModelScope.launch {
             fileRepository.moveFiles(fileIds, targetFolderId)
                 .onSuccess {
