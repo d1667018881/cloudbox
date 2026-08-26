@@ -1,7 +1,8 @@
 # ============================================================
 # CloudBox 自动构建
 # 触发：push 到 main / 手动触发（workflow_dispatch）
-# 产物：release APK（签名一致，可覆盖安装），以 Artifact 保存 30 天
+# 产物：release APK 直接发布到 GitHub Release（避开 artifact 配额）
+# 签名：debug/release 共用 app/keystore/cloudbox-release.keystore（签名一致，可覆盖安装）
 # ============================================================
 name: Build APK
 
@@ -9,6 +10,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write   # 创建 Release 需要
 
 jobs:
   build:
@@ -39,9 +43,22 @@ jobs:
       - name: Build release APK
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudbox-release-apk
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 30
+      - name: Verify APK signature
+        run: |
+          apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+          # 输出 SHA256 应与 keystore 一致（F3:F6:BB:C6:...），保证可覆盖安装
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v0.1.0-$(date +%Y%m%d%H%M)"
+          gh release create "$TAG" \
+            app/build/outputs/apk/release/app-release.apk \
+            --repo "${{ github.repository }}" \
+            --title "CloudBox $TAG" \
+            --notes "自动构建 release APK
+
+- 签名：cloudbox-release.keystore（与本地 debug/release 一致，可覆盖安装）
+- 安装包：app-release.apk" \
+            --latest
