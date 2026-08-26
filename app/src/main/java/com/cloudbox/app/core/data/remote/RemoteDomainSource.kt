@@ -48,17 +48,36 @@ class RemoteDomainSource @Inject constructor(
                 val json = JSONObject(resp.body?.string().orEmpty())
                 val fallback = json.optJSONArray(LanzouDomainConfig.KEY_FALLBACK)?.let { arr ->
                     (0 until arr.length()).map { arr.getString(it) }
-                }?.filter { DomainUtils.normalize(it).isNotEmpty() && !DomainUtils.isForbidden(it) }
+                }?.filter { it.isNotBlank() && !DomainUtils.isForbidden(it) && it.startsWith("https://") }
                     ?: LanzouDomainConfig.DEFAULT.fallbackDomains
 
-                LanzouDomainConfig(
+                val config = LanzouDomainConfig(
                     loginEntry = json.optString(LanzouDomainConfig.KEY_LOGIN, LanzouDomainConfig.DEFAULT.loginEntry),
                     diskMain = json.optString(LanzouDomainConfig.KEY_DISK, LanzouDomainConfig.DEFAULT.diskMain),
                     shareBase = json.optString(LanzouDomainConfig.KEY_SHARE, LanzouDomainConfig.DEFAULT.shareBase),
                     uploadServer = json.optString(LanzouDomainConfig.KEY_UPLOAD, LanzouDomainConfig.DEFAULT.uploadServer),
                     fallbackDomains = fallback
                 )
+                // #10 修复：四个主字段合法性校验（https + 域名白名单 + 黑名单）。
+                // 旧实现原样接受远程值，被篡改的 Gist 可把全部 API 流量（含 phpdisk_info
+                // Cookie）导向任意服务器 = 账号凭证窃取。任一主字段不合法则整份拒绝。
+                listOf(config.loginEntry, config.diskMain, config.shareBase, config.uploadServer)
+                    .forEach { if (!isTrustedDomain(it)) throw IllegalStateException("远程配置含非法域名: $it") }
+                config
             }
         }
+    }
+
+    /**
+     * 可信域名校验：强制 https + 非黑名单 + host 属于 woozooo 或 lanzou 系域名。
+     * 注意：用户手动覆盖（设置页）不受此限制——那是用户自己的行为，风险自担。
+     */
+    private fun isTrustedDomain(value: String): Boolean {
+        if (!value.startsWith("https://")) return false
+        if (DomainUtils.isForbidden(value)) return false
+        val host = runCatching { java.net.URI(value).host }.getOrNull() ?: return false
+        val trusted = listOf("woozooo.com", "lanzou.com", "lanzoui.com", "lanzoup.com",
+            "lanzoux.com", "lanzouo.com", "lanzouh.com", "lanzouu.com")
+        return trusted.any { host == it || host.endsWith(".$it") }
     }
 }
