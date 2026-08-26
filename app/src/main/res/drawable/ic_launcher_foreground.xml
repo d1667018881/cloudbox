@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中性化图标：云朵 + 向下箭头（"收进云里"语义），不含任何品牌元素 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 云朵主体 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,66 C30,66 26,62 26,56 C26,50.5 30,46.5 35.5,45.5 C37.2,39 43,34 50,34 C56.5,34 62,38.5 63.8,44.8 C69,45.2 74,49.5 74,55.5 C74,61.5 69.5,66 63.5,66 Z" />
+    <!-- 向下箭头 -->
+    <path
+        android:fillColor="#1E5AE8"
+        android:pathData="M54,44 L54,58 M48,52 L54,58 L60,52"
+        android:strokeColor="#1E5AE8"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
