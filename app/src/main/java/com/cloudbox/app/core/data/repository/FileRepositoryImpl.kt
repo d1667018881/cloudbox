@@ -94,10 +94,12 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun createFolder(parentId: Long, name: String): Result<Long?> =
         withContext(Dispatchers.IO) {
             runCatching {
+                // #7 修复：before 快照必须在 create 调用【之前】取（旧实现顺序写反，
+                // 两次 getAllFolders 结果相同，diff 恒空 → 新文件夹 id 永远返回 null）
+                val before = api.getAllFolders().info?.map { it.folderId to it.folderName } ?: emptyList()
                 val resp = api.createFolder(parentId = parentId, folderName = name)
                 if (resp.zt != 1) throw ApiError.Business(resp.zt, "新建文件夹失败")
-                // task=2 不返回 id，用前后文件夹列表差异定位新文件夹（源码同款策略）
-                val before = api.getAllFolders().info?.map { it.folderId to it.folderName } ?: emptyList()
+                // task=2 不返回 id，用前后文件夹列表差异定位新文件夹（LanZouCloud-API 同款策略）
                 val after = api.getAllFolders().info?.map { it.folderId to it.folderName } ?: emptyList()
                 after.filter { it.second == name && it !in before }.firstOrNull()?.first
             }
@@ -133,6 +135,11 @@ class FileRepositoryImpl @Inject constructor(
                     if (resp.zt != 1) throw ApiError.Business(resp.zt, "删除文件 $fid 失败")
                 }
                 for (fid in folderIds) {
+                    val resp = api.deleteDir(folderId = fid)
+                    if (resp.zt != 1)   if (resp.zt != 1) throw ApiError.Business(resp.zt, "删除文件 $fid 失败")
+                }
+                for (fid in folderIds) {
+                    if (idx++ > 0) delay(kotlin.random.Random.nextLong(1_000, 3_001))
                     val resp = api.deleteDir(folderId = fid)
                     if (resp.zt != 1) throw ApiError.Business(resp.zt, "删除文件夹 $fid 失败")
                 }
@@ -236,19 +243,21 @@ class FileRepositoryImpl @Inject constructor(
 
     override suspend fun clearRecycle(): Result<Unit> = recycleBulk("delete_all", "清空回收站成功")
 
-    /** 单项操作：GET 取 formhash → POST 执行 */
+    /** 单项操作：GET 取 formhash → POST 执行（#12：逐项加 1-3s 延时防风控） */
     private suspend fun recycleAction(
         actionOf: (Long, Boolean) -> Pair<String, String>,
         ids: List<Pair<Long, Boolean>>,
         successKeyword: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            for ((id, isFolder) in ids) {
+            for ((index, pair) in ids.withIndex()) {
+                val (id, isFolder) = pair
+                if (index > 0) delay(kotlin.random.Random.nextLong(1_000, 3_001))
                 val (action, idParam) = actionOf(id, isFolder)
                 val getHtml = okHttp.newCall(
                     Request.Builder()
                         .url(url("mydisk.php?item=recycle&action=$action&$idParam"))
-                        .header("Referer", "https://pc.woozooo.com/mydisk.php")
+                        .header("Referer", recycleReferer())
                         .build()
                 ).execute().body?.string().orEmpty()
                 val formhash = HtmlExtractor.extractFormhash(getHtml)
@@ -262,7 +271,7 @@ class FileRepositoryImpl @Inject constructor(
                 val respText = okHttp.newCall(
                     Request.Builder()
                         .url(url("mydisk.php?item=recycle"))
-                        .header("Referer", "https://pc.woozooo.com/mydisk.php")
+                        .header("Referer", recycleReferer())
                         .post(body)
                         .build()
                 ).execute().body?.string().orEmpty()
@@ -280,7 +289,7 @@ class FileRepositoryImpl @Inject constructor(
                 val getHtml = okHttp.newCall(
                     Request.Builder()
                         .url(url("mydisk.php?item=recycle&action=$action"))
-                        .header("Referer", "https://pc.woozooo.com/mydisk.php")
+                        .header("Referer", recycleReferer())
                         .build()
                 ).execute().body?.string().orEmpty()
                 val formhash = HtmlExtractor.extractFormhash(getHtml)
@@ -293,7 +302,7 @@ class FileRepositoryImpl @Inject constructor(
                 val respText = okHttp.newCall(
                     Request.Builder()
                         .url(url("mydisk.php?item=recycle"))
-                        .header("Referer", "https://pc.woozooo.com/mydisk.php")
+                        .header("Referer", recycleReferer())
                         .post(body)
                         .build()
                 ).execute().body?.string().orEmpty()
@@ -307,8 +316,12 @@ class FileRepositoryImpl @Inject constructor(
         okHttp.newCall(
             Request.Builder()
                 .url(url("mydisk.php?item=recycle&action=files"))
-                .header("Referer", "https://pc.woozooo.com/mydisk.php")
+                .header("Referer", recycleReferer())
                 .build()
         ).execute().body?.string().orEmpty()
     }
+
+    /** #32 修复：回收站 Referer 用当前配置的管理域（旧实现硬编码 pc.woozooo.com，域名漂移后不一致） */
+    private fun recycleReferer(): String =
+        apiClient.domainInterceptor.snapshot().diskMain.trimEnd('/') + "/mydisk.php"
 }
