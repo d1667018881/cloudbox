@@ -47,13 +47,20 @@ class DownloadRepositoryImpl @Inject constructor(
         mimeType: String?,
         accountUid: String
     ): Long = withContext(Dispatchers.IO) {
+        // #15 修复：文件名净化（文件名来自服务端 inf 字段，含 / 或 .. 会路径穿越
+        // 或抛 IllegalArgumentException）
+        val safeName = fileName
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace("..", "_")
+            .ifBlank { "download_${System.currentTimeMillis()}" }
         val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle(fileName)
+            .setTitle(safeName)
             .setDescription("来自云匣")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalPublicDir(
                 Environment.DIRECTORY_DOWNLOADS,
-                fileName
+                safeName
             )
             // 桌面 UA + Referer：否则 403（需求规格 8 节）
             .addRequestHeader("User-Agent", AppConstants.DESKTOP_UA)
@@ -64,7 +71,7 @@ class DownloadRepositoryImpl @Inject constructor(
         db.downloadRecordDao().insert(
             DownloadRecordEntity(
                 downloadId = id,
-                fileName = fileName,
+                fileName = safeName,
                 url = url,
                 referer = referer,
                 mimeType = mimeType,
