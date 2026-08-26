@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// #31 修复：版本号支持 CI 注入（VERSION_CODE/VERSION_NAME 环境变量），
+// 默认值用于本地/无注入场景；CI 每次构建 versionCode 递增，可区分构建
+val ciVersionCode = (System.getenv("VERSION_CODE") ?: "1").toIntOrNull() ?: 1
+val ciVersionName = System.getenv("VERSION_NAME") ?: "0.1.0"
+
 android {
     namespace = "com.cloudbox.app"
     compileSdk = 34
@@ -14,8 +19,8 @@ android {
         applicationId = "com.cloudbox.app"
         minSdk = 26          // Android 8.0：EncryptedSharedPreferences / adaptive icon 均无兼容问题
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = ciVersionCode
+        versionName = ciVersionName
         // 桌面 UA 以 BuildConfig 形式注入，便于后续通过 DataStore 动态覆盖
         buildConfigField("String", "DEFAULT_DESKTOP_UA", "\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\"")
         vectorDrawables { useSupportLibrary = true }
@@ -118,5 +123,4 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.hilt.work)
-    ksp(libs.hilt.compiler)
 }
