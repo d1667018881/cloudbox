@@ -30,7 +30,7 @@ class LanzouApiClient @Inject constructor(
     val domainInterceptor: LanzouDomainInterceptor,
     private val uaInterceptor: UserAgentInterceptor,
     private val retryInterceptor: RetryInterceptor,
-    private val cookieJar: CookiePersistenceJar,
+    val cookieJar: CookiePersistenceJar,
     private val settingsStore: SettingsStore
 ) {
 
