@@ -14,12 +14,13 @@ interface SearchIndexDao {
     @Query("DELETE FROM file_search_fts WHERE accountUid=:uid")
     suspend fun clearForAccount(uid: String)
 
-    /**
-     * 索引搜索。
-     * 说明：Room @Fts4 虚拟表对中文分词无效且表结构受限（无主键/普通索引），
-     * 因此本表用普通表 + LIKE 查询——对个人网盘规模（千级文件）性能足够，
-     * 且中文/英文/数字统一可用。FTS 前缀加速在数据量达到万级后再引入。
-     */
-    @Query("SELECT * FROM file_search_fts WHERE accountUid=:uid AND name LIKE '%'||:query||'%' LIMIT 200")
+    /** 索引搜索（#25 修复：LIKE 通配符转义，配合 ESCAPE '\' 使用） */
+    @Query(
+        "SELECT * FROM file_search_fts WHERE accountUid=:uid AND name LIKE '%'||:query||'%' ESCAPE '\\' LIMIT 200"
+    )
     suspend fun searchIndex(uid: String, query: String): List<SearchIndexEntity>
+
+    /** #22/#23 修复：索引行数计数（isSynced 用，替代全表拉取判空） */
+    @Query("SELECT COUNT(*) FROM file_search_fts WHERE accountUid=:uid")
+    suspend fun countForAccount(uid: String): Int
 }
