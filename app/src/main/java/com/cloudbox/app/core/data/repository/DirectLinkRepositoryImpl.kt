@@ -10,6 +10,7 @@ import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.data.remote.LanzouApiClient
 import com.cloudbox.app.core.domain.model.DirectLink
 import com.cloudbox.app.core.domain.repository.DirectLinkRepository
+import com.cloudbox.app.core.domain.repository.ResolveFolderResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -90,7 +91,7 @@ class DirectLinkRepositoryImpl @Inject constructor(
             }
         }
 
-    override suspend fun resolveFolder(shareUrl: String, password: String): Result<List<DirectLink>> =
+    override suspend fun resolveFolder(shareUrl: String, password: String): Result<ResolveFolderResult> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val base = apiClient.domainInterceptor.snapshot().shareBase
@@ -122,8 +123,10 @@ class DirectLinkRepositoryImpl @Inject constructor(
                     delay(600)
                 }
 
-                // 3) 逐个解析直链
-                resolveBatch(files).mapNotNull { it.getOrNull() }
+                // 3) 逐个解析直链（#13 修复：保留失败项计数，不静默丢弃）
+                val results = resolveBatch(files)
+                val links = results.mapNotNull { it.getOrNull() }
+                ResolveFolderResult(links, results.size - links.size, results.size)
             }
         }
 
@@ -139,9 +142,21 @@ class DirectLinkRepositoryImpl @Inject constructor(
 
         // acw_sc__v2 反爬挑战：页面出现该 cookie 时需先计算再重新请求（社区逆向算法，见 AcwScV2）
         if (html.contains("acw_sc__v2")) {
-            val cookie = AcwScV2.compute(html)
-            if (cookie != null) {
-                html = getPage(sharePageUrl, base, extraCookie = cookie)
+            val cookieValue = AcwScV2.compute(html)
+            if (cookieValue != null) {
+                // #5 修复：把计算出的 acw_sc__v2 写入 CookieJar（按 lanzou 域），
+                // 由 OkHttp BridgeInterceptor 统一拼接 Cookie 头。
+                // 旧实现手动 header("Cookie", ...) 会被 BridgeInterceptor 在 cookieJar
+                // 返回非空时整体替换（首次访问已 Set-Cookie acw_tc 等），导致重试必然失败
+                val host = java.net.URI(base).host ?: "www.lanzou.com"
+                val cookie = okhttp3.Cookie.Builder()
+                    .name("acw_sc__v2")
+                    .value(cookieValue.substringAfter('='))
+                    .domain(host.removePrefix("www."))
+                    .path("/")
+                    .build()
+                apiClient.cookieJar.putCookie(cookie)
+                html = getPage(sharePageUrl, base)
             }
         }
 
@@ -196,14 +211,18 @@ class DirectLinkRepositoryImpl @Inject constructor(
         )
     }
 
-    /** GET 页面（带桌面 UA 与 Referer） */
-    private fun getPage(url: String, base: String, extraCookie: String? = null): String {
+    /** GET 页面（带桌面 UA 与 Referer；#21 修复：非 2xx 抛业务错误，避免错误页进正则误导排障） */
+    private fun getPage(url: String, base: String): String {
         val builder = Request.Builder()
             .url(url)
             .header("Referer", base)
             .header("Accept-Language", "zh-CN,zh;q=0.9")
-        extraCookie?.let { builder.header("Cookie", it) }
-        return okHttp.newCall(builder.build()).execute().body?.string().orEmpty()
+        val resp = okHttp.newCall(builder.build()).execute()
+        if (!resp.isSuccessful) {
+            resp.close()
+            throw ApiError.Server(resp.code)
+        }
+        return resp.body?.string().orEmpty()
     }
 
     /** 第三方解析服务：POST shareUrl（+可选密码），期望返回 {"url": 直链} 或纯文本 URL */
