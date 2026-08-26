@@ -27,6 +27,9 @@ interface DomainRepository {
     /** 从远程 URL 拉取并应用；失败返回错误信息 */
     suspend fun fetchAndApplyRemote(remoteUrl: String): Result<LanzouDomainConfig>
 
+    /** 用已保存的远程 URL 刷新（App 启动时调用；未配置 URL 返回失败） */
+    suspend fun refreshRemote(): Result<LanzouDomainConfig>
+
     /** 并发 HEAD 测连通性，返回按 RTT 升序的结果 */
     suspend fun testConnectivity(config: LanzouDomainConfig): List<DomainLatency>
 }
