@@ -247,13 +247,23 @@ resolve(shareUrl, password):
 
 ## 7. 构建与发布
 
-### 7.1 本地构建
-```bash
-# 环境：JDK 17 + Android SDK 34 + Gradle 8.9
-export JAVA_HOME=<jdk17> ANDROID_HOME=<sdk>
-gradle assembleDebug     # debug 包
-gradle assembleRelease   # release 包（同一 keystore 签名）
+### 7.1 开发流程（无需本地环境，改完直接 push）
+
+**本项目不要求本地搭建 Android 开发环境**（JDK/SDK/Gradle 都不用装）。
+标准开发流程：
+
 ```
+修改代码 → git push 到 main（或走 GitHub REST API 更新文件）
+        → CI（GitHub Actions）自动构建 release APK
+        → apksigner 验签 → 发布到 GitHub Release（tag 带时间戳）
+        → 从 Release 下载 app-release.apk 安装验证
+```
+
+- 构建结果以 Release 形式产出：https://github.com/d1667018881/cloudbox/releases/latest
+- 编译是否通过 = 看 CI run 是否 success（Actions 页面）
+- 想手动触发一次构建（不 push）：GitHub 仓库 Actions 页 → Build APK → Run workflow
+- 唯一需要本地做的事：改代码文件（可用任意编辑器，或用 GitHub 网页在线编辑）
+- 如果改动涉及新文件，直接编辑仓库对应路径即可，不要动 `app/keystore/` 下的签名文件
 
 ### 7.2 签名（可覆盖安装的关键）
 - keystore：`app/keystore/cloudbox-release.keystore`
@@ -303,13 +313,59 @@ push 到 main（或 workflow_dispatch）→
 
 ---
 
-## 9. AI 接手第一步（Checklist）
+## 9. 参考资料与逆向来源（源码出处明细）
+
+> 接口实现的每一处都尽量有出处，便于后续核对。**若蓝奏云接口变更，优先对照以下来源中
+> 更新最近的资料重新验证，不要凭本文档的记忆值猜测。**
+
+### 9.1 主依据：zaxtyson/LanZouCloud-API（MIT 协议）
+- **仓库**：https://github.com/zaxtyson/LanZouCloud-API（Python）
+- **版本**：master 分支，commit `3bb917f`；2025 年仍活跃维护（PR#69 于 2025-10 修复
+  `lanzouo.com` 域名判定，说明接口持续有效）
+- **LICENSE**：MIT（宽松，可参考/借鉴实现）
+- **本项目的借鉴点（逐项）**：
+  | 借鉴点 | 出处 |
+  |---|---|
+  | task 编号速查表（§5 全部编号） | `lanzou/api/core.py` 逐字核对 |
+  | 登录态列表 `task=5` 只需 folder_id/pg（推翻旧教程 t/k 方案） | `get_file_list` |
+  | 子文件夹 `task=47` 带 `?uid=` | `get_dir_list` |
+  | 上传 `fileup.php` 的 `folder_id_bb_n` 参数名（非 folder_id） | `_upload_small_file` |
+  | 直链拼接 `dom + '/file/' + url`（非 dom+url 直拼） | `get_direct_url` |
+  | 回收站 `mydisk.php` + formhash 流程（每次现取，不可复用） | `recycle` 系列方法 |
+  | 分享链接获取 task=22/18（文件拼 is_newd+f_id） | `get_share_info` |
+  | `acw_sc__v2` 反爬 cookie 计算算法 | `utils.py calc_acw_sc__v2`（社区逆向） |
+  | 上传/批量操作延时防封思路 | `set_upload_delay` 同款 1-3s 随机延时 |
+
+### 9.2 直链解析交叉验证：hanximeng/LanzouAPI（PHP）与 xhgzs/LanzouApi（PHP）
+- https://github.com/hanximeng/LanzouAPI 、 https://github.com/xhgzs/LanzouApi
+- 用途：验证 `ajaxm.php` 的 `action=downprocess&sign&file_id&p` 参数、
+  sign 提取正则（`'sign':(.+?),` 与 `sign=(\w+?)&` 两种形态）、直链响应结构 `{zt, dom, url, inf}`
+- 两处独立来源相互印证后才写入代码（信息交叉验证原则）
+
+### 9.3 架构/交互思路参考（未抄代码）
+| 项目 | 语言 | 参考点 |
+|---|---|---|
+| Yu2002s/SplitLanzou | Kotlin/Android | 安卓原生客户端架构（双面板、分卷上传、直链提取） |
+| chenhb23/lanzouyun-disk | Electron | 批量操作、断点续传交互思路 |
+| rachpt/lanzou-gui | Python/PyQt | 分卷上传、批量任务队列 |
+
+> LICENSE 说明：以上仅借鉴架构与交互**思路**，未直接复制任何代码；
+> 若后续需要直接参考实现，先确认目标仓库为 MIT/Apache 等宽松协议，GPL 项目只借鉴思路。
+
+### 9.4 其他信息来源
+- 域名现状调研：31du.cn 域名更换文章（2025）、tyut.tech 蓝奏云解析文章（2025，`lanzouh.com`）、
+  binmt 论坛域名列表帖（2025-12）
+- 上传限制：爱企查/php中文网多来源确认免费用户 100MB；分卷命名 `.zip/.z01/.z02`
+  （`.001/.002` 被拦截，博客园实测）
+- 需求规格中"会员 200M-210M 额度"等社区传闻**未采信**（无权威佐证，未写入任何业务逻辑）
+
+---
+
+## 10. AI 接手第一步（Checklist）
 
 1. ✅ 完整阅读本文件 + `README.md`
 2. ✅ 拉取代码（https://github.com/d1667018881/cloudbox，私有，需 token）
-3. ✅ 确认构建环境（JDK 17 / SDK 34 / Gradle 8.9 / AGP 8.7.3）
-4. ✅ 本地跑一次 `assembleRelease` 验证基线
-5. ✅ 对照 zaxtyson/LanZouCloud-API 最新源码复核 §5 的 task 表是否仍然有效
-6. ✅ 核实域名池（§7.4）是否仍可用（被墙/抢注域名及时清理）
-7. ⚠️ 改动前先看 §6 的坑列表；改动后跑完整构建 + apksigner 验签
-8. ⚠️ 发布流程：push main 自动构建发 Release；**不要动 keystore**（动了就无法覆盖安装）
+3. ✅ 对照 §9 的参考资料核对 §5 的 task 表是否仍然有效（蓝奏云接口会变）
+4. ✅ 核实域名池（§7.4）是否仍可用（被墙/抢注域名及时清理）
+5. ⚠️ 改动前先看 §6 的坑列表；**改完直接 push 到 main**，CI 自动构建验证（Actions 页面看 run 结果，Release 下载 APK）
+6. ⚠️ 发布流程：push main 自动构建发 Release；**不要动 keystore**（动了就无法覆盖安装）
