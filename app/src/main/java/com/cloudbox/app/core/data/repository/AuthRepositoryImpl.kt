@@ -52,28 +52,51 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun login(uid: String, pwd: String, rememberPwd: Boolean): LoginResult =
         withContext(Dispatchers.IO) {
+            // #1 修复：发请求【前】先绑定槽位（saveUid + setCurrentUid + switchAccount），
+            // 让响应期的 saveFromResponse→persist() 把 phpdisk_info 落盘到【正确账号】槽位；
+            // 旧实现请求后才绑定，首次登录时 persist() 因 currentUid=null 跳过落盘、
+            // 换号登录时新凭证覆盖写入旧账号槽位，随后 switchAccount 从磁盘读回空 → 登录态必丢。
+            val prevUid = accountStore.currentUid()
+            accountStore.saveUid(uid)
+            accountStore.setCurrentUid(uid)
+            cookieJar.switchAccount(uid)
             try {
                 val resp = apiClient.apiService.login(uid = uid, pwd = pwd)
+                // #11 修复：响应体必须消费/关闭，否则 OkHttp 连接不能复用（连接池泄漏）
+                val html = resp.body()?.string().orEmpty()
                 if (cookieJar.isLoggedIn()) {
-                    // 登录成功：写入槽位并切换
-                    accountStore.saveUid(uid)
+                    // 登录成功：持久化密码并保持当前槽位
                     if (rememberPwd) accountStore.savePassword(uid, pwd)
-                    accountStore.setCurrentUid(uid)
-                    cookieJar.switchAccount(uid)
+                    accountStore.touchActive(uid)
                     val info = accountStore.accountInfo(uid)
                     _currentAccount.value = info
                     LoginResult.Success(info)
                 } else {
-                    // 失败：页面 HTML 里包含错误文案，用 Jsoup 提取
-                    val html = resp.body()?.string().orEmpty()
+                    // 失败：回滚槽位到原当前账号
+                    rollbackTo(prevUid, uid)
                     val text = runCatching { Jsoup.parse(html).text() }.getOrDefault(html)
                     val reason = extractLoginError(text) ?: "登录失败（未获取到身份凭证）"
                     LoginResult.Failure(reason)
                 }
             } catch (e: Exception) {
+                // 网络异常同样回滚，避免误切账号
+                rollbackTo(prevUid, uid)
                 LoginResult.Failure(e.message ?: "网络异常")
             }
         }
+
+    /** 登录失败/异常时的槽位回滚：还原到原当前账号（首次登录则清空） */
+    private fun rollbackTo(prevUid: String?, attemptedUid: String) {
+        if (prevUid != null && prevUid != attemptedUid) {
+            accountStore.setCurrentUid(prevUid)
+            cookieJar.switchAccount(prevUid)
+            _currentAccount.value = accountStore.accountInfo(prevUid)
+        } else {
+            accountStore.clearCurrentUid()
+            cookieJar.switchAccount(null)
+            _currentAccount.value = null
+        }
+    }
 
     override suspend fun importCookie(uid: String, cookieHeader: String): LoginResult =
         withContext(Dispatchers.IO) {
