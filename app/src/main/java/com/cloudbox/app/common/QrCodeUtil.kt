@@ -16,13 +16,15 @@ object QrCodeUtil {
                 EncodeHintType.MARGIN to 1
             )
             val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
-            val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+            // #28 修复：一次性填充 IntArray 再创建 Bitmap（旧实现逐像素 setPixel，
+            // 512×512 = 26 万次 JNI 调用，慢一个数量级）
+            val pixels = IntArray(sizePx * sizePx)
             for (x in 0 until sizePx) {
                 for (y in 0 until sizePx) {
-                    bitmap.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+                    pixels[y * sizePx + x] = if (matrix[x, y]) Color.BLACK else Color.WHITE
                 }
             }
-            bitmap
+            Bitmap.createBitmap(pixels, sizePx, sizePx, Bitmap.Config.RGB_565)
         }.getOrNull()
     }
 }
