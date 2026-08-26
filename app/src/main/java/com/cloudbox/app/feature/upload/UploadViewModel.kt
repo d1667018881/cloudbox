@@ -124,7 +124,9 @@ class UploadViewModel @Inject constructor(
                 }
             }.getOrDefault("upload_${System.currentTimeMillis()}")
 
-            val target = File(context.cacheDir, "uploads/$name")
+            // #30 修复：文件名加时间戳前缀，避免同显示名文件互相覆盖；
+            // 上传完成后由 UploadWorker 清理整个 uploads 缓存目录
+            val target = File(context.cacheDir, "uploads/${System.currentTimeMillis()}_$name")
             target.parentFile?.mkdirs()
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
