@@ -26,13 +26,16 @@ class RetryInterceptor @Inject constructor() : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
+        // #20 修复：上传请求（fileup.php）IOException 不自动重试——
+        // 上传中途断流重试可能导致服务端已收到、重复上传（非幂等）；交给上层决策
+        val isUpload = request.method == "POST" && request.url.encodedPath.contains("/fileup.php")
         var attempt = 0
         while (true) {
             val response = try {
                 chain.proceed(request)
             } catch (e: IOException) {
-                // 网络异常：连接失败/超时/DNS
-                if (attempt < AppConstants.MAX_RETRIES) {
+                // 网络异常：连接失败/超时/DNS（上传请求豁免重试）
+                if (!isUpload && attempt < AppConstants.MAX_RETRIES) {
                     sleepBackoff(attempt)
                     attempt++
                     continue
@@ -41,7 +44,7 @@ class RetryInterceptor @Inject constructor() : Interceptor {
             }
             val code = response.code
             if ((code == 429 || code >= 500) && attempt < AppConstants.MAX_RETRIES) {
-                // 429 限流 / 5xx 服务器错误：可重试
+                // 429 限流 / 5xx 服务器错误：可重试（含上传，服务端未处理成功的 5xx 安全）
                 response.close()
                 sleepBackoff(attempt)
                 attempt++
