@@ -47,13 +47,26 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 支持从外部文本/链接唤起解析 -->
+            <!-- 支持从外部链接唤起解析（#17 修复：限定 lanzou 系 host，
+                 旧实现无 host 过滤会变成全系统所有网页链接的候选打开方式） -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" />
-                <data android:scheme="http" />
+                <data android:scheme="https" android:host="lanzou.com" />
+                <data android:scheme="https" android:host="*.lanzou.com" />
+                <data android:scheme="https" android:host="lanzoui.com" />
+                <data android:scheme="https" android:host="*.lanzoui.com" />
+                <data android:scheme="https" android:host="lanzoup.com" />
+                <data android:scheme="https" android:host="*.lanzoup.com" />
+                <data android:scheme="https" android:host="lanzoux.com" />
+                <data android:scheme="https" android:host="*.lanzoux.com" />
+                <data android:scheme="https" android:host="lanzouo.com" />
+                <data android:scheme="https" android:host="*.lanzouo.com" />
+                <data android:scheme="https" android:host="lanzouh.com" />
+                <data android:scheme="https" android:host="*.lanzouh.com" />
+                <data android:scheme="https" android:host="lanzouu.com" />
+                <data android:scheme="https" android:host="*.lanzouu.com" />
             </intent-filter>
         </activity>
 
