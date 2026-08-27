@@ -66,18 +66,27 @@ class UploadViewModel @Inject constructor(
 
         viewModelScope.launch {
             val spoof = settingsStore.suffixSpoofEnabled.first()
-            val request = androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
-                .setInputData(
-                    androidx.work.Data.Builder()
-                        .putLong(UploadWorker.KEY_FOLDER_ID, s.targetFolderId)
-                        .putStringArray(UploadWorker.KEY_FILE_PATHS, s.selectedFiles.toTypedArray())
-                        .putBoolean(UploadWorker.KEY_SPOOF, spoof)
-                        .build()
-                )
-                .build()
-            workManager.enqueue(request)
+            // N1 修复（复审补录）：WorkManager Data 序列化上限 10240 字节（约 100+ 长路径），
+            // 全量路径塞进单个 WorkRequest 会抛 IllegalStateException。
+            // 按每批 50 个拆分，用 WorkContinuation 链式串联（前批失败则后续跳过，观察最后一个即整体结果）
+            val requests = s.selectedFiles.chunked(50).map { batch ->
+                androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
+                    .setInputData(
+                        androidx.work.Data.Builder()
+                            .putLong(UploadWorker.KEY_FOLDER_ID, s.targetFolderId)
+                            .putStringArray(UploadWorker.KEY_FILE_PATHS, batch.toTypedArray())
+                            .putBoolean(UploadWorker.KEY_SPOOF, spoof)
+                            .build()
+                    )
+                    .build()
+            }
+            if (requests.isEmpty()) return@launch
+            val continuation = requests.drop(1).fold(
+                workManager.beginWith(requests.first())
+            ) { cont, req -> cont.then(req) }
+            continuation.enqueue()
             _uiState.update { it.copy(uploading = true, progress = 0, total = s.selectedFiles.size) }
-            observeWork(request.id)
+            observeWork(requests.last().id)
         }
     }
 
