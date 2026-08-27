@@ -416,3 +416,24 @@ push 到 main（或 workflow_dispatch）→
 - 移动文件夹（#19 关联）：官方无接口，UI 明确提示，不实现模拟方案（LanZouCloud-API 的
   新建+移文件+删除有数据丢失风险）
 - keystore 随仓库提交：私有仓库自用可接受；仓库转公开前必须移除并换签名（换签名 = 老用户无法覆盖安装）
+
+---
+
+## 12. V2 复审销账（2026-08-27，R1-R5 + N1/N2 全部修复）
+
+V2 复审（对照 commit 56e2169）发现 7 项新问题，**全部属实并已修复**，最终 CI 转绿
+（BUILD SUCCESSFUL in 6m8s，release v0.1.0-202608271333 起包含全部修复）。
+
+| # | 级别 | 问题 | 修复 |
+|---|---|---|---|
+| R1 | 🔴 | 编译失败 22 连红：缺 combine/delay import、idx 未声明（**教训：上次误看中间 run 就宣称 CI 通过，必须验证最后一个 commit 的 run + BUILD SUCCESSFUL 日志**） | 补 2 个 import + var idx 声明 |
+| R2 | 🔴 | delete() 双重 deleteDir 循环（编辑事故，文件夹删两遍+UI 报失败） | 删除重复循环，保留延时循环 |
+| R3 | 🔴 | Room 主键变更未升 version → 老库升级必崩 | AppDatabase version 1→2 |
+| R4 | 🟠 | 已发布 APK 只含前 10 项修复 | 合入后重新出包（新 Release 已含全部） |
+| R5 | 🟡 | local.properties 误提交入库 | 已从远端删除 |
+| N1 | 🟠 | 上传路径超 WorkManager Data 10KB 上限（V1 补录，分批修改未生效） | UploadViewModel chunked(50) + WorkContinuation 串联 |
+| N2 | 🟡 | Worker 清理整个 uploads 目录（误删并行批次文件） | 只删本次 paths + 分卷临时目录 |
+
+**教训记录**：file_edit/python 批量替换后必须 grep 验证实际内容（多次静默失败/编辑事故）；
+CI 验证必须看**最后一个 commit 对应 run** 的结论 + 下载日志确认 "BUILD SUCCESSFUL"，
+不能只看"最新 run"（中间 commit 的 run 成功不代表最终代码可编译）。
