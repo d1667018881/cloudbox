@@ -43,10 +43,11 @@ class DomainRepositoryImpl @Inject constructor(
 
     // #9 修复：合并 DEFAULT < remote < userOverride（旧实现只有两层，且远程结果
     // 误写进 overrides 槽位导致第二次远程更新被旧值压住）
+    // 注意：remote 是完整 LanzouDomainConfig（RemoteDomainSource.fetch 已带默认值兜底
+    // + https/白名单校验 + 黑名单过滤），直接作为 base；用户覆盖字段再叠加
     private val _domainConfig: Flow<LanzouDomainConfig> =
         combine(store.observeOverrides(), store.observeRemote()) { overrides, remote ->
-            val base = remote?.let { merge(LanzouDomainConfig.DEFAULT, it) } ?: LanzouDomainConfig.DEFAULT
-            merge(base, overrides)
+            merge(remote ?: LanzouDomainConfig.DEFAULT, overrides)
         }
 
     // 注意：必须放在 _domainConfig 声明之后，否则 init 访问未初始化属性
