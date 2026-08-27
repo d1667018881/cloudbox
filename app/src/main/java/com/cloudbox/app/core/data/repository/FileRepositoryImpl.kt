@@ -13,6 +13,7 @@ import com.cloudbox.app.core.domain.model.ShareInfo
 import com.cloudbox.app.core.domain.repository.FileRepository
 import com.cloudbox.app.core.domain.repository.RecycleItems
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.Request
@@ -130,13 +131,13 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun delete(fileIds: List<Long>, folderIds: List<Long>): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
+                // #12 修复：批量删除同样加 1-3s 随机延时防风控
+                // （R2 修复：删除重复循环；旧实现每个文件夹被删两遍、二次请求必然失败）
+                var idx = 0
                 for (fid in fileIds) {
+                    if (idx++ > 0) delay(kotlin.random.Random.nextLong(1_000, 3_001))
                     val resp = api.deleteFile(fileId = fid)
                     if (resp.zt != 1) throw ApiError.Business(resp.zt, "删除文件 $fid 失败")
-                }
-                for (fid in folderIds) {
-                    val resp = api.deleteDir(folderId = fid)
-                    if (resp.zt != 1)   if (resp.zt != 1) throw ApiError.Business(resp.zt, "删除文件 $fid 失败")
                 }
                 for (fid in folderIds) {
                     if (idx++ > 0) delay(kotlin.random.Random.nextLong(1_000, 3_001))
