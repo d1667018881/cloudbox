@@ -61,9 +61,19 @@ class UploadWorker @AssistedInject constructor(
                 .build()
         )
 
-        // 清理上传缓存（SAF 拷贝到 cache/uploads 的临时文件，#30 配套）
+        // N2 修复（复审补录）：只删本次 paths 涉及的文件（含分卷临时文件前缀），
+        // 不删整个 uploads 目录——否则并行批次（用户离开页面再回来可发起新上传）的
+        // 缓存文件会被误删，静默丢文件且报成功
         runCatching {
-            applicationContext.cacheDir.resolve("uploads").deleteRecursively()
+            val uploadsDir = applicationContext.cacheDir.resolve("uploads")
+            paths.forEach { p ->
+                val f = File(p)
+                if (f.parentFile?.absolutePath == uploadsDir.absolutePath) {
+                    f.delete()
+                }
+            }
+            // 分卷临时目录（.cloudbox_split_*）一并清理
+            uploadsDir.listFiles()?.filter { it.name.startsWith(".cloudbox_split_") }?.forEach { it.deleteRecursively() }
         }
 
         return if (failed.isEmpty()) {
