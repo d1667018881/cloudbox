@@ -68,7 +68,7 @@ class LanzouDomainInterceptor @Inject constructor() : Interceptor {
         // 4. 分享页 HTML → shareBase
         val targetBase = when {
             path.contains("/fileup.php") -> config.uploadServer
-            path.contains("ajaxm") -> config.shareBase
+            path.contains("/ajaxm.php") -> config.shareBase
             path.endsWith(".php") -> config.diskMain
             else -> config.shareBase
         }
