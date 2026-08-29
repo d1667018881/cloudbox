@@ -31,6 +31,18 @@ object DomainUtils {
         return AppConstants.SHARE_ID_REGEX.find(clean)?.groupValues?.get(1)
     }
 
-    /** 判断是否为受支持的分享链接 */
-    fun isShareUrl(url: String): Boolean = AppConstants.SHARE_URL_REGEX.containsMatchIn(url.trim())
+    /** 判断是否为受支持的分享链接：正则初筛 + host 后缀白名单双重校验，
+     *  防止钓鱼域名（如 lanzoucloud.com）被误判。 */
+    fun isShareUrl(url: String): Boolean {
+        val trimmed = url.trim()
+        if (!AppConstants.SHARE_URL_REGEX.containsMatchIn(trimmed)) return false
+        val host = runCatching { java.net.URI(trimmed).host?.lowercase() }.getOrNull() ?: return false
+        return isTrustedShareHost(host)
+    }
+
+    /** host 是否属于已知可信的分享/接口域名后缀 */
+    fun isTrustedShareHost(host: String): Boolean {
+        val h = host.lowercase()
+        return AppConstants.TRUSTED_SHARE_HOSTS.any { h == it || h.endsWith(".$it") }
+    }
 }
