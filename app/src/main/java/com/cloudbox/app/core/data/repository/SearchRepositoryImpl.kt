@@ -8,7 +8,6 @@ import com.cloudbox.app.core.domain.repository.FileRepository
 import com.cloudbox.app.core.domain.repository.SearchRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,6 +41,21 @@ class SearchRepositoryImpl @Inject constructor(
                 val folderIds = mutableListOf(-1L) // 根目录
                 folderIds.addAll(allFolders.map { it.first })
 
+                // 先把文件夹自身写入索引（搜索文件夹名）
+                db.searchIndexDao().insertAll(
+                    allFolders.map { (fid, fname) ->
+                        SearchIndexEntity(
+                            accountUid = uid,
+                            fileId = fid,
+                            name = fname,
+                            parentId = -2L, // 文件夹平铺接口未返回父目录，用哨兵值
+                            isFolder = true,
+                            size = null,
+                            time = null
+                        )
+                    }
+                )
+
                 var total = 0
                 folderIds.forEachIndexed { index, folderId ->
                     // 延时防风控
@@ -61,6 +75,7 @@ class SearchRepositoryImpl @Inject constructor(
                                 accountUid = uid,
                                 name = it.name,
                                 parentId = folderId,
+                                isFolder = it.isFolder,
                                 size = it.size,
                                 time = it.time
                             )
@@ -90,7 +105,7 @@ class SearchRepositoryImpl @Inject constructor(
             // 两个列表类型不同，分别转换后合并去重
             val merged = LinkedHashMap<Long, CloudFile>()
             indexed.forEach { e ->
-                merged.putIfAbsent(e.fileId, CloudFile(e.fileId, e.name, false, e.size, e.time, null, null, e.parentId))
+                merged.putIfAbsent(e.fileId, CloudFile(e.fileId, e.name, e.isFolder, e.size, e.time, null, null, e.parentId))
             }
             fromCache.forEach { e ->
                 merged.putIfAbsent(e.id, CloudFile(e.id, e.name, false, e.size, e.time, null, null, e.parentId))
