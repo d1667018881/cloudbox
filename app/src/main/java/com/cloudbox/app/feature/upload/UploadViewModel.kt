@@ -30,7 +30,8 @@ data class UploadUiState(
     val total: Int = 0,
     val currentFile: String = "",
     val message: String? = null,
-    val oversizeHint: String? = null
+    val oversizeHint: String? = null,
+    val failedFiles: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -43,6 +44,10 @@ class UploadViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UploadUiState())
     val uiState: StateFlow<UploadUiState> = _uiState.asStateFlow()
+
+    private var currentWorkIds: List<UUID> = emptyList()
+    private val workStates = mutableMapOf<UUID, WorkInfo.State>()
+    private val failedAccumulator = mutableListOf<String>()
 
     /** 选择文件：SAF 返回 content:// uri，先拷到缓存目录再上传 */
     fun addFiles(uris: List<Uri>) {
@@ -66,9 +71,9 @@ class UploadViewModel @Inject constructor(
 
         viewModelScope.launch {
             val spoof = settingsStore.suffixSpoofEnabled.first()
-            // N1 修复（复审补录）：WorkManager Data 序列化上限 10240 字节（约 100+ 长路径），
+            // WorkManager Data 序列化上限 10240 字节（约 100+ 长路径），
             // 全量路径塞进单个 WorkRequest 会抛 IllegalStateException。
-            // 按每批 50 个拆分，用 WorkContinuation 链式串联（前批失败则后续跳过，观察最后一个即整体结果）
+            // 按每批 50 个拆分，用 WorkContinuation 链式串联。
             val requests = s.selectedFiles.chunked(50).map { batch ->
                 androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
                     .setInputData(
@@ -81,36 +86,67 @@ class UploadViewModel @Inject constructor(
                     .build()
             }
             if (requests.isEmpty()) return@launch
+            currentWorkIds = requests.map { it.id }
+            workStates.clear()
+            failedAccumulator.clear()
+
             val continuation = requests.drop(1).fold(
                 workManager.beginWith(requests.first())
             ) { cont, req -> cont.then(req) }
             continuation.enqueue()
-            _uiState.update { it.copy(uploading = true, progress = 0, total = s.selectedFiles.size) }
-            observeWork(requests.last().id)
+
+            _uiState.update {
+                it.copy(
+                    uploading = true,
+                    progress = 0,
+                    total = s.selectedFiles.size,
+                    message = null,
+                    failedFiles = emptyList()
+                )
+            }
+            observeWorks(currentWorkIds)
         }
     }
 
-    private fun observeWork(workId: UUID) {
-        viewModelScope.launch {
-            workManager.getWorkInfoByIdFlow(workId).collect { info ->
-                _uiState.update {
-                    it.copy(
-                        progress = info.progress.getInt(UploadWorker.KEY_PROGRESS, 0),
-                        total = info.progress.getInt(UploadWorker.KEY_TOTAL, 0),
-                        currentFile = info.progress.getString(UploadWorker.KEY_CURRENT_FILE) ?: ""
-                    )
-                }
-                if (info.state.isFinished) {
-                    val ok = info.state == WorkInfo.State.SUCCEEDED
-                    _uiState.update {
-                        it.copy(
-                            uploading = false,
-                            message = if (ok) "上传完成" else "上传失败，请检查 Cookie 是否过期",
-                            progress = 0
-                        )
+    private fun observeWorks(workIds: List<UUID>) {
+        workIds.forEach { workId ->
+            viewModelScope.launch {
+                workManager.getWorkInfoByIdFlow(workId).collect { info ->
+                    if (info.state == WorkInfo.State.RUNNING) {
+                        _uiState.update {
+                            it.copy(
+                                progress = info.progress.getInt(UploadWorker.KEY_PROGRESS, 0),
+                                total = info.progress.getInt(UploadWorker.KEY_TOTAL, 0),
+                                currentFile = info.progress.getString(UploadWorker.KEY_CURRENT_FILE) ?: ""
+                            )
+                        }
+                    }
+                    if (info.state.isFinished) {
+                        workStates[workId] = info.state
+                        if (info.state == WorkInfo.State.FAILED) {
+                            info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
+                                ?.split("\n")
+                                ?.filter { it.isNotBlank() }
+                                ?.let { failedAccumulator.addAll(it) }
+                        }
+                        checkAllFinished()
                     }
                 }
             }
+        }
+    }
+
+    private fun checkAllFinished() {
+        if (currentWorkIds.any { it !in workStates }) return
+        val allSuccess = workStates.values.all { it == WorkInfo.State.SUCCEEDED }
+        _uiState.update {
+            it.copy(
+                uploading = false,
+                message = if (allSuccess) "上传完成" else "上传完成，部分文件失败",
+                failedFiles = failedAccumulator.distinct(),
+                progress = 0,
+                currentFile = ""
+            )
         }
     }
 
@@ -129,18 +165,16 @@ class UploadViewModel @Inject constructor(
             val name = runCatching {
                 context.contentResolver.query(uri, null, null, null, null)?.use { c ->
                     val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) c.getString(idx) else "upload_${System.currentTimeMillis()}"
+                    if (idx >= 0 && !c.isNull(idx)) c.getString(idx) else null
                 }
-            }.getOrDefault("upload_${System.currentTimeMillis()}")
-
-            // #30 修复：文件名加时间戳前缀，避免同显示名文件互相覆盖；
-            // 上传完成后由 UploadWorker 清理整个 uploads 缓存目录
-            val target = File(context.cacheDir, "uploads/${System.currentTimeMillis()}_$name")
-            target.parentFile?.mkdirs()
+            }.getOrNull() ?: "upload_${System.currentTimeMillis()}"
+            val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val dir = File(context.cacheDir, "uploads").apply { mkdirs() }
+            val out = File(dir, safeName)
             context.contentResolver.openInputStream(uri)?.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+                out.outputStream().use { output -> input.copyTo(output) }
             }
-            target
+            out
         }.getOrNull()
     }
 }
