@@ -19,7 +19,7 @@ import androidx.room.RoomDatabase
         DirectLinkEntity::class,
         FavoriteShareEntity::class
     ],
-    version = 2, // R3 修复：v2 复合主键变更（cloud_files/file_search_fts），必须升版本否则老库 identity 校验崩溃
+    version = 4, // v4：search_index_fts 增加 isFolder 字段（文件夹也入搜索索引）
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
