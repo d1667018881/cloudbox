@@ -77,6 +77,7 @@ private fun DownloadItem(task: DownloadTask, viewModel: DownloadViewModel) {
         task.bytesDownloaded.toFloat() / task.bytesTotal
     } else 0f
     val finished = task.status == DownloadManager.STATUS_SUCCESSFUL
+    val paused = task.paused || task.status == -1
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -95,6 +96,16 @@ private fun DownloadItem(task: DownloadTask, viewModel: DownloadViewModel) {
                 // 打开文件（APK 跳安装器）
                 IconButton(onClick = { viewModel.openTask(task) }) {
                     Text("打开", color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge)
+                }
+            } else if (paused) {
+                IconButton(onClick = { viewModel.resume(task.downloadId) }) {
+                    Text("继续", color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge)
+                }
+            } else {
+                IconButton(onClick = { viewModel.pause(task.downloadId) }) {
+                    Text("暂停", color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.labelLarge)
                 }
             }
