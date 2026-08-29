@@ -24,10 +24,24 @@ object AppConstants {
     /** 直链域黑名单：lanzous.com 已被第三方抢注（解析到不良站点），必须拦截 */
     val FORBIDDEN_DOMAINS = setOf("lanzous.com", "www.lanzous.com")
 
-    /** 识别"分享链接"的正则：覆盖已知全部历史/活跃分享域名
-     *  （来源：需求规格 + 2025 年域名调研，见 LanzouDomainConfig 注释） */
+    /** 受信任的分享/接口域名后缀（与 RemoteDomainSource.isTrustedDomain 同步维护）。
+     *  用于：1) 链接识别白名单；2) Cookie 持久化域过滤。
+     *  注意：必须是完整后缀，避免子串误判（如 evil-lanzou.com 不应被信任）。 */
+    val TRUSTED_SHARE_HOSTS = setOf(
+        "woozooo.com",
+        "lanzou.com",
+        "lanzoui.com",
+        "lanzoup.com",
+        "lanzoux.com",
+        "lanzouo.com",
+        "lanzouh.com",
+        "lanzouu.com"
+    )
+
+    /** 识别"分享链接"的正则：限定为已知蓝奏云/woozooo 域名，防止匹配钓鱼域
+     *  （如 lanzoucloud.com）。实际判定仍结合 DomainUtils.isTrustedShareHost 后缀校验。 */
     val SHARE_URL_REGEX = Regex(
-        """https?://(?:[a-z0-9-]+\.)?(?:lanzou[a-z]*|woozooo)\.(?:com|cn)/[a-zA-Z0-9]+/?"""
+        """https?://(?:[a-z0-9-]+\.)?(?:lanzou[ioxphu]?|woozooo)\.(?:com|cn)/[a-zA-Z0-9]+/?"""
     )
 
     /** 从 URL 中提取分享 ID（最后一层路径段，如 lanzou.com/i5g8y1a 的 i5g8y1a） */
