@@ -38,6 +38,7 @@ jobs:
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: "0.1.0-${{ github.run_number }}"
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Verify signature
