@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -109,8 +110,12 @@ fun SearchScreen(
                             Modifier.fillMaxWidth().padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Filled.InsertDriveFile, null, Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(
+                                imageVector = if (file.isFolder) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Spacer(Modifier.size(10.dp))
                             Column {
                                 Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
