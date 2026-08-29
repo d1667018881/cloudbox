@@ -29,12 +29,14 @@ android {
     // 签名：release 与 debug 使用同一 keystore（自用分发场景）。
     // 为什么 debug 也用正式密钥：保证"本地构建 / CI 构建 / 不同构建类型"产物签名一致，
     // 任意两者之间都能覆盖安装，不会出现"签名不一致，需要先卸载"。
+    // 密码由环境变量 KEYSTORE_PASSWORD 注入（CI 从 GitHub Secrets 读取，仓库内不留明文）。
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD") ?: "change-me"
     signingConfigs {
         create("release") {
             storeFile = file("keystore/cloudbox-release.keystore")
-            storePassword = "CloudBox@2026!"
+            storePassword = keystorePassword
             keyAlias = "cloudbox"
-            keyPassword = "CloudBox@2026!"
+            keyPassword = keystorePassword
         }
     }
 
