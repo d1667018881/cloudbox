@@ -37,6 +37,14 @@ class DownloadViewModel @Inject constructor(
         viewModelScope.launch { downloadRepository.cancel(downloadId) }
     }
 
+    fun pause(downloadId: Long) {
+        viewModelScope.launch { downloadRepository.pause(downloadId) }
+    }
+
+    fun resume(downloadId: Long) {
+        viewModelScope.launch { downloadRepository.resume(downloadId) }
+    }
+
     fun openTask(task: DownloadTask) {
         val uri = DownloadHelper.getCompletedFileUri(context, task.downloadId)
         DownloadHelper.openFile(context, uri, task.mimeType)
