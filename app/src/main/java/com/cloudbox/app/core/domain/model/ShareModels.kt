@@ -21,9 +21,10 @@ data class DownloadTask(
     val downloadId: Long,
     val fileName: String,
     val mimeType: String?,
-    val status: Int,        // DownloadManager.STATUS_*
+    val status: Int,        // DownloadManager.STATUS_*；查不到时为 -1
     val bytesTotal: Long,
     val bytesDownloaded: Long,
     val referer: String?,
-    val url: String
+    val url: String,
+    val paused: Boolean = false // 用户主动暂停（DownloadManager 无此状态）
 )
