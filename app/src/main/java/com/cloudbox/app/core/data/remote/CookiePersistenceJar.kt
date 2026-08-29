@@ -1,5 +1,6 @@
 package com.cloudbox.app.core.data.remote
 
+import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.core.data.local.secure.AccountSecureStore
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -60,9 +61,9 @@ class CookiePersistenceJar @Inject constructor(
         if (cookies.isEmpty()) return
         synchronized(lock) {
             for (cookie in cookies) {
-                // 只关心蓝奏云/woozooo 体系的 Cookie，避免污染第三方域
-                val host = cookie.domain
-                if (!(host.contains("woozooo") || host.contains("lanzou"))) continue
+                // 只持久化已知可信域的 Cookie：防止恶意/钓鱼域 Set-Cookie 污染加密存储。
+                // 发送阶段 Cookie.matches 还会再过滤，但此处先拦截可避免持久化脏数据。
+                if (!isTrustedCookieDomain(cookie.domain)) continue
                 addCookieLocked(cookie)
             }
             persistLocked()
@@ -110,6 +111,12 @@ class CookiePersistenceJar @Inject constructor(
             val uid = currentUid ?: return
             accountStore.clearCookies(uid)
         }
+    }
+
+    /** 校验 Cookie 的 domain 是否属于已知可信域（后缀匹配），避免持久化恶意域 Cookie */
+    private fun isTrustedCookieDomain(domain: String): Boolean {
+        val d = domain.removePrefix(".").lowercase()
+        return AppConstants.TRUSTED_SHARE_HOSTS.any { d == it || d.endsWith(".$it") }
     }
 
     private fun addCookieLocked(cookie: Cookie) {
