@@ -12,6 +12,12 @@ interface DownloadRepository {
     /** 入队下载；返回 downloadId */
     suspend fun enqueue(url: String, fileName: String, referer: String?, mimeType: String?, accountUid: String): Long
 
-    /** 取消/删除下载与记录 */
+    /** 取消/删除下载、本地文件与记录 */
     suspend fun cancel(downloadId: Long)
+
+    /** 暂停下载（记录保留，用户可继续） */
+    suspend fun pause(downloadId: Long)
+
+    /** 继续已暂停的下载（重新入队，新 downloadId） */
+    suspend fun resume(downloadId: Long)
 }
