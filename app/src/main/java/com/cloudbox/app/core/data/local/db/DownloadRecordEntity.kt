@@ -22,5 +22,6 @@ data class DownloadRecordEntity(
     val mimeType: String?,         // APK 时触发安装引导
     val totalBytes: Long = 0,
     val accountUid: String,
+    val paused: Boolean = false,   // 用户主动暂停（DownloadManager 本身无持久状态）
     val createdAt: Long = System.currentTimeMillis()
 )
