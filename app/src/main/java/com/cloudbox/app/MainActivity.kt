@@ -1,11 +1,16 @@
 package com.cloudbox.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
@@ -55,12 +60,24 @@ class MainActivity : ComponentActivity() {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* 用户拒绝仅影响下载通知显示，不阻塞主流程 */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 启动剪贴板链接监听（需求规格 9 节）
         clipboardWatcher.start(appScope)
         // #17：外部链接唤起（intent-filter 已限 lanzou 系 host），转交剪贴板弹窗机制
         intent?.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
+        // Android 13+ 动态请求通知权限（下载完成/上传进度通知需要）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                        PackageManager.PERMISSION_GRANTED -> {}
+                else -> notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         enableEdgeToEdge()
         setContent {
