@@ -267,7 +267,7 @@ resolve(shareUrl, password):
 
 ### 7.2 签名（可覆盖安装的关键）
 - keystore：`app/keystore/cloudbox-release.keystore`
-- storePassword/keyPassword：`CloudBox@2026!`，keyAlias：`cloudbox`
+- keystore 密码与 keyAlias：`cloudbox`（密码已从文档移除，见下方说明）
 - **debug 和 release 共用此 keystore**（build.gradle.kts signingConfigs），无 applicationId 后缀差异
 - 指纹 SHA-256：`f3f6bbc6c413bfc880a61b2b4595600c8ad389327318639edf50baf82c3f5c3f`
 - 结论：本地 debug / 本地 release / CI release 三路签名一致 → 互相覆盖安装
