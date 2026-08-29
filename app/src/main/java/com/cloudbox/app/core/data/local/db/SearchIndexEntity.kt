@@ -18,6 +18,7 @@ data class SearchIndexEntity(
     val fileId: Long,
     val name: String,
     val parentId: Long,
+    val isFolder: Boolean = false, // 搜索索引同时覆盖文件夹（需求规格 3 节）
     val size: String?,
     val time: String?
 )
