@@ -23,4 +23,13 @@ interface DownloadRecordDao {
 
     @Query("SELECT * FROM download_records WHERE downloadId=:downloadId")
     suspend fun getByDownloadId(downloadId: Long): DownloadRecordEntity?
+
+    @Query("UPDATE download_records SET paused=:paused WHERE downloadId=:downloadId")
+    suspend fun updatePaused(downloadId: Long, paused: Boolean)
+
+    @Query("UPDATE download_records SET downloadId=:newId, paused=0 WHERE downloadId=:oldId")
+    suspend fun updateDownloadId(oldId: Long, newId: Long)
+
+    @Query("UPDATE download_records SET fileName=:fileName WHERE downloadId=:downloadId")
+    suspend fun updateFileName(downloadId: Long, fileName: String)
 }
