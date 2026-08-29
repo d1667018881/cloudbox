@@ -26,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -34,12 +35,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.cloudbox.app.common.ClipboardLinkWatcher
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
 import com.cloudbox.app.feature.resolve.ResolveScreen
+import com.cloudbox.app.feature.search.SearchViewModel
 import com.cloudbox.app.feature.upload.UploadScreen
 
 /**
@@ -56,12 +61,31 @@ fun MainScreen(
     onOpenResolve: (String?) -> Unit,
     onLogout: () -> Unit,
     clipboardWatcher: ClipboardLinkWatcher = hiltViewModel<MainViewModel>().clipboardWatcher,
-    authRepository: AuthRepository = hiltViewModel<MainViewModel>().authRepository
+    authRepository: AuthRepository = hiltViewModel<MainViewModel>().authRepository,
+    searchViewModel: SearchViewModel = hiltViewModel()
 ) {
     var tab by remember { mutableIntStateOf(0) }
     val pendingLink by clipboardWatcher.pendingLink.collectAsState()
     // currentAccount 是 Flow（非 StateFlow），collectAsState 必须提供 initial
     val account by authRepository.currentAccount.collectAsState(initial = null)
+
+    // Android 10+ 从其他 App 复制链接再切回本 App 时，系统回调不会触发，
+    // 必须在每次回到前台时主动补查一次剪贴板（需求规格 9 节）
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) clipboardWatcher.checkNow()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 后台自动同步搜索索引（需求规格 3 节：Room FTS 索引，后台自动同步）
+    LaunchedEffect(Unit) {
+        if (!searchViewModel.uiState.value.syncing) {
+            searchViewModel.syncAll()
+        }
+    }
 
     // 剪贴板检测到分享链接 → 弹窗询问是否解析
     if (pendingLink != null) {
