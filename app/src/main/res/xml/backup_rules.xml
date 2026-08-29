@@ -4,4 +4,8 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="secure_accounts.xml" />
     <exclude domain="sharedpref" path="secure_cookies.xml" />
+    <!-- Room 数据库含账号相关缓存（下载记录/文件列表/直链缓存），跨设备恢复后可能指向旧账号或过期数据，排除 -->
+    <exclude domain="database" />
+    <!-- 上传临时文件无需备份 -->
+    <exclude domain="file" path="uploads" />
 </full-backup-content>
