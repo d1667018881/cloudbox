@@ -7,6 +7,7 @@ import androidx.work.Data
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.cloudbox.app.core.domain.repository.UploadRepository
+import com.cloudbox.app.core.domain.repository.UploadResult
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
@@ -19,13 +20,11 @@ import java.io.File
  * - KEY_FILE_PATHS：待上传文件路径列表（逗号分隔，单批 ≤ 50 个，见 UploadViewModel 分批）
  * - KEY_SPOOF：后缀伪装开关
  *
- * 审查修复（CODE_REVIEW #3）：
- * - 改调 uploadBatch()：其内部已实现 超限文件自动分卷（95MB/卷）+ 批量 1-3s 随机延时防封
- *   + 失败计数；旧实现逐文件调 uploadFile()，超限必被服务端拒绝且无延时
- * - 失败检测：存在失败文件时返回 Result.failure()，失败名单写入 outputData（UI 可提示）
- * - 上传完成后清理缓存目录（#30 配套）
- *
- * 进度：setProgress 上报（uploadBatch 为整批执行，进度粒度=批次完成/进行中，UI 显示总量）
+ * 审查修复：
+ * - 改由 Worker 逐文件调度并实时 setProgress，UI 可见当前文件名与已完成数量。
+ * - 大文件自动走 uploadSplit，分卷结果逐条进入失败名单。
+ * - 失败名单通过 outputData 返回，UploadViewModel 多批汇总后展示。
+ * - 上传完成后清理本批次缓存文件与分卷临时目录。
  */
 @HiltWorker
 class UploadWorker @AssistedInject constructor(
@@ -43,27 +42,41 @@ class UploadWorker @AssistedInject constructor(
         val files = paths.map { File(it) }.filter { it.exists() }
         val total = files.size
 
-        setProgress(
-            Data.Builder()
-                .putInt(KEY_PROGRESS, 0)
-                .putInt(KEY_TOTAL, total)
-                .build()
-        )
+        setProgress(workDataOf(KEY_PROGRESS to 0, KEY_TOTAL to total, KEY_CURRENT_FILE to ""))
 
-        // #3 修复：uploadBatch 内部处理 分卷/延时/失败计数（见 UploadRepositoryImpl）
-        val results = uploadRepository.uploadBatch(files, folderId, spoof)
-        val failed = results.filter { !it.success }
+        val results = mutableListOf<UploadResult>()
+        files.forEachIndexed { index, file ->
+            setProgress(
+                workDataOf(
+                    KEY_PROGRESS to index,
+                    KEY_TOTAL to total,
+                    KEY_CURRENT_FILE to file.name
+                )
+            )
+            val result = if (uploadRepository.isOversize(file)) {
+                // 超限文件：走分卷上传，分卷结果逐条记录，便于失败重试
+                val splitResults = uploadRepository.uploadSplit(file, folderId)
+                results.addAll(splitResults)
+                UploadResult(
+                    file.name, null,
+                    splitResults.all { it.success },
+                    "分卷 ${splitResults.count { it.success }}/${splitResults.size} 成功"
+                )
+            } else {
+                uploadRepository.uploadFile(file, folderId, spoof)
+            }
+            results.add(result)
+            setProgress(
+                workDataOf(
+                    KEY_PROGRESS to index + 1,
+                    KEY_TOTAL to total,
+                    KEY_CURRENT_FILE to file.name
+                )
+            )
+        }
 
-        setProgress(
-            Data.Builder()
-                .putInt(KEY_PROGRESS, total)
-                .putInt(KEY_TOTAL, total)
-                .build()
-        )
-
-        // N2 修复（复审补录）：只删本次 paths 涉及的文件（含分卷临时文件前缀），
-        // 不删整个 uploads 目录——否则并行批次（用户离开页面再回来可发起新上传）的
-        // 缓存文件会被误删，静默丢文件且报成功
+        // 只删本次 paths 涉及的文件（含分卷临时文件前缀），
+        // 不删整个 uploads 目录——避免并行批次的缓存文件被误删。
         runCatching {
             val uploadsDir = applicationContext.cacheDir.resolve("uploads")
             paths.forEach { p ->
@@ -72,14 +85,13 @@ class UploadWorker @AssistedInject constructor(
                     f.delete()
                 }
             }
-            // 分卷临时目录（.cloudbox_split_*）一并清理
             uploadsDir.listFiles()?.filter { it.name.startsWith(".cloudbox_split_") }?.forEach { it.deleteRecursively() }
         }
 
+        val failed = results.filter { !it.success }
         return if (failed.isEmpty()) {
             Result.success()
         } else {
-            // 有失败：返回 failure + 失败文件名单（UI 可展示重试）
             Result.failure(
                 workDataOf(
                     KEY_FAILED_FILES to failed.joinToString("\n") { it.fileName },
