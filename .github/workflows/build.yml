@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: build-apk
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -46,5 +50,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v0.1.0-$(date +%Y%m%d%H%M)"
+          TAG="v0.1.0-$(date +%Y%m%d%H%M%S)"
           gh release create "$TAG" app/build/outputs/apk/release/app-release.apk --repo "${{ github.repository }}" --title "CloudBox $TAG" --notes "Auto build APK" --latest
