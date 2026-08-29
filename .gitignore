@@ -8,3 +8,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 模块级构建产物与 Kotlin 编译缓存
+app/build/
+.kotlin/
+*.salive
+
+# 项目维护文档（随会话生成，不进入仓库）
+AI_MAINTENANCE.md
