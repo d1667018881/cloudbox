@@ -58,10 +58,6 @@ fun UploadScreen(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> viewModel.addFiles(uris) }
 
-    LaunchedEffect(state.message) {
-        state.message?.let { viewModel.dismissMessage() }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -119,6 +115,28 @@ fun UploadScreen(
                 Spacer(Modifier.height(4.dp))
                 Text("${state.progress}/${state.total}  正在上传：${state.currentFile}",
                     style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // 上传结果与失败名单（多批汇总）
+            state.message?.let { msg ->
+                val isError = state.failedFiles.isNotEmpty()
+                Text(
+                    msg,
+                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (isError) {
+                    Spacer(Modifier.height(4.dp))
+                    state.failedFiles.take(5).forEach {
+                        Text("• $it", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (state.failedFiles.size > 5) {
+                        Text("…等共 ${state.failedFiles.size} 个失败",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
             }
 
