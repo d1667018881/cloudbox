@@ -36,11 +36,13 @@ class LoginViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // 启动时已有有效会话（App 启动时 ensureSession 已尝试静默重登）
-            val account = authRepository.currentAccount.first()
-            if (account != null) {
-                _uiState.update { it.copy(alreadyLoggedIn = true) }
-                onLoginSuccess?.invoke()
+            // 持续观察当前账号：App 启动时 ensureSession 可能异步静默重登，
+            // 用 collect 而不是 first() 才能在其完成后自动跳转主页。
+            authRepository.currentAccount.collect { account ->
+                if (account != null) {
+                    _uiState.update { it.copy(alreadyLoggedIn = true) }
+                    onLoginSuccess?.invoke()
+                }
             }
         }
     }
