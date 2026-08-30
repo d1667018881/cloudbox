@@ -13,6 +13,3 @@ local.properties
 app/build/
 .kotlin/
 *.salive
-
-# 项目维护文档（随会话生成，不进入仓库）
-AI_MAINTENANCE.md
