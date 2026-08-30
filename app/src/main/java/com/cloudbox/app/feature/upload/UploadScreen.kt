@@ -29,7 +29,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -136,6 +135,11 @@ fun UploadScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                // P3(V3)：结果消息常驻，提供"知道了"手动关闭（dismissMessage 的 UI 入口）
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = viewModel::dismissMessage) {
+                    Text("知道了")
                 }
                 Spacer(Modifier.height(8.dp))
             }
