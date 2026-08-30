@@ -37,7 +37,7 @@ jobs:
       - name: Build APK
         env:
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: "0.1.0-${{ github.run_number }}"
+          VERSION_NAME: "0.1.${{ github.run_number }}"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
@@ -51,5 +51,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v0.1.0-$(date +%Y%m%d%H%M%S)"
+          TAG="v0.1.${{ github.run_number }}"
           gh release create "$TAG" app/build/outputs/apk/release/app-release.apk --repo "${{ github.repository }}" --title "CloudBox $TAG" --notes "Auto build APK" --latest
