@@ -3,7 +3,6 @@ package com.cloudbox.app.feature.upload
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.Data
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.cloudbox.app.core.domain.repository.UploadRepository
@@ -11,20 +10,24 @@ import com.cloudbox.app.core.domain.repository.UploadResult
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
+import java.util.concurrent.ThreadLocalRandom
+import kotlinx.coroutines.delay
 
 /**
  * 批量上传 Worker（WorkManager 后台执行，需求规格 4 节）。
  *
  * 输入参数：
  * - KEY_FOLDER_ID：目标文件夹 id（-1 = 根目录）
- * - KEY_FILE_PATHS：待上传文件路径列表（逗号分隔，单批 ≤ 50 个，见 UploadViewModel 分批）
+ * - KEY_FILE_PATHS：待上传文件路径数组（StringArray，单批 ≤ 50 个，分批在 UploadViewModel）
  * - KEY_SPOOF：后缀伪装开关
  *
  * 审查修复：
  * - 改由 Worker 逐文件调度并实时 setProgress，UI 可见当前文件名与已完成数量。
  * - 大文件自动走 uploadSplit，分卷结果逐条进入失败名单。
- * - 失败名单通过 outputData 返回，UploadViewModel 多批汇总后展示。
- * - 上传完成后清理本批次缓存文件与分卷临时目录。
+ * - 普通文件批量上传循环内 1-3s 随机延时（防 fileup.php 风控，与删除/分卷同款）。
+ * - 失败名单通过 outputData 返回；无论批次内是否有失败，一律返回 success，
+ *   避免 WorkManager 链式调度把后续批次静默标 FAILED（失败语义由 UI 侧 failedAccumulator 汇总）。
+ * - 清理只删本批次上传成功的缓存文件；分卷临时目录兜底清理（uploadSplit 已自清理）。
  */
 @HiltWorker
 class UploadWorker @AssistedInject constructor(
@@ -45,7 +48,12 @@ class UploadWorker @AssistedInject constructor(
         setProgress(workDataOf(KEY_PROGRESS to 0, KEY_TOTAL to total, KEY_CURRENT_FILE to ""))
 
         val results = mutableListOf<UploadResult>()
+        val filesSucceeded = mutableListOf<Boolean>()
         files.forEachIndexed { index, file ->
+            // N1(V3)：普通文件连续上传防风控——除第一个外，每个文件上传前延时 1-3s
+            if (index > 0) {
+                delay(ThreadLocalRandom.current().nextLong(1_000, 3_001))
+            }
             setProgress(
                 workDataOf(
                     KEY_PROGRESS to index,
@@ -66,6 +74,7 @@ class UploadWorker @AssistedInject constructor(
                 uploadRepository.uploadFile(file, folderId, spoof)
             }
             results.add(result)
+            filesSucceeded.add(result.success)
             setProgress(
                 workDataOf(
                     KEY_PROGRESS to index + 1,
@@ -75,30 +84,36 @@ class UploadWorker @AssistedInject constructor(
             )
         }
 
-        // 只删本次 paths 涉及的文件（含分卷临时文件前缀），
-        // 不删整个 uploads 目录——避免并行批次的缓存文件被误删。
+        // N3(V3)：只删本次上传成功的缓存文件；失败的文件保留副本，便于用户重试。
+        // 缓存布局：uploads/<uuid>/原名（UUID 子目录隔离同名文件）。
+        // 分卷临时目录（.cloudbox_split_ 前缀）一律兜底清理（uploadSplit 内部 finally 已自清理）。
         runCatching {
             val uploadsDir = applicationContext.cacheDir.resolve("uploads")
-            paths.forEach { p ->
-                val f = File(p)
-                if (f.parentFile?.absolutePath == uploadsDir.absolutePath) {
-                    f.delete()
+            files.forEachIndexed { index, file ->
+                val success = filesSucceeded.getOrNull(index) ?: false
+                val inUploadsTree = file.absolutePath.startsWith(uploadsDir.absolutePath + File.separator)
+                if (success && inUploadsTree) {
+                    file.delete()
+                    // 上传成功且子目录已空（如分卷临时文件已自清理）→ 删除 UUID 子目录
+                    file.parentFile?.let { dir ->
+                        if (dir.listFiles()?.isEmpty() != false) dir.delete()
+                    }
                 }
             }
+            // 兜底：清理残留的分卷临时目录
             uploadsDir.listFiles()?.filter { it.name.startsWith(".cloudbox_split_") }?.forEach { it.deleteRecursively() }
         }
 
+        // N2(V3)：一律返回 success，失败名单只走 outputData。
+        // 若返回 failure，WorkManager 链式调度会把后续批次全部标 FAILED 且不执行，
+        // 导致"一批失败、后续 70 个文件静默不传"的回归。
         val failed = results.filter { !it.success }
-        return if (failed.isEmpty()) {
-            Result.success()
-        } else {
-            Result.failure(
-                workDataOf(
-                    KEY_FAILED_FILES to failed.joinToString("\n") { it.fileName },
-                    KEY_FAILED_MESSAGE to failed.firstOrNull()?.message.orEmpty()
-                )
+        return Result.success(
+            workDataOf(
+                KEY_FAILED_FILES to failed.joinToString("\n") { it.fileName },
+                KEY_FAILED_MESSAGE to failed.firstOrNull()?.message.orEmpty()
             )
-        }
+        )
     }
 
     companion object {
