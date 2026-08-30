@@ -61,6 +61,14 @@ class UploadViewModel @Inject constructor(
 
     fun removeFile(path: String) {
         _uiState.update { it.copy(selectedFiles = it.selectedFiles - path) }
+        // N4(V3)：从列表移除后，若该文件已不在任何选中项，顺带删除其 UUID 子目录（含孤儿缓存）
+        if (path !in _uiState.value.selectedFiles) {
+            val uploadsRoot = File(context.cacheDir, "uploads")
+            val f = File(path)
+            if (f.parentFile?.parentFile?.absolutePath == uploadsRoot.absolutePath) {
+                f.parentFile?.deleteRecursively()
+            }
+        }
         checkOversize()
     }
 
@@ -123,12 +131,12 @@ class UploadViewModel @Inject constructor(
                     }
                     if (info.state.isFinished) {
                         workStates[workId] = info.state
-                        if (info.state == WorkInfo.State.FAILED) {
-                            info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
-                                ?.split("\n")
-                                ?.filter { it.isNotBlank() }
-                                ?.let { failedAccumulator.addAll(it) }
-                        }
+                        // N2(V3)：Worker 一律返回 success，失败名单始终在 outputData 里。
+                        // 任何终态（SUCCEEDED/FAILED/CANCELLED）都读取，不再只认 FAILED。
+                        info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
+                            ?.split("\n")
+                            ?.filter { it.isNotBlank() }
+                            ?.let { failedAccumulator.addAll(it) }
                         checkAllFinished()
                     }
                 }
@@ -138,7 +146,9 @@ class UploadViewModel @Inject constructor(
 
     private fun checkAllFinished() {
         if (currentWorkIds.any { it !in workStates }) return
-        val allSuccess = workStates.values.all { it == WorkInfo.State.SUCCEEDED }
+        // N2(V3)：不再用 workStates 的 SUCCEEDED 判定（Worker 现在一律 success），
+        // 以 failedAccumulator 是否为空作为"全部成功"的依据。
+        val allSuccess = failedAccumulator.isEmpty()
         _uiState.update {
             it.copy(
                 uploading = false,
@@ -169,7 +179,10 @@ class UploadViewModel @Inject constructor(
                 }
             }.getOrNull() ?: "upload_${System.currentTimeMillis()}"
             val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            val dir = File(context.cacheDir, "uploads").apply { mkdirs() }
+            // N4(V3)：每个文件独立 UUID 子目录（uploads/<uuid>/原名），
+            // 防止不同目录选两个同名文件互相覆盖，同时保持文件名不变（云端上传名 = 原名）。
+            val dir = File(File(context.cacheDir, "uploads"), UUID.randomUUID().toString().substring(0, 8))
+                .apply { mkdirs() }
             val out = File(dir, safeName)
             context.contentResolver.openInputStream(uri)?.use { input ->
                 out.outputStream().use { output -> input.copyTo(output) }
