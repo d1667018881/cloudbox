@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -45,7 +44,6 @@ import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
 import com.cloudbox.app.feature.resolve.ResolveScreen
 import com.cloudbox.app.feature.search.SearchViewModel
-import com.cloudbox.app.feature.upload.UploadScreen
 
 /**
  * 主界面：底部导航容器（网盘 / 解析 / 上传 / 我的）。
@@ -122,12 +120,6 @@ fun MainScreen(
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.Download, null) },
-                    label = { Text("上传") }
-                )
-                NavigationBarItem(
-                    selected = tab == 3,
-                    onClick = { tab = 3 },
                     icon = { Icon(Icons.Filled.Person, null) },
                     label = { Text("我的") }
                 )
@@ -141,8 +133,7 @@ fun MainScreen(
                     onOpenRecycle = onOpenRecycle
                 )
                 1 -> ResolveScreen(onBack = {})
-                2 -> UploadScreen(onBack = {})
-                3 -> MeTab(
+                2 -> MeTab(
                     accountName = account?.uid ?: "未登录",
                     onOpenDownload = onOpenDownload,
                     onOpenFavorites = onOpenFavorites,

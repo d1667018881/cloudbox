@@ -6,97 +6,97 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 
-/** 上传页 UI 状态 */
-data class UploadUiState(
-    val selectedFiles: List<String> = emptyList(),
-    val targetFolderId: Long = -1L,
-    val targetFolderName: String = "根目录",
-    val uploading: Boolean = false,
-    val progress: Int = 0,
-    val total: Int = 0,
-    val currentFile: String = "",
-    val message: String? = null,
-    val oversizeHint: String? = null,
-    val failedFiles: List<String> = emptyList()
-)
-
+/**
+ * 上传调度 ViewModel（V5 重构：上传并入网盘页 FAB，不再是独立 Tab）。
+ *
+ * 使用方式：FileListScreen 的 + FAB → SAF 多选 → [enqueueUpload]（目标 =
+ * 当前文件夹）→ 底部进度横幅 → [uploadFinished] 事件触发列表刷新。
+ *
+ * 进度语义（多批合并）：WorkManager 按每批 ≤50 文件链式串联（Data 10KB 上限），
+ * 全局进度 = 已完成批次的文件数累计 + 当前批次的批内进度，total = 全部文件数
+ * （修复 V3 P3 的"total 随批次跳变"问题）。
+ *
+ * 失败语义（V3 N2）：Worker 一律返回 success，失败名单走 outputData，
+ * 这里汇总 failedAccumulator 判定"全部成功/部分失败"。
+ */
 @HiltViewModel
 class UploadViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val uploadRepository: UploadRepository,
-    private val settingsStore: SettingsStore,
     private val workManager: WorkManager
 ) : ViewModel() {
+
+    /** 上传进度横幅状态 */
+    data class UploadUiState(
+        val uploading: Boolean = false,
+        val progress: Int = 0,
+        val total: Int = 0,
+        val currentFile: String = "",
+        val message: String? = null,
+        val failedFiles: List<String> = emptyList()
+    )
 
     private val _uiState = MutableStateFlow(UploadUiState())
     val uiState: StateFlow<UploadUiState> = _uiState.asStateFlow()
 
+    /** 一次上传会话结束（不论成败）发射一次；网盘页收集后刷新当前文件夹列表 */
+    private val _uploadFinished = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val uploadFinished: SharedFlow<Unit> = _uploadFinished.asSharedFlow()
+
     private var currentWorkIds: List<UUID> = emptyList()
     private val workStates = mutableMapOf<UUID, WorkInfo.State>()
     private val failedAccumulator = mutableListOf<String>()
+    private var globalTotal = 0
 
-    /** 选择文件：SAF 返回 content:// uri，先拷到缓存目录再上传 */
-    fun addFiles(uris: List<Uri>) {
-        val paths = uris.mapNotNull { copyUriToCache(it)?.absolutePath }
-        _uiState.update { it.copy(selectedFiles = it.selectedFiles + paths) }
-        checkOversize()
-    }
-
-    fun setTargetFolder(folderId: Long, name: String) =
-        _uiState.update { it.copy(targetFolderId = folderId, targetFolderName = name) }
-
-    fun removeFile(path: String) {
-        _uiState.update { it.copy(selectedFiles = it.selectedFiles - path) }
-        // N4(V3)：从列表移除后，若该文件已不在任何选中项，顺带删除其 UUID 子目录（含孤儿缓存）
-        if (path !in _uiState.value.selectedFiles) {
-            val uploadsRoot = File(context.cacheDir, "uploads")
-            val f = File(path)
-            if (f.parentFile?.parentFile?.absolutePath == uploadsRoot.absolutePath) {
-                f.parentFile?.deleteRecursively()
-            }
+    /** SAF 多选入口：拷贝到缓存 → 分批 → 链式入队（folderId = 当前目录，-1 = 根） */
+    fun enqueueUpload(uris: List<Uri>, folderId: Long, spoof: Boolean = true) {
+        if (uris.isEmpty()) return
+        if (_uiState.value.uploading) {
+            _uiState.update { it.copy(message = "已有上传任务进行中，请稍候") }
+            return
         }
-        checkOversize()
-    }
-
-    fun startUpload() {
-        val s = _uiState.value
-        if (s.selectedFiles.isEmpty() || s.uploading) return
-        checkOversize()
-
         viewModelScope.launch {
-            val spoof = settingsStore.suffixSpoofEnabled.first()
-            // WorkManager Data 序列化上限 10240 字节（约 100+ 长路径），
-            // 全量路径塞进单个 WorkRequest 会抛 IllegalStateException。
-            // 按每批 50 个拆分，用 WorkContinuation 链式串联。
-            val requests = s.selectedFiles.chunked(50).map { batch ->
+            // 大文件拷贝必须在 IO 线程（默认 viewModelScope = Main）
+            val paths = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                uris.mapNotNull { copyUriToCache(it)?.absolutePath }
+            }
+            if (paths.isEmpty()) {
+                _uiState.update { it.copy(message = "所选文件读取失败") }
+                return@launch
+            }
+
+            // WorkManager Data 序列化上限 10240 字节 → 按每批 50 个拆分链式串联
+            val batches = paths.chunked(50)
+            val requests = batches.map { batch ->
                 androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
                     .setInputData(
                         androidx.work.Data.Builder()
-                            .putLong(UploadWorker.KEY_FOLDER_ID, s.targetFolderId)
+                            .putLong(UploadWorker.KEY_FOLDER_ID, folderId)
                             .putStringArray(UploadWorker.KEY_FILE_PATHS, batch.toTypedArray())
                             .putBoolean(UploadWorker.KEY_SPOOF, spoof)
                             .build()
                     )
                     .build()
             }
-            if (requests.isEmpty()) return@launch
             currentWorkIds = requests.map { it.id }
             workStates.clear()
             failedAccumulator.clear()
+            globalTotal = paths.size
 
             val continuation = requests.drop(1).fold(
                 workManager.beginWith(requests.first())
@@ -107,32 +107,38 @@ class UploadViewModel @Inject constructor(
                 it.copy(
                     uploading = true,
                     progress = 0,
-                    total = s.selectedFiles.size,
+                    total = globalTotal,
                     message = null,
-                    failedFiles = emptyList()
+                    failedFiles = emptyList(),
+                    currentFile = ""
                 )
             }
-            observeWorks(currentWorkIds)
+            observeWorks(currentWorkIds, batches.map { it.size })
         }
     }
 
-    private fun observeWorks(workIds: List<UUID>) {
-        workIds.forEach { workId ->
+    fun dismissMessage() = _uiState.update { it.copy(message = null) }
+
+    /** 观察各批次：RUNNING 更新全局进度，终态累计完成数并收集失败名单 */
+    private fun observeWorks(workIds: List<UUID>, batchSizes: List<Int>) {
+        var finishedCount = 0 // 已完成批次累计的文件数（批间串行，无并发写）
+        workIds.forEachIndexed { idx, workId ->
             viewModelScope.launch {
                 workManager.getWorkInfoByIdFlow(workId).collect { info ->
                     if (info.state == WorkInfo.State.RUNNING) {
+                        val p = info.progress.getInt(UploadWorker.KEY_PROGRESS, 0)
                         _uiState.update {
                             it.copy(
-                                progress = info.progress.getInt(UploadWorker.KEY_PROGRESS, 0),
-                                total = info.progress.getInt(UploadWorker.KEY_TOTAL, 0),
+                                progress = finishedCount + p,
+                                total = globalTotal,
                                 currentFile = info.progress.getString(UploadWorker.KEY_CURRENT_FILE) ?: ""
                             )
                         }
                     }
-                    if (info.state.isFinished) {
+                    if (info.state.isFinished && workStates[workId] == null) {
                         workStates[workId] = info.state
-                        // N2(V3)：Worker 一律返回 success，失败名单始终在 outputData 里。
-                        // 任何终态（SUCCEEDED/FAILED/CANCELLED）都读取，不再只认 FAILED。
+                        finishedCount += batchSizes.getOrElse(idx) { 0 }
+                        // N2(V3)：任何终态都读 outputData 失败名单（Worker 一律 success）
                         info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
                             ?.split("\n")
                             ?.filter { it.isNotBlank() }
@@ -146,8 +152,6 @@ class UploadViewModel @Inject constructor(
 
     private fun checkAllFinished() {
         if (currentWorkIds.any { it !in workStates }) return
-        // N2(V3)：不再用 workStates 的 SUCCEEDED 判定（Worker 现在一律 success），
-        // 以 failedAccumulator 是否为空作为"全部成功"的依据。
         val allSuccess = failedAccumulator.isEmpty()
         _uiState.update {
             it.copy(
@@ -158,18 +162,10 @@ class UploadViewModel @Inject constructor(
                 currentFile = ""
             )
         }
+        _uploadFinished.tryEmit(Unit)
     }
 
-    fun dismissMessage() = _uiState.update { it.copy(message = null, oversizeHint = null) }
-
-    private fun checkOversize() {
-        val s = _uiState.value
-        if (s.selectedFiles.any { uploadRepository.isOversize(File(it)) }) {
-            _uiState.update { it.copy(oversizeHint = "存在超过 100MB 的文件，将自动分卷（95MB/卷）上传") }
-        }
-    }
-
-    /** content:// → cache 目录真实文件（蓝奏云上传需要真实文件流） */
+    /** SAF content:// 拷入缓存 uploads/<uuid>/原名（UUID 子目录隔离同名文件，V3 N4） */
     private fun copyUriToCache(uri: Uri): File? {
         return runCatching {
             val name = runCatching {
@@ -179,10 +175,7 @@ class UploadViewModel @Inject constructor(
                 }
             }.getOrNull() ?: "upload_${System.currentTimeMillis()}"
             val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            // N4(V3)：每个文件独立 UUID 子目录（uploads/<uuid>/原名），
-            // 防止不同目录选两个同名文件互相覆盖，同时保持文件名不变（云端上传名 = 原名）。
-            val dir = File(File(context.cacheDir, "uploads"), UUID.randomUUID().toString().substring(0, 8))
-                .apply { mkdirs() }
+            val dir = File(context.cacheDir, "uploads/${UUID.randomUUID()}").apply { mkdirs() }
             val out = File(dir, safeName)
             context.contentResolver.openInputStream(uri)?.use { input ->
                 out.outputStream().use { output -> input.copyTo(output) }

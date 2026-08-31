@@ -527,3 +527,55 @@ CI 验证必须看**最后一个 commit 对应 run** 的结论 + 下载日志确
 3. 参考项目（LanZouCloud-API）的"现行"实现也可能过期（account.php 同样死亡），
    迁移接口时参考项目只提供线索，结论必须实测。
 
+
+---
+
+## 14. V5 真机反馈三连修（2026-09-01，上传假成功/幽灵文件夹/上传入口 UX）
+
+用户真机验收 v0.1.93（登录已通过）后报告三问题。定位与修复过程：
+
+### 14.1 "上传显示成功实际没有上传"（P0）
+
+**排查**（复审 AI）：
+1. 读全链路（UploadScreen→ViewModel→Worker→Repository→拦截器），zt==1 判定与
+   LanZouCloud-API 一致；无 Cookie 实测 fileup.php 返回 404 HTML（Gson 解析必抛
+   异常→显示失败），排除"未授权却报成功"。
+2. 定位真凶：**上传走独立 Tab + WorkManager 后台执行，FileListViewModel 完全不感知
+   上传完成**——传完切回网盘页看到的是旧列表，用户以为没传（实际服务端已有文件，
+   传到 targetFolderId，默认根目录）。
+3. 顺带锤出一条真·假成功路径：Worker 里 `paths.map{File(it)}.filter{it.exists()}`
+   若缓存文件全丢（系统清 cacheDir），results 为空 → failed 为空 → 报"上传完成"
+   但零上传。
+
+**修复**：
+- 上传完成后发 `uploadFinished` 事件 → 网盘页收事件自动 refresh()（见 14.3 重构）
+- Worker：files 全丢失时把全部路径计入失败名单（"本地缓存文件已丢失"），
+  不再静默报成功
+
+### 14.2 "二级目录里出现一级目录名（幽灵文件夹）"（P1）
+
+两个独立根因，都修：
+1. **loadPage 竞态**：快速导航 root→A→B 时，A 的迟到响应覆盖 B 的列表
+   （无请求序号防护）。修复：`loadSeq` 序号，过期响应直接丢弃。
+2. **task=47 的 info 字段被映射成文件夹**（"兼容两种形态"的臆测代码）：
+   参考实现（LanZouCloud-API get_dir_list）只解析 text——info 是元信息字段，
+   映射成文件夹会注入服务端不存在的幽灵条目。修复：删 info 映射，DTO 注释更正。
+   （该缓存还污染了搜索索引 fileCacheDao——幽灵条目随 insertAll 入库）
+
+### 14.3 上传入口并入网盘页（UX，用户指定方案）
+
+用户："不改成网盘页点击+上传呢"。重构：
+- MainScreen 底部导航 4 Tab → 3 Tab（网盘/解析/我的），上传 Tab 移除
+- 网盘页 FAB 改弹出菜单：「新建文件夹 / 上传文件到当前目录」
+  （SAF 多选 → enqueueUpload(uris, 当前目录id) → 底部进度横幅 → 完成自动刷新）
+- UploadViewModel 重写：enqueueUpload 入口 + 全局进度（已完成批次累计 + 批内进度，
+  顺带修了 V3 P3 的 total 批间跳变）+ uploadFinished 事件；SAF 拷贝移 IO 线程
+- UploadScreen.kt 删除（git 历史可找回）；UploadWorker 协议不变
+
+### 14.4 验收清单（真机 v0.1.94+）
+
+- [ ] 网盘页 + → 上传文件到当前目录 → 选 2 个文件 → 进度横幅 → 完成后列表自动
+      出现新文件（不用手动刷新）
+- [ ] 在子目录里上传 → 文件落在该子目录（不再是"传到根目录找不到"）
+- [ ] 快速连点进入二级目录 → 列表内容与面包屑一致，无一级目录内容残留
+- [ ] 上传中切 Tab/杀进程 → WorkManager 后台继续传（回到网盘页进度恢复显示）

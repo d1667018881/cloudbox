@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,15 +72,38 @@ import com.cloudbox.app.feature.filelist.dialog.SimpleInputDialog
 fun FileListScreen(
     onOpenSearch: () -> Unit,
     onOpenRecycle: () -> Unit,
-    viewModel: FileListViewModel = hiltViewModel()
+    viewModel: FileListViewModel = hiltViewModel(),
+    uploadViewModel: com.cloudbox.app.feature.upload.UploadViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val uploadState by uploadViewModel.uiState.collectAsState()
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
     var moveTarget by remember { mutableStateOf(false) }
     var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
     var descTarget by remember { mutableStateOf<CloudFile?>(null) }
+    var showFabMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+
+    // V5：+ FAB 直传当前目录（SAF 多选）——上传不再是独立 Tab
+    val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            // 目标 = 当前浏览目录（栈顶），传完自动刷新列表
+            uploadViewModel.enqueueUpload(uris, state.folderStack.last().first)
+        }
+    }
+
+    // 上传会话结束（含部分失败）→ 刷新当前目录（V5：修复"上传成功但列表不更新"）
+    LaunchedEffect(Unit) {
+        uploadViewModel.uploadFinished.collect { viewModel.refresh() }
+    }
+
+    // 上传结果提示（成功/部分失败文案）
+    LaunchedEffect(uploadState.message) {
+        uploadState.message?.let { snackbarHostState.showSnackbar(it) }
+    }
 
     // 系统返回键：先退多选/上级目录
     androidx.activity.compose.BackHandler { viewModel.back() }
@@ -147,7 +171,29 @@ fun FileListScreen(
         },
         floatingActionButton = {
             if (!state.selectionMode) {
-                FloatingActionButton(onClick = { showNewFolder = true }) { Icon(Icons.Filled.Add, "新建文件夹") }
+                Box {
+                    FloatingActionButton(onClick = { showFabMenu = true }) {
+                        Icon(Icons.Filled.Add, "新建/上传")
+                    }
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = showFabMenu,
+                        onDismissRequest = { showFabMenu = false }
+                    ) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("新建文件夹") },
+                            leadingIcon = { Icon(Icons.Filled.Add, null) },
+                            onClick = { showFabMenu = false; showNewFolder = true }
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("上传文件到当前目录") },
+                            leadingIcon = { Icon(Icons.Filled.UploadFile, null) },
+                            onClick = {
+                                showFabMenu = false
+                                filePicker.launch(arrayOf("*/*"))
+                            }
+                        )
+                    }
+                }
             }
         }
     ) { padding ->
@@ -187,6 +233,38 @@ fun FileListScreen(
                                 Text("已全部加载", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } }
+                        }
+                    }
+                }
+            }
+
+            // V5：上传进度横幅（多批全局进度，底部悬浮）
+            if (uploadState.uploading) {
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        tonalElevation = 4.dp,
+                        shadowElevation = 4.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                "上传中 ${uploadState.progress}/${uploadState.total}" +
+                                        if (uploadState.currentFile.isNotBlank()) "：${uploadState.currentFile}" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val total = uploadState.total.coerceAtLeast(1)
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { uploadState.progress.toFloat() / total },
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }

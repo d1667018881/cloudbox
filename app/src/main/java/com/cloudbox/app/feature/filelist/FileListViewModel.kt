@@ -59,6 +59,10 @@ class FileListViewModel @Inject constructor(
 
     private fun loadPage(append: Boolean) {
         val folderId = _uiState.value.currentFolderId
+        // 导航竞态防护（V5）：用户快速进入/切换文件夹时，旧文件夹的迟到响应
+        // 会把新文件夹的列表覆盖成旧内容——表现为"二级目录里出现一级目录的内容/
+        // 幽灵文件夹"。每个请求带序号，应用结果前校验序号未被更新，过期即丢弃。
+        val seq = ++loadSeq
         viewModelScope.launch {
             if (append) {
                 _uiState.update { it.copy(loadingMore = true) }
@@ -66,6 +70,7 @@ class FileListViewModel @Inject constructor(
                 _uiState.update { it.copy(loading = true, error = null) }
             }
             fileRepository.getPage(folderId, page).onSuccess { listPage ->
+                if (seq != loadSeq) return@launch // 过期响应（用户已切到其他文件夹）
                 _uiState.update {
                     it.copy(
                         files = if (append) it.files + listPage.files else listPage.folders + listPage.files,
@@ -75,6 +80,7 @@ class FileListViewModel @Inject constructor(
                     )
                 }
             }.onFailure { e ->
+                if (seq != loadSeq) return@launch
                 _uiState.update {
                     it.copy(loading = false, loadingMore = false, error = e.message ?: "加载失败")
                 }
@@ -112,6 +118,9 @@ class FileListViewModel @Inject constructor(
     }
 
     fun toggleGrid() = _uiState.update { it.copy(gridMode = !it.gridMode) }
+
+    /** loadPage 请求序号（导航竞态防护，见 loadPage 注释） */
+    private var loadSeq = 0
 
     fun enterSelection(file: CloudFile) {
         _uiState.update { it.copy(selectionMode = true, selected = setOf(file.id)) }

@@ -23,8 +23,8 @@ data class RemoteFile(
 )
 
 /**
- * task=47 子文件夹列表响应（doupload.php?uid=xxx）：
- * 兼容两种形态：text[{fol_id,name,onof,folder_des}] 或 info[{folderid,name}]
+ * task=47 子文件夹列表响应（doupload.php?uid=xxx）：text[{fol_id,name,onof,folder_des}]。
+ * info 为接口元信息字段（非文件夹列表，V5 修复：不再映射成文件夹，防幽灵条目）
  */
 data class DirListResponse(
     @SerializedName("text") val text: List<RemoteDir>? = null,

@@ -43,6 +43,17 @@ class UploadWorker @AssistedInject constructor(
         if (paths.isEmpty()) return Result.failure()
 
         val files = paths.map { File(it) }.filter { it.exists() }
+        // V5 修复：全部缓存文件丢失（如系统清理 cacheDir）时，旧逻辑会以
+        // "0 个文件全部成功"收尾 → UI 显示上传完成但实际什么都没传（假成功）。
+        // 改为把丢失文件全部计入失败名单，如实上报。
+        if (files.isEmpty()) {
+            return Result.success(
+                workDataOf(
+                    KEY_FAILED_FILES to paths.joinToString("\n") { File(it).name },
+                    KEY_FAILED_MESSAGE to "本地缓存文件已丢失，请重新选择后上传"
+                )
+            )
+        }
         val total = files.size
 
         setProgress(workDataOf(KEY_PROGRESS to 0, KEY_TOTAL to total, KEY_CURRENT_FILE to ""))
