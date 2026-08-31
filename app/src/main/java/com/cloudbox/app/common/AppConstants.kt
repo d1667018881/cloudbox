@@ -47,6 +47,21 @@ object AppConstants {
     /** 从 URL 中提取分享 ID（最后一层路径段，如 lanzou.com/i5g8y1a 的 i5g8y1a） */
     val SHARE_ID_REGEX = Regex("""/([a-zA-Z0-9]+)/?$""")
 
+    /** 统一账号中心（2026-08-31 实测：login.php 已在 pc/up.woozooo.com 双双下线 404，
+     *  蓝奏云将登录迁移至此并叠加 acw_sc__v2 挑战；协议规格见 CODE_REVIEW_V4_LOGIN.md）。
+     *  该 host 为固定域名，不走 LanzouDomainInterceptor 重写（拦截器只重写占位 host 请求）。 */
+    const val ACCOUNT_CENTER_BASE = "https://accounts.woozooo.com"
+
+    /** 账号中心登录页（GET 触发 acw 挑战；POST task=uselogin 提交凭证）。
+     *  ref 参数决定登录成功后中转跳转的目标站（pc = 网盘管理端，凭证 phpdisk_info 落在该域）。 */
+    const val ACCOUNT_CENTER_LOGIN_URL = "$ACCOUNT_CENTER_BASE/accounts.php?action=login&ref=pc.woozooo.com"
+
+    /** 登录 AJAX 提交端点（页面 JS：var task ='uselogin'） */
+    const val ACCOUNT_CENTER_SUBMIT_URL = "$ACCOUNT_CENTER_BASE/accounts.php"
+
+    /** 登录成功后中转鉴权回跳的目标站（作为 ref 参数值） */
+    const val ACCOUNT_CENTER_REF_HOST = "pc.woozooo.com"
+
     /** 超时（毫秒）：需求规格要求 30s */
     const val TIMEOUT_CONNECT_MS = 30_000L
     const val TIMEOUT_READ_MS = 30_000L

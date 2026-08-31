@@ -129,8 +129,10 @@ app/src/main/java/com/cloudbox/app/
 - Cookie 的 domain 常带前导点（`.lanzou.com`），读取时按"host 等于 key 或 host 是 key 子域"匹配。
 - 手动导入的纯键值对（无 Domain 属性）：按名字约定归属
   `phpdisk_info/ylogin → woozooo.com`，其他 → `lanzou.com`（否则请求不带 Cookie）。
-- 登录成功判定 = CookieJar 中存在 `phpdisk_info`（login.php 成败都返回 200，
-  唯一可靠信号是 Set-Cookie；失败页面 HTML 含中文错误文案，用 Jsoup 提取）。
+- 登录成功判定 = CookieJar 中存在 `phpdisk_info`（账号中心接口成败都返回 200 + JSON zt 字段，
+  但凭证仍以 Set-Cookie 到手为准；失败时 JSON msgs 直接给中文错误文案）。
+  ⚠️ login.php（task=3）已于 2026-08-31 实测下线（pc/up.woozooo.com 双 404），
+  现行登录协议见 §13。
 - 有效期：phpdisk_info 约 20 天；`ensureSession()` 在启动时检测 lastActiveAt，
   **超过 18 天**（留 2 天缓冲）用保存的账密静默重登，失败清 Cookie 提示重登。
 
@@ -437,3 +439,91 @@ V2 复审（对照 commit 56e2169）发现 7 项新问题，**全部属实并已
 **教训记录**：file_edit/python 批量替换后必须 grep 验证实际内容（多次静默失败/编辑事故）；
 CI 验证必须看**最后一个 commit 对应 run** 的结论 + 下载日志确认 "BUILD SUCCESSFUL"，
 不能只看"最新 run"（中间 commit 的 run 成功不代表最终代码可编译）。
+
+---
+
+## 13. 登录迁移统一账号中心（2026-09-01，V4 根因分析 + 修复，复审 AI 亲自实现）
+
+### 13.1 事故与排查过程（完整时间线，供未来接口失效时参照）
+
+**症状**（2026-08-31 22:46 用户报告）：首次真实登录，账号密码正确，
+报"登录失败（未获取到身份凭证）"。此前无人真正登录过——前四轮全是纯代码审查。
+
+**排查步骤**（复审 AI，全部一手实测）：
+
+1. **读现行代码**：App 登录 = Retrofit POST `login.php`（task=3&uid&pwd），
+   域名拦截器把 `.php` 结尾的占位 host 请求路由到 diskMain（pc.woozooo.com）。
+2. **拉 LanZouCloud-API 现行源码**（core.py）：其 `login()` 用的是
+   `pc.woozooo.com/account.php` 取页面 → POST `mydisk.php`（task=3&uid&pwd&formhash，
+   **手机 UA**）——跟 App 的 login.php 完全不是一回事。这说明 App 从第一版起
+   就没按参考实现做过登录。
+3. **实测旧端点（锤死）**：
+   - POST `pc.woozooo.com/login.php` task=3 → 404 页（HTML 内含 `pan.lanzou.com/?404`），无 Set-Cookie——与用户报错完全吻合；
+   - POST `up.woozooo.com/login.php` → HTTP 404；
+   - GET `pc.woozooo.com/account.php`（桌面/手机 UA 双测）→ 830B JS 跳转壳：
+     `document.location="https://accounts.woozooo.com/accounts.php?action=login&ref=pc.woozooo.com"`——**连 LanZouCloud-API 的旧流程也死了**。
+4. **实测新端点（逆向出完整协议）**：
+   - GET `accounts.woozooo.com/accounts.php?action=login&ref=pc.woozooo.com` →
+     返回 acw_sc__v2 挑战页（`var arg1='…'` 混淆 JS）；
+   - 用仓库内 AcwScV2 同款算法（unsbox+hex_xor，V2 轮已与原版逐行对齐）本地算出
+     挑战值，带 cookie 重 GET → 真登录页（含 `var task ='uselogin'`、AJAX 提交逻辑、
+     `window.location.href = date.msgs` 中转跳转）；
+   - POST task=uselogin 假凭证 → JSON `{"zt":0,"msgs":"用户名不正确"}`（端点活、
+     参数对、错误文案直出）；对照组 task=login → 返回新挑战页（证实 task 值敏感，
+     必须用 uselogin）。
+5. **根因结论**：登录功能从第一版起就打在已死亡的接口上。接口存活性只有实测能验——
+   **这是纯代码审查（含历轮复审）的结构性盲区**。
+
+### 13.2 现行登录协议（全部实测验证，除第 3 步中转链）
+
+```
+1. GET  https://accounts.woozooo.com/accounts.php?action=login&ref=pc.woozooo.com
+   （桌面 UA；首次访问返回 acw 挑战页 var arg1='…' → 本地 AcwScV2 计算
+     acw_sc__v2 cookie 写入 CookieJar → 重 GET 验证通过）
+2. POST https://accounts.woozooo.com/accounts.php
+   Header: X-Requested-With: XMLHttpRequest
+   Form:   task=uselogin & username & password & ref=pc.woozooo.com
+   → JSON {"zt":1,"msgs":"<中转鉴权URL>"} 或 {"zt":0,"msgs":"<中文错误>"}
+   （若响应是挑战页 = 挑战 cookie 缺失/过期，解挑战后重试一次）
+3. GET 中转 URL（OkHttp 自动跟随重定向链）→ 链上 Set-Cookie phpdisk_info
+   ⚠️ 第 3 步的跳转链细节无法用假凭证实测，真机验证见 §13.4
+4. 成功判定 = CookieJar.isLoggedIn()（phpdisk_info 到手，跨域桶查找）
+```
+
+### 13.3 代码改动清单（commit 见 git log "fix(login)"）
+
+| 文件 | 改动 |
+|---|---|
+| `AppConstants.kt` | 新增 ACCOUNT_CENTER_BASE / _LOGIN_URL / _SUBMIT_URL / _REF_HOST 四常量（含下线证据注释） |
+| `AuthRepositoryImpl.kt` | login() 重写为账号中心四步流程；新增 helpers：getWithAcwChallenge / postLogin / httpGet / httpPostLogin / solveAcwChallengeIfPresent；保留槽位预绑定+回滚（V2 #1）、catch 回滚；类 KDoc 全量更新为新协议 |
+| `LanzouApiService.kt` | 删除死端点 login()（task=3），留注释指路 AuthRepositoryImpl |
+| `AI_MAINTENANCE.md` | §4.2 更新登录判定描述；新增本节 §13 |
+
+**设计决策记录**：
+- 挑战 cookie 走 `putCookie` 而非手动 Cookie header——OkHttp BridgeInterceptor
+  会在 jar 非空时整体替换手动头（V2 #5 同款教训）；
+- accounts.woozooo.com 是真实域名，域名拦截器只重写占位 host 请求，天然放行，
+  无需改拦截器（V4 报告 L2 预设的改动实际不需要）；
+- 挑战解算重试一律**上限一次**（bounded），防挑战页死循环；
+- 白名单无需改：accounts.woozooo.com 以 `.woozooo.com` 后缀命中
+  TRUSTED_SHARE_HOSTS / isTrustedCookieDomain（V4 L5 预设确认，实测相符）；
+- 登录失败文案优先用 JSON msgs 原文（"用户名不正确"/"密码错误"），
+  extractLoginError() 关键词表保留为 HTML 兜底。
+
+### 13.4 验收清单（真机）
+
+- [ ] 正确账密登录 → 进文件列表，杀进程重启登录态保持
+- [ ] 错误密码 → 提示"密码错误"（不再是"未获取到身份凭证"）
+- [ ] 首次登录触发 acw 挑战自动通过（算法已在 2026-08-31 实测可过线上挑战）
+- [ ] 中转跳转链 phpdisk_info 落库（第 3 步唯一未实测环节，若失败按报错
+      "登录跳转未获取到凭证"反馈，回落 Cookie 导入）
+
+### 13.5 流程教训（写给所有参与 AI）
+
+1. **接口类功能必须实测销账**：涉及第三方服务端点的功能，修复后必须真机走通一次
+   才能宣布"已修复"；代码审查再细也验不了服务端现状。
+2. **注释里的"部分账号仍可用"是过时文档**——login.php 的 KDoc 误导了两轮 AI
+   （开发 AI 照抄、复审 AI 未质疑）。对"接口可能已死"的怀疑要优先实测。
+3. 参考项目（LanZouCloud-API）的"现行"实现也可能过期（account.php 同样死亡），
+   迁移接口时参考项目只提供线索，结论必须实测。
+

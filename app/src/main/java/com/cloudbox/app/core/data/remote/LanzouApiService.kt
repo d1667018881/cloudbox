@@ -35,20 +35,9 @@ import retrofit2.http.Url
 interface LanzouApiService {
 
     // ==================== 登录 ====================
-
-    /**
-     * 登录（需求规格指定方案）。
-     * POST login.php，task=3&uid&pwd；成功以 Set-Cookie 下发 phpdisk_info+ylogin。
-     * 注：LanZouCloud-API 源码显示官方已转向 mydisk.php+formhash 的登录方式，
-     * login.php 为旧入口（部分账号仍可用）。失败时上层可降级到 cookie 导入。
-     */
-    @FormUrlEncoded
-    @POST("login.php")
-    suspend fun login(
-        @Field("task") task: Int = 3,
-        @Field("uid") uid: String,
-        @Field("pwd") pwd: String
-    ): Response<ResponseBody>
+    // V4（2026-08-31）：login.php（task=3）已在 pc/up.woozooo.com 双双实测 404，端点移除。
+    // 登录不走 Retrofit——统一账号中心 accounts.woozooo.com 为固定真实域名，
+    // 协议含 acw 挑战/中转跳转，实现见 AuthRepositoryImpl（账号中心协议 helpers）。
 
     // ==================== 文件列表 ====================
 
