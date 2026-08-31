@@ -13,3 +13,5 @@ local.properties
 app/build/
 .kotlin/
 *.salive
+CODE_REVIEW.md
+CODE_REVIEW_V2.md
