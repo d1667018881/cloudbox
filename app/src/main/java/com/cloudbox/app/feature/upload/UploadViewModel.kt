@@ -75,7 +75,8 @@ class UploadViewModel @Inject constructor(
 
             fun batchSizeOf(info: WorkInfo): Int =
                 info.progress.getInt(UploadWorker.KEY_TOTAL, 0).takeIf { it > 0 }
-                    ?: info.inputData.getStringArray(UploadWorker.KEY_FILE_PATHS)?.size ?: 0
+                    ?: info.tags.firstOrNull { it.startsWith(UploadWorker.TAG_SIZE_PREFIX) }
+                        ?.removePrefix(UploadWorker.TAG_SIZE_PREFIX)?.toIntOrNull() ?: 0
 
             currentWorkIds = active.map { it.id }
             workStates.clear()
@@ -134,6 +135,9 @@ class UploadViewModel @Inject constructor(
             val requests = batches.map { batch ->
                 androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
                     .addTag(UploadWorker.TAG_UPLOAD_SESSION)
+                    // 批大小随 tag 冗余一份：WorkInfo 不暴露 inputData，进程重启恢复时
+                    // ENQUEUED 批的 size 从这里解析（见 init 的 batchSizeOf）
+                    .addTag("${UploadWorker.TAG_SIZE_PREFIX}${batch.size}")
                     .setInputData(
                         androidx.work.Data.Builder()
                             .putLong(UploadWorker.KEY_FOLDER_ID, folderId)

@@ -135,6 +135,10 @@ class UploadWorker @AssistedInject constructor(
     companion object {
         /** 会话 tag：App 重启后 UploadViewModel 凭此恢复对在途批次的观察（见其 init） */
         const val TAG_UPLOAD_SESSION = "cloudbox_upload_session"
+
+        /** 批大小 tag 前缀：WorkInfo 不暴露 inputData，恢复时批大小从 tag 解析
+         *  （形如 "cloudbox_upload_session:size=50"，见 UploadViewModel.enqueueUpload） */
+        const val TAG_SIZE_PREFIX = "$TAG_UPLOAD_SESSION:size="
         const val KEY_FOLDER_ID = "folder_id"
         const val KEY_FILE_PATHS = "file_paths"
         const val KEY_SPOOF = "spoof"
