@@ -43,13 +43,15 @@ class UploadWorker @AssistedInject constructor(
         if (paths.isEmpty()) return Result.failure()
 
         val files = paths.map { File(it) }.filter { it.exists() }
-        // V5 修复：全部缓存文件丢失（如系统清理 cacheDir）时，旧逻辑会以
-        // "0 个文件全部成功"收尾 → UI 显示上传完成但实际什么都没传（假成功）。
-        // 改为把丢失文件全部计入失败名单，如实上报。
+        // V5 修复：缓存文件丢失（系统清理 cacheDir）时，旧逻辑会静默跳过丢失文件
+        // ——全丢时报"0 个全部成功"（假成功），部分丢时丢失的文件无声消失。
+        // 改为：丢失文件全部计入失败名单，如实上报（按路径精确比对，同名文件不误判）。
+        val existingPaths = files.map { it.absolutePath }.toSet()
+        val missingNames = paths.filter { it !in existingPaths }.map { File(it).name }
         if (files.isEmpty()) {
             return Result.success(
                 workDataOf(
-                    KEY_FAILED_FILES to paths.joinToString("\n") { File(it).name },
+                    KEY_FAILED_FILES to missingNames.joinToString("\n"),
                     KEY_FAILED_MESSAGE to "本地缓存文件已丢失，请重新选择后上传"
                 )
             )
@@ -119,15 +121,20 @@ class UploadWorker @AssistedInject constructor(
         // 若返回 failure，WorkManager 链式调度会把后续批次全部标 FAILED 且不执行，
         // 导致"一批失败、后续 70 个文件静默不传"的回归。
         val failed = results.filter { !it.success }
+        // V5：部分丢失的文件并入失败名单（否则无声消失）
+        val failedNames = (failed.map { it.fileName } + missingNames).distinct()
         return Result.success(
             workDataOf(
-                KEY_FAILED_FILES to failed.joinToString("\n") { it.fileName },
-                KEY_FAILED_MESSAGE to failed.firstOrNull()?.message.orEmpty()
+                KEY_FAILED_FILES to failedNames.joinToString("\n"),
+                KEY_FAILED_MESSAGE to (failed.firstOrNull()?.message
+                    ?: if (missingNames.isNotEmpty()) "部分本地缓存文件已丢失" else "").orEmpty()
             )
         )
     }
 
     companion object {
+        /** 会话 tag：App 重启后 UploadViewModel 凭此恢复对在途批次的观察（见其 init） */
+        const val TAG_UPLOAD_SESSION = "cloudbox_upload_session"
         const val KEY_FOLDER_ID = "folder_id"
         const val KEY_FILE_PATHS = "file_paths"
         const val KEY_SPOOF = "spoof"

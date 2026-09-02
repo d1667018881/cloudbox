@@ -63,6 +63,41 @@ class UploadViewModel @Inject constructor(
     private val failedAccumulator = mutableListOf<String>()
     private var globalTotal = 0
 
+    init {
+        // V5 自查修复：进程在上传中被杀后重进 App，ViewModel 重建会丢失对在途
+        // Worker 的观察——后台传完后 uploadFinished 无人发射，列表又不刷新了
+        // （正是 V5 主修缺陷的残留路径）。凭 tag 重新接管在途会话。
+        viewModelScope.launch {
+            val infos = runCatching {
+                workManager.getWorkInfosByTag(UploadWorker.TAG_UPLOAD_SESSION)
+            }.getOrDefault(emptyList())
+            val active = infos.filter { !it.state.isFinished }
+            if (active.isEmpty()) return@launch
+
+            fun batchSizeOf(info: WorkInfo): Int =
+                info.progress.getInt(UploadWorker.KEY_TOTAL, 0).takeIf { it > 0 }
+                    ?: info.inputData.getStringArray(UploadWorker.KEY_FILE_PATHS)?.size ?: 0
+
+            currentWorkIds = active.map { it.id }
+            workStates.clear()
+            failedAccumulator.clear()
+            // 已完成批（SUCCEEDED）的失败名单与文件数一并并入，进度从正确基数续算
+            val finishedInfos = infos.filter { it.state == WorkInfo.State.SUCCEEDED }
+            finishedInfos.forEach { info ->
+                info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
+                    ?.split("\n")?.filter { it.isNotBlank() }
+                    ?.let { failedAccumulator.addAll(it) }
+            }
+            val initialFinished = finishedInfos.sumOf { batchSizeOf(it) }
+            globalTotal = infos.filter { it.state != WorkInfo.State.CANCELLED }.sumOf { batchSizeOf(it) }
+
+            _uiState.update {
+                it.copy(uploading = true, progress = initialFinished, total = globalTotal, message = null)
+            }
+            observeWorks(currentWorkIds, active.map { batchSizeOf(it) }, initialFinished)
+        }
+    }
+
     /** SAF 多选入口：拷贝到缓存 → 分批 → 链式入队（folderId = 当前目录，-1 = 根） */
     fun enqueueUpload(uris: List<Uri>, folderId: Long, spoof: Boolean = true) {
         if (uris.isEmpty()) return
@@ -70,13 +105,16 @@ class UploadViewModel @Inject constructor(
             _uiState.update { it.copy(message = "已有上传任务进行中，请稍候") }
             return
         }
+        // 防重入（V5 自查修复）：先占位 uploading=true。拷贝期间（大文件可达数秒）
+        // 用户再次点上传会双会话并行，currentWorkIds 互相覆盖、进度混乱。
+        _uiState.update { it.copy(uploading = true, message = null) }
         viewModelScope.launch {
             // 大文件拷贝必须在 IO 线程（默认 viewModelScope = Main）
             val paths = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 uris.mapNotNull { copyUriToCache(it)?.absolutePath }
             }
             if (paths.isEmpty()) {
-                _uiState.update { it.copy(message = "所选文件读取失败") }
+                _uiState.update { it.copy(uploading = false, message = "所选文件读取失败") }
                 return@launch
             }
 
@@ -84,6 +122,7 @@ class UploadViewModel @Inject constructor(
             val batches = paths.chunked(50)
             val requests = batches.map { batch ->
                 androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
+                    .addTag(UploadWorker.TAG_UPLOAD_SESSION)
                     .setInputData(
                         androidx.work.Data.Builder()
                             .putLong(UploadWorker.KEY_FOLDER_ID, folderId)
@@ -120,8 +159,12 @@ class UploadViewModel @Inject constructor(
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 
     /** 观察各批次：RUNNING 更新全局进度，终态累计完成数并收集失败名单 */
-    private fun observeWorks(workIds: List<UUID>, batchSizes: List<Int>) {
-        var finishedCount = 0 // 已完成批次累计的文件数（批间串行，无并发写）
+    private fun observeWorks(
+        workIds: List<UUID>,
+        batchSizes: List<Int>,
+        initialFinished: Int = 0
+    ) {
+        var finishedCount = initialFinished // 已完成批次累计的文件数（批间串行，无并发写）
         workIds.forEachIndexed { idx, workId ->
             viewModelScope.launch {
                 workManager.getWorkInfoByIdFlow(workId).collect { info ->

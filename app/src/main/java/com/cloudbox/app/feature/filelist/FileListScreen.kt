@@ -100,9 +100,12 @@ fun FileListScreen(
         uploadViewModel.uploadFinished.collect { viewModel.refresh() }
     }
 
-    // 上传结果提示（成功/部分失败文案）
+    // 上传结果提示（消费即清，防止 Tab 切换重建 composition 时重放同一条）
     LaunchedEffect(uploadState.message) {
-        uploadState.message?.let { snackbarHostState.showSnackbar(it) }
+        uploadState.message?.let {
+            snackbarHostState.showSnackbar(it)
+            uploadViewModel.dismissMessage()
+        }
     }
 
     // 系统返回键：先退多选/上级目录
