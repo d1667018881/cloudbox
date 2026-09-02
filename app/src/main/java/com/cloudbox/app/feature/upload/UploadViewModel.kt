@@ -68,9 +68,8 @@ class UploadViewModel @Inject constructor(
         // Worker 的观察——后台传完后 uploadFinished 无人发射，列表又不刷新了
         // （正是 V5 主修缺陷的残留路径）。凭 tag 重新接管在途会话。
         viewModelScope.launch {
-            val infos = runCatching {
-                workManager.getWorkInfosByTag(UploadWorker.TAG_UPLOAD_SESSION)
-            }.getOrDefault(emptyList())
+            val infos = runCatching { workInfosByTag(UploadWorker.TAG_UPLOAD_SESSION) }
+                .getOrDefault(emptyList())
             val active = infos.filter { !it.state.isFinished }
             if (active.isEmpty()) return@launch
 
@@ -97,6 +96,18 @@ class UploadViewModel @Inject constructor(
             observeWorks(currentWorkIds, active.map { batchSizeOf(it) }, initialFinished)
         }
     }
+
+    /**
+     * WorkManager.getWorkInfosByTag 返回 ListenableFuture（KTX 无 tag 版 Flow 扩展，
+     * 只有 LiveData 版），用 suspendCancellableCoroutine 手动桥接，避免引 guava 协程依赖。
+     */
+    private suspend fun workInfosByTag(tag: String): List<WorkInfo> =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val future = workManager.getWorkInfosByTag(tag)
+            future.addListener({
+                cont.resumeWith(kotlin.runCatching { future.get() })
+            }, context.mainExecutor)
+        }
 
     /** SAF 多选入口：拷贝到缓存 → 分批 → 链式入队（folderId = 当前目录，-1 = 根） */
     fun enqueueUpload(uris: List<Uri>, folderId: Long, spoof: Boolean = true) {
