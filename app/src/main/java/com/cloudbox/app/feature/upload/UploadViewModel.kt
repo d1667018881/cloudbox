@@ -54,8 +54,9 @@ class UploadViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UploadUiState())
     val uiState: StateFlow<UploadUiState> = _uiState.asStateFlow()
 
-    /** 一次上传会话结束（不论成败）发射一次；网盘页收集后刷新当前文件夹列表 */
-    private val _uploadFinished = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** 一次上传会话结束（不论成败）发射一次；网盘页收集后刷新当前文件夹列表。
+     *  replay=1：Tab 切换瞬间完成的事件在新订阅者建立时补投一次（进入网盘页顺手刷新） */
+    private val _uploadFinished = MutableSharedFlow<Unit>(replay = 1, extraBufferCapacity = 1)
     val uploadFinished: SharedFlow<Unit> = _uploadFinished.asSharedFlow()
 
     private var currentWorkIds: List<UUID> = emptyList()
@@ -66,30 +67,40 @@ class UploadViewModel @Inject constructor(
     init {
         // V5 自查修复：进程在上传中被杀后重进 App，ViewModel 重建会丢失对在途
         // Worker 的观察——后台传完后 uploadFinished 无人发射，列表又不刷新了
-        // （正是 V5 主修缺陷的残留路径）。凭 tag 重新接管在途会话。
+        // （正是 V5 主修缺陷的残留路径）。凭固定 tag 找出全部上传批次，
+        // 再按会话 uuid 分组，只接管含未完成批的那个会话（S5：防多会话混淆）。
         viewModelScope.launch {
             val infos = runCatching { workInfosByTag(UploadWorker.TAG_UPLOAD_SESSION) }
                 .getOrDefault(emptyList())
-            val active = infos.filter { !it.state.isFinished }
-            if (active.isEmpty()) return@launch
+            if (infos.isEmpty()) return@launch
+
+            fun sessionOf(info: WorkInfo): String? =
+                info.tags.firstOrNull { it.startsWith(UploadWorker.TAG_SESSION_PREFIX) }
+                    ?.removePrefix(UploadWorker.TAG_SESSION_PREFIX)
+
+            // 含未完成批的会话（正常至多一个；旧会话已全部终态则被排除）
+            val activeSession = infos.groupBy(::sessionOf)
+                .entries.firstOrNull { (_, list) -> list.any { !it.state.isFinished } }
+                ?.value ?: return@launch
 
             fun batchSizeOf(info: WorkInfo): Int =
                 info.progress.getInt(UploadWorker.KEY_TOTAL, 0).takeIf { it > 0 }
                     ?: info.tags.firstOrNull { it.startsWith(UploadWorker.TAG_SIZE_PREFIX) }
-                        ?.removePrefix(UploadWorker.TAG_SIZE_PREFIX)?.toIntOrNull() ?: 0
+                        ?.substringAfterLast(':')?.toIntOrNull() ?: 0
 
+            val active = activeSession.filter { !it.state.isFinished }
             currentWorkIds = active.map { it.id }
             workStates.clear()
             failedAccumulator.clear()
-            // 已完成批（SUCCEEDED）的失败名单与文件数一并并入，进度从正确基数续算
-            val finishedInfos = infos.filter { it.state == WorkInfo.State.SUCCEEDED }
+            // 本次会话中已完成批（SUCCEEDED）的失败名单与文件数一并并入，进度从正确基数续算
+            val finishedInfos = activeSession.filter { it.state == WorkInfo.State.SUCCEEDED }
             finishedInfos.forEach { info ->
                 info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
                     ?.split("\n")?.filter { it.isNotBlank() }
                     ?.let { failedAccumulator.addAll(it) }
             }
             val initialFinished = finishedInfos.sumOf { batchSizeOf(it) }
-            globalTotal = infos.filter { it.state != WorkInfo.State.CANCELLED }.sumOf { batchSizeOf(it) }
+            globalTotal = activeSession.filter { it.state != WorkInfo.State.CANCELLED }.sumOf { batchSizeOf(it) }
 
             _uiState.update {
                 it.copy(uploading = true, progress = initialFinished, total = globalTotal, message = null)
@@ -130,14 +141,22 @@ class UploadViewModel @Inject constructor(
                 return@launch
             }
 
-            // WorkManager Data 序列化上限 10240 字节 → 按每批 50 个拆分链式串联
+            // WorkManager Data 序列化上限 10240 字节 → 按每批 50 个拆分链式串联。
+            // 每次入队生成独立会话 uuid（S5：多会话批次按 tag 隔离，恢复时防混淆）
+            val sessionUuid = UUID.randomUUID().toString()
             val batches = paths.chunked(50)
+            // 离线时 Worker 不跑（否则直接把"上传失败"写进名单）；联网后自动继续
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
             val requests = batches.map { batch ->
                 androidx.work.OneTimeWorkRequestBuilder<UploadWorker>()
                     .addTag(UploadWorker.TAG_UPLOAD_SESSION)
+                    .addTag(UploadWorker.TAG_SESSION_PREFIX + sessionUuid)
                     // 批大小随 tag 冗余一份：WorkInfo 不暴露 inputData，进程重启恢复时
                     // ENQUEUED 批的 size 从这里解析（见 init 的 batchSizeOf）
-                    .addTag("${UploadWorker.TAG_SIZE_PREFIX}${batch.size}")
+                    .addTag("${UploadWorker.TAG_SIZE_PREFIX}$sessionUuid:${batch.size}")
+                    .setConstraints(constraints)
                     .setInputData(
                         androidx.work.Data.Builder()
                             .putLong(UploadWorker.KEY_FOLDER_ID, folderId)
@@ -155,7 +174,15 @@ class UploadViewModel @Inject constructor(
             val continuation = requests.drop(1).fold(
                 workManager.beginWith(requests.first())
             ) { cont, req -> cont.then(req) }
-            continuation.enqueue()
+            // 入队失败（存储罕见异常）时复位 uploading，否则后续上传被永久挡死
+            runCatching { continuation.enqueue() }.onFailure { e ->
+                currentWorkIds = emptyList()
+                workStates.clear()
+                _uiState.update {
+                    it.copy(uploading = false, message = "上传任务创建失败：${e.message}")
+                }
+                return@launch
+            }
 
             _uiState.update {
                 it.copy(

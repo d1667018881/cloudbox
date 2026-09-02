@@ -133,12 +133,17 @@ class UploadWorker @AssistedInject constructor(
     }
 
     companion object {
-        /** 会话 tag：App 重启后 UploadViewModel 凭此恢复对在途批次的观察（见其 init） */
+        /** 查询 tag（固定值）：App 重启后 UploadViewModel 凭此找出全部上传批次（见其 init） */
         const val TAG_UPLOAD_SESSION = "cloudbox_upload_session"
 
+        /** 会话分组 tag 前缀：每次 enqueue 一个新 uuid，防止多会话批次互相混淆
+         *  （S5 修复：旧实现全共享一个 tag，传两批 + 杀进程后恢复会把已完成
+         *  旧会话的文件数错算进新会话的进度基数） */
+        const val TAG_SESSION_PREFIX = "cloudbox_upload_session:"
+
         /** 批大小 tag 前缀：WorkInfo 不暴露 inputData，恢复时批大小从 tag 解析
-         *  （形如 "cloudbox_upload_session:size=50"，见 UploadViewModel.enqueueUpload） */
-        const val TAG_SIZE_PREFIX = "$TAG_UPLOAD_SESSION:size="
+         *  （形如 "cloudbox_upload_size:<uuid>:<n>"，见 UploadViewModel.enqueueUpload） */
+        const val TAG_SIZE_PREFIX = "cloudbox_upload_size:"
         const val KEY_FOLDER_ID = "folder_id"
         const val KEY_FILE_PATHS = "file_paths"
         const val KEY_SPOOF = "spoof"

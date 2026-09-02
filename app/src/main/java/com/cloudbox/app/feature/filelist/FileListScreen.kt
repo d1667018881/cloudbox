@@ -108,8 +108,10 @@ fun FileListScreen(
         }
     }
 
-    // 系统返回键：先退多选/上级目录
-    androidx.activity.compose.BackHandler { viewModel.back() }
+    // 系统返回键：多选/非根目录时先退多选/上级；根目录不拦截（放行系统默认退出）
+    androidx.activity.compose.BackHandler(
+        enabled = state.selectionMode || state.folderStack.size > 1
+    ) { viewModel.back() }
 
     // 消费一次性提示
     LaunchedEffect(state.message) {

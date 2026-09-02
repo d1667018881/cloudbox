@@ -592,3 +592,21 @@ CI 验证必须看**最后一个 commit 对应 run** 的结论 + 下载日志确
 | S4 | 🟡 | Snackbar 重放：Tab 切换重建 composition，LaunchedEffect(message) 对未消费的同一 message 重放 | 消费即清（dismissMessage） |
 
 v0.1.96 起生效。修复方 = 复审 AI 本人（V5 改动的自查，方法论：对自己写的代码也按外部审查标准走查一遍——竞态/进程死亡/资源清理/重入四个面挨个过）。
+
+### 14.6 二轮自查（2026-09-03，用户"不想重复安装"，一次性清零）
+
+按里程碑全读标准重审 V4+V5 全部改动（竞态/进程死亡/资源清理/重入四面向），新增修复：
+
+| # | 级别 | 问题 | 修复 |
+|---|---|---|---|
+| S5 | 🔴 | **多会话 tag 混淆**：全部批次共享一个 tag。传两批文件 + 杀进程后，init 恢复会把已完成旧会话的文件数错算进新会话的进度基数（进度虚高/total 错乱） | 每次入队生成会话 uuid：批次带"会话 tag + 批大小 tag"，init 按会话分组、只接管含未完成批的会话 |
+| S6 | 🟠 | **返回键被吞**：BackHandler 无条件注册，根目录按返回键无反应，无法退出 App | enabled = 多选或非根目录；根目录放行系统默认行为 |
+| S7 | 🟡 | **离线上传立即报失败**：无网络约束，离线时入队即执行、直接把失败写进名单 | Worker 加 CONNECTED 约束，离线挂起等网自动续 |
+| S8 | 🟡 | **enqueue 异常卡死**：WorkManager 入队抛异常时 uploading 永久 true，后续上传全被挡 | runCatching 包裹，失败复位 uploading + 提示 |
+| S9 | 🟡 | **Tab 切换瞬间丢刷新事件**：SharedFlow 无 replay，上传恰好在离开网盘页时完成，事件丢失 | replay=1，新订阅者（重进网盘页）补投一次 |
+
+编译教训补充（上轮两连红）：无本地 SDK 环境，WorkInfo 只暴露 outputData/progress/tags/state
+（**没有 inputData**，那是 CoroutineWorker 的）；getWorkInfosByTag 返回 ListenableFuture 非 suspend。
+不确定的 API 一律先查证或从已编译通过的既有代码里找同款用法。
+
+v0.1.99 起生效。验收补充：传两批文件（第二批在第一批完成后）→ 杀进程 → 重进应只接管第二批的进度基数。
