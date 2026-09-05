@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -34,8 +35,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -44,6 +47,7 @@ import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
 import com.cloudbox.app.feature.resolve.ResolveScreen
 import com.cloudbox.app.feature.search.SearchViewModel
+import com.cloudbox.app.feature.upload.UploadScreen
 
 /**
  * 主界面：底部导航容器（网盘 / 解析 / 上传 / 我的）。
@@ -85,7 +89,9 @@ fun MainScreen(
         }
     }
 
-    // 剪贴板检测到分享链接 → 弹窗询问是否解析
+    // 剪贴板检测到分享链接 → 弹窗：解析（跳解析页）/ 获取直链（原地解析并复制）/ 忽略
+    val mainViewModel: MainViewModel = hiltViewModel()
+    val context = LocalContext.current
     if (pendingLink != null) {
         AlertDialog(
             onDismissRequest = { clipboardWatcher.dismiss() },
@@ -97,7 +103,16 @@ fun MainScreen(
                 }) { Text("解析") }
             },
             dismissButton = {
-                TextButton(onClick = { clipboardWatcher.dismiss() }) { Text("忽略") }
+                Row {
+                    TextButton(onClick = {
+                        val link = pendingLink ?: return@TextButton
+                        mainViewModel.resolveDirectLink(link) { ok, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            if (ok) clipboardWatcher.dismiss()
+                        }
+                    }) { Text("获取直链") }
+                    TextButton(onClick = { clipboardWatcher.dismiss() }) { Text("忽略") }
+                }
             }
         )
     }
@@ -120,6 +135,12 @@ fun MainScreen(
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
+                    icon = { Icon(Icons.Filled.Download, null) },
+                    label = { Text("上传") }
+                )
+                NavigationBarItem(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
                     icon = { Icon(Icons.Filled.Person, null) },
                     label = { Text("我的") }
                 )
@@ -133,7 +154,8 @@ fun MainScreen(
                     onOpenRecycle = onOpenRecycle
                 )
                 1 -> ResolveScreen(onBack = {})
-                2 -> MeTab(
+                2 -> UploadScreen(onBack = {})
+                3 -> MeTab(
                     accountName = account?.uid ?: "未登录",
                     onOpenDownload = onOpenDownload,
                     onOpenFavorites = onOpenFavorites,

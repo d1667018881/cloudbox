@@ -51,7 +51,17 @@ class UploadRepositoryImpl @Inject constructor(
                 } else {
                     file.name
                 }
-                doUpload(file, folderId, uploadName)
+                val result = doUpload(file, folderId, uploadName)
+                if (!result.success) return@runCatching result
+                // 假成功兜底：fileup.php 返回 zt=1 不代表文件真的入库（用户实测照片上传失败仍报成功）。
+                // 上传后查一次云端目录（task=5 第一页按时间倒序，刚上传的排最前），确认文件真实存在。
+                when (verifyOnCloud(folderId, uploadName)) {
+                    false -> UploadResult(
+                        uploadName, null, false,
+                        "服务器返回成功，但云端目录未找到该文件（可能未真正上传，请重试）"
+                    )
+                    else -> result // true=已确认存在 / null=列表请求失败无法确认（按成功处理，不误报）
+                }
             }.getOrElse { e ->
                 UploadResult(file.name, null, false, e.message ?: "上传失败")
             }
@@ -104,7 +114,8 @@ class UploadRepositoryImpl @Inject constructor(
             results
         }
 
-    /** 实际调用 fileup.php（suspend：Retrofit 接口是挂起函数） */
+    /** 实际调用 fileup.php（suspend：Retrofit 接口是挂起函数）。
+     *  成功判定加严：zt==1 且响应带文件 id——缺 id 视为异常响应，防止假成功。 */
     private suspend fun doUpload(file: File, folderId: Long, uploadName: String): UploadResult {
         val mediaType = "application/octet-stream".toMediaType()
         val filePart = MultipartBody.Part.createFormData(
@@ -119,12 +130,24 @@ class UploadRepositoryImpl @Inject constructor(
             name = uploadName.toRequestBody(mediaType),
             file = filePart
         )
-        return if (resp.zt == 1) {
-            UploadResult(uploadName, resp.text?.id, true)
+        val fileId = resp.text?.id
+        return if (resp.zt == 1 && !fileId.isNullOrBlank()) {
+            UploadResult(uploadName, fileId, true)
+        } else if (resp.zt == 1) {
+            UploadResult(uploadName, null, false, "服务器返回成功但未返回文件ID（疑似未真正上传）")
         } else {
             UploadResult(uploadName, null, false, resp.info ?: "上传失败（zt=${resp.zt}）")
         }
     }
+
+    /** 上传后云端确认：在目标目录第一页（按时间倒序）查找刚上传的文件。
+     *  返回 true=已确认存在；false=目录里没有（假成功）；null=列表请求失败，无法判断。
+     *  注意 task=5 列表的文件名字段是 name_all。 */
+    private suspend fun verifyOnCloud(folderId: Long, uploadName: String): Boolean? =
+        runCatching {
+            val resp = apiClient.apiService.getFileList(folderId = folderId, pg = 1)
+            resp.text?.any { it.nameAll == uploadName }
+        }.getOrNull()
 
     /** 需要伪装后缀的格式：exe/apk 等可执行/安装包（蓝奏云限制上传的格式） */
     private fun needsSpoof(file: File): Boolean {

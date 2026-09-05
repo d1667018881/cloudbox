@@ -40,9 +40,12 @@ object DomainUtils {
         return isTrustedShareHost(host)
     }
 
-    /** host 是否属于已知可信的分享/接口域名后缀 */
+    /** host 是否属于已知可信的分享/接口域名。
+     *  用正则匹配 lanzou+可选单字母变体（lanzouw.com 等全部变体，蓝奏云换域名无需改代码），
+     *  钓鱼域（lanzoucloud.com / evil-lanzou.com）结构上无法匹配，lanzous.com 由黑名单拦截。 */
     fun isTrustedShareHost(host: String): Boolean {
         val h = host.lowercase()
-        return AppConstants.TRUSTED_SHARE_HOSTS.any { h == it || h.endsWith(".$it") }
+        if (AppConstants.FORBIDDEN_DOMAINS.any { h == it || h.endsWith(".$it") }) return false
+        return AppConstants.TRUSTED_HOST_REGEX.matches(h)
     }
 }

@@ -76,7 +76,7 @@ class RemoteDomainSource @Inject constructor(
         if (!value.startsWith("https://")) return false
         if (DomainUtils.isForbidden(value)) return false
         val host = runCatching { java.net.URI(value).host }.getOrNull() ?: return false
-        // 与 AppConstants.TRUSTED_SHARE_HOSTS 统一维护，避免域名白名单分散
-        return AppConstants.TRUSTED_SHARE_HOSTS.any { host == it || host.endsWith(".$it") }
+        // 与链接识别同一套规则（lanzou 全部单字母变体 + woozooo），避免域名白名单分散
+        return DomainUtils.isTrustedShareHost(host)
     }
 }

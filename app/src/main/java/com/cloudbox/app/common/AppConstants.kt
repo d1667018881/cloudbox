@@ -25,8 +25,9 @@ object AppConstants {
     val FORBIDDEN_DOMAINS = setOf("lanzous.com", "www.lanzous.com")
 
     /** 受信任的分享/接口域名后缀（与 RemoteDomainSource.isTrustedDomain 同步维护）。
-     *  用于：1) 链接识别白名单；2) Cookie 持久化域过滤。
-     *  注意：必须是完整后缀，避免子串误判（如 evil-lanzou.com 不应被信任）。 */
+     *  用于：1) Cookie 持久化域过滤；2) 远程配置校验等需要"完整枚举"的场景。
+     *  注意：链接识别不走此枚举（蓝奏云单字母变体域名太多，枚举必漏），
+     *  统一走 [TRUSTED_HOST_REGEX]（见 DomainUtils.isTrustedShareHost）。 */
     val TRUSTED_SHARE_HOSTS = setOf(
         "woozooo.com",
         "lanzou.com",
@@ -38,29 +39,21 @@ object AppConstants {
         "lanzouu.com"
     )
 
-    /** 识别"分享链接"的正则：限定为已知蓝奏云/woozooo 域名，防止匹配钓鱼域
-     *  （如 lanzoucloud.com）。实际判定仍结合 DomainUtils.isTrustedShareHost 后缀校验。 */
+    /** 受信任 host 匹配正则：lanzou + 可选单个字母后缀（lanzouw/lanzouq/lanzoum 等
+     *  全部单字母变体均覆盖，蓝奏云换域名无需改代码）+ 多级子域 + woozooo.com。
+     *  钓鱼域天然排除：lanzoucloud.com / evil-lanzou.com 等"lanzou 后跟多字母"的域
+     *  无法匹配（[a-z]? 最多 1 个字母且必须紧跟 .com）。lanzous.com 由黑名单单独拦截。 */
+    val TRUSTED_HOST_REGEX = Regex("""^(?:[a-z0-9-]+\.)*(?:lanzou[a-z]?|woozooo)\.com$""")
+
+    /** 识别"分享链接"的正则：lanzou + 可选单字母变体域名（覆盖全部已知/未来变体），
+     *  防钓鱼域结构上排除（同 TRUSTED_HOST_REGEX 说明）。实际判定仍结合
+     *  DomainUtils.isTrustedShareHost 二次校验。 */
     val SHARE_URL_REGEX = Regex(
-        """https?://(?:[a-z0-9-]+\.)?(?:lanzou[ioxphu]?|woozooo)\.(?:com|cn)/[a-zA-Z0-9]+/?"""
+        """https?://(?:[a-z0-9-]+\.)*(?:lanzou[a-z]?|woozooo)\.com/[a-zA-Z0-9]+/?"""
     )
 
     /** 从 URL 中提取分享 ID（最后一层路径段，如 lanzou.com/i5g8y1a 的 i5g8y1a） */
     val SHARE_ID_REGEX = Regex("""/([a-zA-Z0-9]+)/?$""")
-
-    /** 统一账号中心（2026-08-31 实测：login.php 已在 pc/up.woozooo.com 双双下线 404，
-     *  蓝奏云将登录迁移至此并叠加 acw_sc__v2 挑战；协议规格见 CODE_REVIEW_V4_LOGIN.md）。
-     *  该 host 为固定域名，不走 LanzouDomainInterceptor 重写（拦截器只重写占位 host 请求）。 */
-    const val ACCOUNT_CENTER_BASE = "https://accounts.woozooo.com"
-
-    /** 账号中心登录页（GET 触发 acw 挑战；POST task=uselogin 提交凭证）。
-     *  ref 参数决定登录成功后中转跳转的目标站（pc = 网盘管理端，凭证 phpdisk_info 落在该域）。 */
-    const val ACCOUNT_CENTER_LOGIN_URL = "$ACCOUNT_CENTER_BASE/accounts.php?action=login&ref=pc.woozooo.com"
-
-    /** 登录 AJAX 提交端点（页面 JS：var task ='uselogin'） */
-    const val ACCOUNT_CENTER_SUBMIT_URL = "$ACCOUNT_CENTER_BASE/accounts.php"
-
-    /** 登录成功后中转鉴权回跳的目标站（作为 ref 参数值） */
-    const val ACCOUNT_CENTER_REF_HOST = "pc.woozooo.com"
 
     /** 超时（毫秒）：需求规格要求 30s */
     const val TIMEOUT_CONNECT_MS = 30_000L

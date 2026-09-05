@@ -1,6 +1,6 @@
 package com.cloudbox.app.core.data.remote
 
-import com.cloudbox.app.common.AppConstants
+import com.cloudbox.app.common.DomainUtils
 import com.cloudbox.app.core.data.local.secure.AccountSecureStore
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -113,10 +113,11 @@ class CookiePersistenceJar @Inject constructor(
         }
     }
 
-    /** 校验 Cookie 的 domain 是否属于已知可信域（后缀匹配），避免持久化恶意域 Cookie */
+    /** 校验 Cookie 的 domain 是否属于已知可信域（与链接识别同一套规则，
+     *  覆盖 lanzou 全部单字母变体域名，避免新变体域名的 Cookie 被误丢导致登录态失效） */
     private fun isTrustedCookieDomain(domain: String): Boolean {
         val d = domain.removePrefix(".").lowercase()
-        return AppConstants.TRUSTED_SHARE_HOSTS.any { d == it || d.endsWith(".$it") }
+        return DomainUtils.isTrustedShareHost(d)
     }
 
     private fun addCookieLocked(cookie: Cookie) {
