@@ -24,6 +24,25 @@ object AppConstants {
     /** 直链域黑名单：lanzous.com 已被第三方抢注（解析到不良站点），必须拦截 */
     val FORBIDDEN_DOMAINS = setOf("lanzous.com", "www.lanzous.com")
 
+    // ==================== 账号中心（V4 登录协议） ====================
+    // login.php 已于 2026-08-31 实测下线（pc/up.woozooo.com 404），登录统一走账号中心。
+    // 协议（AuthRepositoryImpl KDoc 有完整流程）：GET 登录页解 acw_sc__v2 挑战 →
+    // POST 同一 URL（task=uselogin&username&password&ref=pc.woozooo.com，AJAX 头）→
+    // zt=1 时 msgs 为中转鉴权 URL → GET 它收集 phpdisk_info Cookie。
+
+    /** 账号中心登录页（GET 入口，同时是 POST 提交目标） */
+    const val ACCOUNT_CENTER_LOGIN_URL =
+        "https://accounts.woozooo.com/accounts.php?action=login&ref=pc.woozooo.com"
+
+    /** 凭证 AJAX 提交地址（与登录页同 URL；独立常量便于日后分离时不混淆语义） */
+    const val ACCOUNT_CENTER_SUBMIT_URL = ACCOUNT_CENTER_LOGIN_URL
+
+    /** 提交 form 中 ref 字段的值（页面 JS 实证：ref=pc.woozooo.com） */
+    const val ACCOUNT_CENTER_REF_HOST = "pc.woozooo.com"
+
+    /** 账号中心根地址（挑战 Cookie 写域时取 host 用） */
+    const val ACCOUNT_CENTER_BASE = "https://accounts.woozooo.com"
+
     /** 受信任的分享/接口域名后缀（与 RemoteDomainSource.isTrustedDomain 同步维护）。
      *  用于：1) Cookie 持久化域过滤；2) 远程配置校验等需要"完整枚举"的场景。
      *  注意：链接识别不走此枚举（蓝奏云单字母变体域名太多，枚举必漏），
