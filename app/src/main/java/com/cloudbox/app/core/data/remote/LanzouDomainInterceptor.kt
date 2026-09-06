@@ -62,12 +62,12 @@ class LanzouDomainInterceptor @Inject constructor() : Interceptor {
         val path = url.encodedPath
 
         // 角色判定（顺序敏感）：
-        // 1. 上传接口 → uploadServer
+        // 1. 上传接口（V6：html5up.php 替代已下线的 fileup.php）→ uploadServer
         // 2. 直链解析 ajaxm.php → shareBase（ajaxm 部署在分享域上）
         // 3. 其余 .php 管理接口 → diskMain
         // 4. 分享页 HTML → shareBase
         val targetBase = when {
-            path.contains("/fileup.php") -> config.uploadServer
+            path.contains("/html5up.php") || path.contains("/fileup.php") -> config.uploadServer
             path.contains("/ajaxm.php") -> config.shareBase
             path.endsWith(".php") -> config.diskMain
             else -> config.shareBase

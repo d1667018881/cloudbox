@@ -53,14 +53,25 @@ class UploadRepositoryImpl @Inject constructor(
                 }
                 val result = doUpload(file, folderId, uploadName)
                 if (!result.success) return@runCatching result
-                // 假成功兜底：fileup.php 返回 zt=1 不代表文件真的入库（用户实测照片上传失败仍报成功）。
-                // 上传后查一次云端目录（task=5 第一页按时间倒序，刚上传的排最前），确认文件真实存在。
-                when (verifyOnCloud(folderId, uploadName)) {
+                // 假成功兜底：接口返回 zt=1 不代表文件真的入库（用户实测照片上传失败仍报成功）。
+                // 上传后查一次云端目录（task=5 第一页按时间倒序，刚上传的排最前）确认文件真实存在。
+                // V6 收紧：确认请求失败（null）时重试一次；仍失败则成功但明确提示"未确认"，
+                // 不再静默放行（旧版 null 直接按成功处理 = 假成功漏洞）。
+                var verified = verifyOnCloud(folderId, uploadName)
+                if (verified == null) {
+                    delay(1_500)
+                    verified = verifyOnCloud(folderId, uploadName)
+                }
+                when (verified) {
                     false -> UploadResult(
                         uploadName, null, false,
                         "服务器返回成功，但云端目录未找到该文件（可能未真正上传，请重试）"
                     )
-                    else -> result // true=已确认存在 / null=列表请求失败无法确认（按成功处理，不误报）
+                    true -> result
+                    null -> UploadResult(
+                        uploadName, result.fileId, true,
+                        "上传完成（云端确认超时，请稍后在文件列表核实）"
+                    )
                 }
             }.getOrElse { e ->
                 UploadResult(file.name, null, false, e.message ?: "上传失败")
@@ -114,13 +125,20 @@ class UploadRepositoryImpl @Inject constructor(
             results
         }
 
-    /** 实际调用 fileup.php（suspend：Retrofit 接口是挂起函数）。
-     *  成功判定加严：zt==1 且响应带文件 id——缺 id 视为异常响应，防止假成功。 */
+    /** 实际调用 html5up.php（V6：fileup.php 已于 2026-09 实测 404 下线）。
+     *  成功判定：zt==1 且 text 数组带文件 id——缺 id 视为异常响应，防止假成功。
+     *  zt==9 表示登录态失效（"login not"），把服务端文案透出给用户。 */
     private suspend fun doUpload(file: File, folderId: Long, uploadName: String): UploadResult {
         val mediaType = "application/octet-stream".toMediaType()
         val filePart = MultipartBody.Part.createFormData(
             "upload_file", uploadName, file.asRequestBody(mediaType)
         )
+        // 浏览器 File 对象元数据（html5up 时代新增字段，模拟网页上传行为）
+        val mime = mimeOf(uploadName)
+        val lastModified = java.text.SimpleDateFormat(
+            "EEE MMM dd yyyy HH:mm:ss 'GMT'Z (z)", java.util.Locale.ENGLISH
+        ).format(java.util.Date())
+
         val resp = apiClient.apiService.upload(
             task = "1".toRequestBody(mediaType),
             vie = "2".toRequestBody(mediaType),
@@ -128,16 +146,32 @@ class UploadRepositoryImpl @Inject constructor(
             id = "WU_FILE_0".toRequestBody(mediaType),
             folderId = folderId.toString().toRequestBody(mediaType),
             name = uploadName.toRequestBody(mediaType),
+            type = mime.toRequestBody(mediaType),
+            lastModifiedDate = lastModified.toRequestBody(mediaType),
             file = filePart
         )
-        val fileId = resp.text?.id
-        return if (resp.zt == 1 && !fileId.isNullOrBlank()) {
-            UploadResult(uploadName, fileId, true)
-        } else if (resp.zt == 1) {
-            UploadResult(uploadName, null, false, "服务器返回成功但未返回文件ID（疑似未真正上传）")
-        } else {
-            UploadResult(uploadName, null, false, resp.info ?: "上传失败（zt=${resp.zt}）")
+        // V6：text 为数组 [{id,name,...}]；未登录时为字符串 "error"
+        val fileId: String? = (resp.text as? List<*>)
+            ?.firstOrNull()
+            ?.let { entry -> (entry as? Map<*, *>)?.get("id")?.toString() }
+        return when {
+            resp.zt == 1 && !fileId.isNullOrBlank() ->
+                UploadResult(uploadName, fileId, true)
+            resp.zt == 1 ->
+                UploadResult(uploadName, null, false, "服务器返回成功但未返回文件ID（疑似未真正上传）")
+            else ->
+                UploadResult(uploadName, null, false,
+                    resp.info?.let { if (it.contains("login", true)) "登录态已失效，请重新登录（$it）" else it }
+                        ?: "上传失败（zt=${resp.zt}）")
         }
+    }
+
+    /** 按扩展名取 MIME（html5up 的 type 字段；模拟浏览器 File.type） */
+    private fun mimeOf(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext.isBlank()) return "application/octet-stream"
+        return android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(ext) ?: "application/octet-stream"
     }
 
     /** 上传后云端确认：在目标目录第一页（按时间倒序）查找刚上传的文件。

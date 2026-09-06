@@ -78,10 +78,13 @@ data class ShareInfoDto(
     @SerializedName("onof") val onof: String? = null
 )
 
-/** 上传响应：{"zt":1, "text":{"id": 文件ID}} */
+/** 上传响应。
+ *  成功：{"zt":1, "text":[{id, name, time, size, icon, downs}]}（text 为对象数组）
+ *  未登录：{"zt":9, "info":"login not", "text":"error"}（text 为字符串）
+ *  旧 fileup.php 时代 text 为单对象；html5up.php（V6）为数组。用 Any? 兼容两种形态。 */
 data class UploadResponse(
     @SerializedName("zt") val zt: Int,
-    @SerializedName("text") val text: UploadTextDto? = null,
+    @SerializedName("text") val text: Any? = null,
     @SerializedName("info") val info: String? = null
 )
 

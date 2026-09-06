@@ -209,12 +209,15 @@ interface LanzouApiService {
     // ==================== 上传 ====================
 
     /**
-     * 上传文件（fileup.php，multipart）。
-     * 参数与需求规格差异：源码（2025）实际参数名是 folder_id_bb_n 而非 folder_id，
-     * 且必带 vie=2/ve=2/id=WU_FILE_0/name。按源码实现。
+     * 上传文件（html5up.php，multipart）。
+     * V6 协议迁移（2026-09 实测）：旧 fileup.php 已下线（pc/up.woozooo.com 均 404），
+     * 网页端现走 html5up.php（HTML5 上传入口）。新增字段 type（MIME）与
+     * lastModifiedDate（浏览器 File 对象元数据，服务端不严格校验但需携带）。
+     * 响应成功形态：{"zt":1,"text":[{id,name,time,size,icon,downs}]}（text 为数组）；
+     * 未登录：{"zt":9,"info":"login not"}。
      */
     @Multipart
-    @POST("fileup.php")
+    @POST("html5up.php")
     suspend fun upload(
         @Part("task") task: RequestBody,
         @Part("vie") vie: RequestBody,
@@ -222,6 +225,8 @@ interface LanzouApiService {
         @Part("id") id: RequestBody,
         @Part("folder_id_bb_n") folderId: RequestBody,
         @Part("name") name: RequestBody,
+        @Part("type") type: RequestBody,
+        @Part("lastModifiedDate") lastModifiedDate: RequestBody,
         @Part file: MultipartBody.Part
     ): UploadResponse
 
