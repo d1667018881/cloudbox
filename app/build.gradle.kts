@@ -30,13 +30,22 @@ android {
     // 为什么 debug 也用正式密钥：保证"本地构建 / CI 构建 / 不同构建类型"产物签名一致，
     // 任意两者之间都能覆盖安装，不会出现"签名不一致，需要先卸载"。
     // 密码由环境变量 KEYSTORE_PASSWORD 注入（CI 从 GitHub Secrets 读取，仓库内不留明文）。
-    val keystorePassword = System.getenv("KEYSTORE_PASSWORD") ?: "change-me"
+    //
+    // 缺失时**不报错，回退到 AGP 默认的 debug keystore**（不指定 storeFile 即默认行为）：
+    // 仓库内的 cloudbox-release.keystore 密码并不是源码里的占位值，任何没配该环境变量的
+    // 环境（含 GitHub Actions 默认环境）签名都会直接失败 → 整个构建挂掉。
+    // 回退后：APK 一定能构建出来（CI 可验证编译与功能），代价是签名与正式密钥不同，
+    // 无法覆盖安装此前用正式密钥签名的旧包（需先卸载）。
+    // 要恢复正式签名：GitHub 仓库 Settings → Secrets 配 KEYSTORE_PASSWORD 即可，无需改代码。
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
     signingConfigs {
         create("release") {
-            storeFile = file("keystore/cloudbox-release.keystore")
-            storePassword = keystorePassword
-            keyAlias = "cloudbox"
-            keyPassword = keystorePassword
+            if (keystorePassword != null) {
+                storeFile = file("keystore/cloudbox-release.keystore")
+                storePassword = keystorePassword
+                keyAlias = "cloudbox"
+                keyPassword = keystorePassword
+            }
         }
     }
 
