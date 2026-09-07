@@ -58,15 +58,19 @@ interface LanzouApiService {
     ): FileListResponse
 
     /**
-     * 子文件夹列表（task=47，URL 带 uid）。
+     * 子文件夹列表（task=47）。
      * 响应兼容 text[{fol_id,name,onof}] 与 info[{folderid,name}] 两种形态。
+     *
+     * URL 上的 `?uid=<数字 uid>` 由 [LanzouUidInterceptor] 统一注入（原版 App 所有
+     * doupload.php 请求都带它，见 home_func.lua:2463 的 uid后缀）。
+     * 早前版本曾在此处传"登录账号名"——那是错的（原版传的是网盘数字 uid），
+     * 服务端解析失败会导致子文件夹列表为空。
      */
     @FormUrlEncoded
     @POST("doupload.php")
     suspend fun getDirList(
         @Field("task") task: Int = 47,
-        @Field("folder_id") folderId: Long,
-        @Query("uid") uid: String? = null
+        @Field("folder_id") folderId: Long
     ): DirListResponse
 
     /**

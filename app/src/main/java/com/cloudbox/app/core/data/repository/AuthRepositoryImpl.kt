@@ -23,8 +23,13 @@ import javax.inject.Singleton
 /**
  * 认证仓库实现。
  *
- * 登录流程（V4 修复：login.php 已于 2026-08-31 实测下线，pc/up.woozooo.com 均 404，
- * 旧 LanZouCloud-API 的 account.php 入口也已被 JS 跳转壳替代。现行协议，全部实测验证）：
+ * 登录流程（V7 改版）：
+ * 【主通道】原版 App 协议（逆向 login.lua:273，2026-09-07 实测存活）
+ *   1. GET  https://pc.woozooo.com/mlogin.php          （建会话，服务端下发 PHPSESSID）
+ *   2. POST 同 URL，form: task=3&uid&pwd&setSessionId=&setSig=&setScene=&setToken=&formhash=
+ *   3. 响应 {"zt":1,...} 成功（凭证在 Set-Cookie）/ {"zt":0,"info":"没有用户"} 失败
+ *   4. 成功判定 = CookieJar.isLoggedIn()（phpdisk_info 到手）
+ * 【回落通道】仅在主通道不可用（非账号密码错误）时走账号中心 accounts.php：
  * 1. GET accounts.woozooo.com/accounts.php?action=login&ref=pc.woozooo.com
  *    —— 首次访问返回 acw_sc__v2 JS 挑战页（var arg1='…'），本地计算挑战值
  *    写入 CookieJar 后重 GET（[AcwScV2]，算法与 LanZouCloud-API 原版逐行一致）
@@ -71,7 +76,119 @@ class AuthRepositoryImpl @Inject constructor(
             accountStore.setCurrentUid(uid)
             cookieJar.switchAccount(uid)
             try {
-                // V4：登录迁移到统一账号中心（login.php 已实测下线，协议见类 KDoc）
+                // V7 主通道：原版 mlogin.php（task=3，2026-09-07 实测存活）
+                when (val outcome = loginViaMlogin(uid, pwd)) {
+                    is MloginOutcome.Ok -> {
+                        fetchCloudUid(uid)
+                        if (rememberPwd) accountStore.savePassword(uid, pwd)
+                        accountStore.touchActive(uid)
+                        _currentAccount.value = outcome.info
+                        LoginResult.Success(outcome.info)
+                    }
+                    is MloginOutcome.Rejected -> {
+                        // 服务端明确拒绝（账号不存在 / 密码错误）：不必再试回落通道
+                        rollbackTo(prevUid, uid)
+                        LoginResult.Failure(outcome.reason)
+                    }
+                    is MloginOutcome.Unavailable -> {
+                        // 主通道不可用（端点变更 / 被挑战页拦截 / 未下发凭证）→ 回落账号中心
+                        loginViaAccountCenter(uid, pwd, rememberPwd, prevUid)
+                    }
+                }
+            } catch (e: Exception) {
+                rollbackTo(prevUid, uid)
+                LoginResult.Failure(e.message ?: "网络异常")
+            }
+        }
+
+    /**
+     * 原版登录协议（逆向 login.lua:273 / home_func.lua:891，2026-09-07 实测有效）：
+     *   ① GET  pc.woozooo.com/mlogin.php          → 服务端下发 PHPSESSID
+     *   ② POST 同 URL，form: task=3&uid=&pwd=&setSessionId=&setSig=&setScene=&setToken=&formhash=
+     *   ③ 响应 JSON：zt=1 成功（凭证在响应头 Set-Cookie，原版取回调第三参 a3）；
+     *      zt=0 时 info 为中文原因（实测 "没有用户"）。
+     *
+     * 为什么改回原版通道：账号中心 accounts.php 长期返回 acw_sc__v2 挑战页，
+     * 解完挑战仍可能停留在挑战页，登录拿不到 phpdisk_info —— 表现为"能登录进
+     * 网盘界面但上传永远失败（zt=9 login not）"。
+     */
+    private fun loginViaMlogin(username: String, password: String): MloginOutcome {
+        val url = AppConstants.MLOGIN_URL
+        return try {
+            // ① 建会话
+            runCatching {
+                apiClient.okHttpClient.newCall(
+                    Request.Builder().url(url).header("User-Agent", AppConstants.DESKTOP_UA).build()
+                ).execute().close()
+            }
+            // ② 提交凭证（密码为明文，与原版一致——原版未做 md5）
+            val form = FormBody.Builder()
+                .add("task", "3")
+                .add("uid", username)
+                .add("pwd", password)
+                .add("setSessionId", "")
+                .add("setSig", "")
+                .add("setScene", "")
+                .add("setToken", "")
+                .add("formhash", "")
+                .build()
+            val body = apiClient.okHttpClient.newCall(
+                Request.Builder()
+                    .url(url)
+                    .header("User-Agent", AppConstants.DESKTOP_UA)
+                    .header("Referer", url)
+                    .post(form)
+                    .build()
+            ).execute().use { it.body?.string().orEmpty() }
+
+            val json = runCatching { JSONObject(body) }.getOrNull()
+                ?: return MloginOutcome.Unavailable("mlogin 未返回 JSON（端点可能已变更）")
+
+            if (json.optInt("zt") == 1) {
+                // 凭证由响应头 Set-Cookie 下发，OkHttp CookieJar 已自动收集。
+                // 极少数情况 POST 只回 zt=1 而不带 phpdisk_info：补一次网盘首页请求兜底。
+                if (!cookieJar.isLoggedIn()) {
+                    runCatching {
+                        apiClient.okHttpClient.newCall(
+                            Request.Builder()
+                                .url("${AppConstants.PC_WOOZOOO}/mydisk.php?item=files&action=index")
+                                .header("User-Agent", AppConstants.DESKTOP_UA)
+                                .build()
+                        ).execute().close()
+                    }
+                }
+                if (cookieJar.isLoggedIn()) {
+                    MloginOutcome.Ok(accountStore.accountInfo(username))
+                } else {
+                    MloginOutcome.Unavailable("mlogin 返回成功但未取得 phpdisk_info")
+                }
+            } else {
+                MloginOutcome.Rejected(json.optString("info").ifBlank { "登录失败" })
+            }
+        } catch (e: Exception) {
+            MloginOutcome.Unavailable(e.message ?: "网络异常")
+        }
+    }
+
+    /** 登录主通道的三种结局（区分"账号密码错"与"协议不可用"，决定是否回落） */
+    private sealed class MloginOutcome {
+        data class Ok(val info: AccountInfo) : MloginOutcome()
+        data class Rejected(val reason: String) : MloginOutcome()
+        data class Unavailable(val reason: String) : MloginOutcome()
+    }
+
+    /**
+     * 回落通道：账号中心 accounts.woozooo.com（task=uselogin + acw_sc__v2）。
+     * 仅在主通道 [loginViaMlogin] 返回 [MloginOutcome.Unavailable] 时调用。
+     */
+    private suspend fun loginViaAccountCenter(
+        uid: String,
+        pwd: String,
+        rememberPwd: Boolean,
+        prevUid: String?
+    ): LoginResult = withContext(Dispatchers.IO) {
+        try {
+            // V4：登录迁移到统一账号中心（login.php 已实测下线，协议见类 KDoc）
                 // ① 打开登录页：首次访问触发 acw_sc__v2 挑战，helper 内部自动解挑战重试
                 getWithAcwChallenge(AppConstants.ACCOUNT_CENTER_LOGIN_URL)
                 // ② AJAX 提交凭证（挑战 cookie 过期时 helper 自动解挑战重试一次）
@@ -87,6 +204,7 @@ class AuthRepositoryImpl @Inject constructor(
                             getWithAcwChallenge(relayUrl)
                         }
                         if (cookieJar.isLoggedIn()) {
+                            fetchCloudUid(uid)
                             if (rememberPwd) accountStore.savePassword(uid, pwd)
                             accountStore.touchActive(uid)
                             val info = accountStore.accountInfo(uid)
@@ -140,6 +258,28 @@ class AuthRepositoryImpl @Inject constructor(
     private fun httpGet(url: String): String =
         apiClient.okHttpClient.newCall(Request.Builder().url(url).build()).execute()
             .use { it.body?.string().orEmpty() }
+
+    /**
+     * 登录后提取网盘【数字 uid】并落盘（原版 home_func.lua:2372：
+     * `uid后缀 = "?uid=" .. 页面里匹配到的 index&u=(.-)'`）。
+     *
+     * 该 uid 会被 [com.cloudbox.app.core.data.remote.LanzouUidInterceptor] 拼到所有
+     * doupload.php 请求上。取不到不影响登录结果——拦截器在无 uid 时原样放行。
+     */
+    private fun fetchCloudUid(uid: String) {
+        val html = runCatching {
+            apiClient.okHttpClient.newCall(
+                Request.Builder()
+                    .url("${AppConstants.PC_WOOZOOO}/mydisk.php")
+                    .header("User-Agent", AppConstants.DESKTOP_UA)
+                    .build()
+            ).execute().use { it.body?.string().orEmpty() }
+        }.getOrNull() ?: return
+        val cloudUid = Regex("""index&u=(\d+)""").find(html)?.groupValues?.get(1)
+            ?: Regex("""[?&]u=(\d+)""").find(html)?.groupValues?.get(1)
+            ?: return
+        accountStore.saveCloudUid(uid, cloudUid)
+    }
 
     private fun httpPostLogin(username: String, password: String): String {
         val form = FormBody.Builder()
@@ -208,6 +348,7 @@ class AuthRepositoryImpl @Inject constructor(
             // 直接把导入的 Cookie 文本落盘（不走 Cookie.parse，保持原样）
             accountStore.saveCookies(uid, lines)
             cookieJar.switchAccount(uid) // 重新加载
+            fetchCloudUid(uid) // Cookie 导入路径同样要拿数字 uid（否则 doupload 缺 ?uid=）
             val info = accountStore.accountInfo(uid)
             _currentAccount.value = info
             LoginResult.Success(info)

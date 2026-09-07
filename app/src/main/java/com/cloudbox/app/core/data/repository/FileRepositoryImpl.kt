@@ -68,12 +68,12 @@ class FileRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             runCatching {
                 val uid = accountStore.currentUid() ?: throw ApiError.CookieExpired("未登录")
-                // 1) 子文件夹（task=47，URL 带 uid）
+                // 1) 子文件夹（task=47；URL 上的 ?uid= 由 LanzouUidInterceptor 注入）
                 // V5 修复：只解析 text。旧代码额外把响应的 info 映射成文件夹（"兼容两种形态"），
                 // 但参考实现（LanZouCloud-API get_dir_list）只读 text——info 实为接口的
                 // 元信息字段，映射成文件夹会注入服务端并不存在的"幽灵文件夹"
                 // （用户实测：进入二级目录后一级目录名仍出现在列表里，实际并无该文件夹）。
-                val dirsResp = api.getDirList(folderId = folderId, uid = uid)
+                val dirsResp = api.getDirList(folderId = folderId)
                 // 用 .dirs / .items 访问器而不是 .text：服务端在空目录/最后一页会
                 // 把数组字段换成字符串 "no file"（见 Dtos.kt 顶部说明）
                 val folders = dirsResp.dirs.map {

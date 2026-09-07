@@ -737,3 +737,83 @@ curl -sk -X POST "https://<域>/ajaxfile.php?file=<fid>" -d "action=downprocess&
 
 首次编译若有报错，优先怀疑：`Dtos.kt` 访问器用法、`HtmlExtractor` 正则转义、
 `WebViewUploadActivity` 的 Compose 导入。
+
+## 16. 登录主通道回归原版 mlogin.php + 数字 uid（2026-09-07，逆向 + 实测）
+
+### 16.1 为什么改：原"上传不上"的根因不在上传，在登录
+
+排查顺序反过来推的：上传接口 `pc.woozooo.com/html5up.php` 实测返回
+`{"zt":9,"info":"login not","text":"error"}`，而旧端点 `fileup.php` 已 404。
+也就是说**只要没拿到 phpdisk_info，上传 100% 失败**——旧版恰好没校验 zt，
+于是"上传失败但显示成功"。
+
+而登录此前走的是账号中心 `accounts.woozooo.com/accounts.php`：
+实测（Python 复刻 acw 算法、带 cookie 重放）**解完 acw_sc__v2 挑战后仍是挑战页**，
+永远拿不到 phpdisk_info。这就是"登录界面能进、上传永远不行"的完整因果链。
+
+### 16.2 原版真实协议（逆向 login.lua:273 / home_func.lua:891，已实测）
+
+```
+① GET  https://pc.woozooo.com/mlogin.php            → 服务端下发 PHPSESSID
+② POST https://pc.woozooo.com/mlogin.php
+       form: task=3&uid=<账号>&pwd=<明文密码>&setSessionId=&setSig=&setScene=&setToken=&formhash=
+③ 响应 JSON:{"zt":1,...} 成功 / {"zt":0,"info":"没有用户","id":null} 失败
+④ 成功凭证在响应头 Set-Cookie（原版取 Http 回调第三参 a3 存 设置.cookie）
+```
+
+实测记录（2026-09-07，假账号）：
+`POST mlogin.php` → `{"zt":0,"info":"没有用户","id":null}`
+说明端点存活、字段名是 **info**（不是账号中心的 msgs）、密码是**明文**（原版未做 md5）。
+
+实现：主通道 `loginViaMlogin()`，账号中心降级为回落；用 `MloginOutcome`
+区分"账号密码错"（直接报错，不重试）与"协议不可用"（才回落）。
+
+### 16.3 数字 uid：doupload.php 必须带 ?uid=
+
+原版 home_func.lua:2463 里所有管理请求都拼 `uid后缀`：
+
+```lua
+uid后缀 = "?uid=" .. 首页HTML:match("index&u=(.-)'")   -- home_func.lua:2372
+Http.post(domain .. "/doupload.php" .. uid后缀, "task=47&folder_id=-1&pg=1", ...)
+```
+
+这是服务端分配的**数字 uid**（如 1702063），**不是登录账号名**。
+本项目早前在 `getDirList` 上把"登录账号名"当 uid 传，服务端解析不了 → 子文件夹列表空。
+
+修法：
+- 登录后 `fetchCloudUid()`：GET `mydisk.php`，正则 `index&u=(\d+)` 提取，存 `cloud_uid_<uid>`
+- 新增 `LanzouUidInterceptor`：只对 `doupload.php` 生效，无 uid 查询参数时自动注入；
+  取不到就原样放行（接口在无 uid 时仍可能工作，不阻断）
+- `getDirList` 的 `@Query("uid")` 参数删除（改由拦截器统一注入，避免重复/传错）
+
+### 16.4 本轮改动文件
+
+| 文件 | 改动 |
+|---|---|
+| `common/AppConstants.kt` | 新增 `PC_WOOZOOO` / `MLOGIN_URL`，注释改为主通道=mlogin |
+| `repository/AuthRepositoryImpl.kt` | 新增 `loginViaMlogin()` + `MloginOutcome` + `fetchCloudUid()`；原登录改名 `loginViaAccountCenter()` 作回落 |
+| `remote/LanzouUidInterceptor.kt` | **新建**，`doupload.php` 自动注入 `?uid=` |
+| `remote/LanzouApiClient.kt` | 注册 uid 拦截器（Referer 之后、域名重写之前） |
+| `remote/LanzouApiService.kt` | `getDirList` 去掉 uid 形参 |
+| `repository/FileRepositoryImpl.kt` | `getDirList` 调用去掉 `uid = uid` |
+| `local/secure/AccountSecureStore.kt` | 新增 `saveCloudUid/cloudUid`，`removeUid` 一并清理 |
+
+### 16.5 自查命令（协议再变时照抄）
+
+```bash
+# 1) 登录端点是否还活着（假账号应回 zt=0 + 中文原因）
+curl -s -A "Mozilla/5.0 ... Chrome/120" \
+  -X POST https://pc.woozooo.com/mlogin.php \
+  --data "task=3&uid=xxx&pwd=yyy&setSessionId=&setSig=&setScene=&setToken=&formhash="
+
+# 2) 上传端点是否还活着（未登录应回 zt=9 login not）
+curl -s -A "Mozilla/5.0 ... Chrome/120" \
+  -e "https://pc.woozooo.com/mydisk.php?item=files&action=index" \
+  -F "task=1" -F "upload_file=@a.txt" https://pc.woozooo.com/html5up.php
+
+# 3) 数字 uid 是否还能提取（登录后带 cookie）
+curl -s -b cookies.txt https://pc.woozooo.com/mydisk.php | grep -o "index&u=[0-9]*"
+```
+
+若 1) 返回 HTML 而非 JSON → mlogin 已下线，删除主通道改走账号中心；
+若 2) 返回 404 → 上传端点又换了，抓网页版上传页的 form action。

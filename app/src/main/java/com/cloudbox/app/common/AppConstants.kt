@@ -24,8 +24,22 @@ object AppConstants {
     /** 直链域黑名单：lanzous.com 已被第三方抢注（解析到不良站点），必须拦截 */
     val FORBIDDEN_DOMAINS = setOf("lanzous.com", "www.lanzous.com")
 
-    // ==================== 账号中心（V4 登录协议） ====================
-    // login.php 已于 2026-08-31 实测下线（pc/up.woozooo.com 404），登录统一走账号中心。
+    // ==================== 登录协议（V7：主通道改回原版 mlogin.php） ====================
+    // 2026-09-07 实测：原版 App（逆向 login.lua:273 / home_func.lua:891）走的是
+    //   GET  https://pc.woozooo.com/mlogin.php
+    //   POST https://pc.woozooo.com/mlogin.php
+    //        task=3&uid=<账号>&pwd=<密码>&setSessionId=&setSig=&setScene=&setToken=&formhash=
+    //   响应 JSON {"zt":1,...} / {"zt":0,"info":"没有用户"}，Cookie 由响应头 Set-Cookie 下发。
+    // 实测结果：端点存活且返回规范 JSON（假账号返回 {"zt":0,"info":"没有用户","id":null}）。
+    // 因此把它作为【主通道】；账号中心 accounts.php 作为【回落通道】保留。
+
+    /** 网盘主域（原版 设置.domain_name = "pc.woozooo.com"，见 home_func.lua:1194） */
+    const val PC_WOOZOOO = "https://pc.woozooo.com"
+
+    /** 原版登录端点（task=3 用户名密码登录） */
+    const val MLOGIN_URL = "$PC_WOOZOOO/mlogin.php"
+
+    // ---- 以下为回落通道：账号中心 accounts.woozooo.com ----
     // 协议（AuthRepositoryImpl KDoc 有完整流程）：GET 登录页解 acw_sc__v2 挑战 →
     // POST 同一 URL（task=uselogin&username&password&ref=pc.woozooo.com，AJAX 头）→
     // zt=1 时 msgs 为中转鉴权 URL → GET 它收集 phpdisk_info Cookie。

@@ -31,6 +31,7 @@ class LanzouApiClient @Inject constructor(
     private val uaInterceptor: UserAgentInterceptor,
     private val retryInterceptor: RetryInterceptor,
     private val refererInterceptor: LanzouRefererInterceptor,
+    private val uidInterceptor: LanzouUidInterceptor,
     val cookieJar: CookiePersistenceJar,
     private val settingsStore: SettingsStore
 ) {
@@ -48,6 +49,7 @@ class LanzouApiClient @Inject constructor(
             .addInterceptor(retryInterceptor)
             .addInterceptor(uaInterceptor)
             .addInterceptor(refererInterceptor)
+            .addInterceptor(uidInterceptor)
             .addInterceptor(domainInterceptor)
         if (BuildConfig.DEBUG) {
             builder.addInterceptor(HttpLoggingInterceptor().apply {

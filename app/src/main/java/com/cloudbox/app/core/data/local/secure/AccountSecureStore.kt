@@ -60,6 +60,7 @@ class AccountSecureStore @Inject constructor(
             .remove("$PREFIX_PWD$uid")
             .remove("$PREFIX_COOKIES$uid")
             .remove("$PREFIX_ACTIVE$uid")
+            .remove("$PREFIX_CLOUD_UID$uid")
         // #8 修复：只有删除的是【当前账号】时才清 currentUid；
         // 旧实现无条件 remove，导致删除非当前账号 B 时把正在使用的账号 A 也登出
         if (currentUid() == uid) editor.remove(KEY_CURRENT_UID)
@@ -97,6 +98,20 @@ class AccountSecureStore @Inject constructor(
 
     fun clearCookies(uid: String) = prefs.edit().remove("$PREFIX_COOKIES$uid").apply()
 
+    // ---------- 云端数字 uid（原版 doupload.php?uid=xxx） ----------
+
+    /**
+     * 网盘数字 uid（如 1702063），与登录账号名不是一回事。
+     *
+     * 原版 App 从网盘首页 HTML 里正则 `index&u=(\d+)` 提取（home_func.lua:2372），
+     * 之后所有 doupload.php 请求都拼在 URL 上（uid后缀）。
+     * 由 [LanzouUidInterceptor] 读取并自动注入，业务层无需关心。
+     */
+    fun saveCloudUid(uid: String, cloudUid: String) =
+        prefs.edit().putString("$PREFIX_CLOUD_UID$uid", cloudUid).apply()
+
+    fun cloudUid(uid: String): String? = prefs.getString("$PREFIX_CLOUD_UID$uid", null)
+
     // ---------- 活跃时间 ----------
 
     fun touchActive(uid: String) =
@@ -118,5 +133,6 @@ class AccountSecureStore @Inject constructor(
         private const val PREFIX_PWD = "pwd_"
         private const val PREFIX_COOKIES = "cookies_"
         private const val PREFIX_ACTIVE = "active_at_"
+        private const val PREFIX_CLOUD_UID = "cloud_uid_"
     }
 }
