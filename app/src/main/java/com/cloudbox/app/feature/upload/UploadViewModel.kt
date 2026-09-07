@@ -62,6 +62,8 @@ class UploadViewModel @Inject constructor(
     private var currentWorkIds: List<UUID> = emptyList()
     private val workStates = mutableMapOf<UUID, WorkInfo.State>()
     private val failedAccumulator = mutableListOf<String>()
+    /** 失败原因（去重）：用户最需要的是"为什么失败"，而不是一句"部分失败" */
+    private val failedReasons = mutableListOf<String>()
     private var globalTotal = 0
 
     init {
@@ -92,6 +94,7 @@ class UploadViewModel @Inject constructor(
             currentWorkIds = active.map { it.id }
             workStates.clear()
             failedAccumulator.clear()
+            failedReasons.clear()
             // 本次会话中已完成批（SUCCEEDED）的失败名单与文件数一并并入，进度从正确基数续算
             val finishedInfos = activeSession.filter { it.state == WorkInfo.State.SUCCEEDED }
             finishedInfos.forEach { info ->
@@ -169,6 +172,7 @@ class UploadViewModel @Inject constructor(
             currentWorkIds = requests.map { it.id }
             workStates.clear()
             failedAccumulator.clear()
+            failedReasons.clear()
             globalTotal = paths.size
 
             val continuation = requests.drop(1).fold(
@@ -228,6 +232,9 @@ class UploadViewModel @Inject constructor(
                             ?.split("\n")
                             ?.filter { it.isNotBlank() }
                             ?.let { failedAccumulator.addAll(it) }
+                        info.outputData.getString(UploadWorker.KEY_FAILED_MESSAGE)
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { failedReasons.add(it) }
                         checkAllFinished()
                     }
                 }
@@ -237,12 +244,18 @@ class UploadViewModel @Inject constructor(
 
     private fun checkAllFinished() {
         if (currentWorkIds.any { it !in workStates }) return
-        val allSuccess = failedAccumulator.isEmpty()
+        val failed = failedAccumulator.distinct()
+        // 带上失败原因：只说"部分失败"用户无法判断该怎么办（重新登录？改后缀？走网页上传？）
+        val reason = failedReasons.distinct().firstOrNull()
         _uiState.update {
             it.copy(
                 uploading = false,
-                message = if (allSuccess) "上传完成" else "上传完成，部分文件失败",
-                failedFiles = failedAccumulator.distinct(),
+                message = when {
+                    failed.isEmpty() -> "上传完成"
+                    reason != null -> "上传完成，${failed.size} 个失败：$reason"
+                    else -> "上传完成，${failed.size} 个失败"
+                },
+                failedFiles = failed,
                 progress = 0,
                 currentFile = ""
             )

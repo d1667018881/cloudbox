@@ -23,6 +23,15 @@ interface UploadRepository {
     /** 当前文件是否超过直传限额 */
     fun isOversize(file: File): Boolean
 
+    /**
+     * 官方网页上传页地址（兜底通道）。
+     *
+     * 为什么留这条：原版 App（蓝云）并不自己拼 multipart，而是 WebView 打开官方
+     * 上传页交给网页 JS 处理——这是它能稳定上传的真正原因。原生直传遇到风控或
+     * 协议变更时，UI 可用 WebView 打开本地址作为兜底（folderId <= 0 时为根目录）。
+     */
+    fun uploadPageUrl(folderId: Long): String
+
     /** 单文件直传（不支持格式会按设置伪装后缀） */
     suspend fun uploadFile(file: File, folderId: Long, spoofSuffix: Boolean): UploadResult
 

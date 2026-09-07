@@ -70,6 +70,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 官方网页上传通道（兜底）：用已登录 Cookie 打开蓝奏云官方上传页。
+             原生直传被风控 / 协议变更挡住时使用，与原版 App 的做法一致
+             （原版 AndroLua 端没有任何 multipart 上传调用，一律 WebView 打开官方上传页）。
+             不导出（无 intent-filter），只能由本 App 内部启动。 -->
+        <activity
+            android:name=".feature.upload.WebViewUploadActivity"
+            android:exported="false"
+            android:label="网页上传"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.CloudBox" />
+
         <!-- WorkManager 使用 Hilt 自定义 WorkerFactory（CloudBoxApp 实现 Configuration.Provider），
              必须移除默认初始化器，否则运行时重复初始化（lint 强制要求） -->
         <provider

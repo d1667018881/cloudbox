@@ -63,12 +63,17 @@ class LanzouDomainInterceptor @Inject constructor() : Interceptor {
 
         // 角色判定（顺序敏感）：
         // 1. 上传接口（V6：html5up.php 替代已下线的 fileup.php）→ uploadServer
-        // 2. 直链解析 ajaxm.php → shareBase（ajaxm 部署在分享域上）
-        // 3. 其余 .php 管理接口 → diskMain
+        // 2. 分享域 AJAX：filemoreajax（文件夹列表）+ ajaxfile/ajaxm（直链解析）。
+        //    2026-09 实测：直链端点已从 ajaxm.php 迁到 ajaxfile.php，两者都只存在于分享域。
+        //    若不在此显式路由，它们会落到下面的 .php 分支被错误重写到网盘域
+        //    （pc.woozooo.com），表现为"解析总是失败"——这是旧实现的一个隐性根因。
+        // 3. 其余 .php 管理接口（doupload / mydisk）→ diskMain
         // 4. 分享页 HTML → shareBase
         val targetBase = when {
             path.contains("/html5up.php") || path.contains("/fileup.php") -> config.uploadServer
-            path.contains("/ajaxm.php") -> config.shareBase
+            path.contains("/filemoreajax.php") ||
+                path.contains("/ajaxfile.php") ||
+                path.contains("/ajaxm.php") -> config.shareBase
             path.endsWith(".php") -> config.diskMain
             else -> config.shareBase
         }

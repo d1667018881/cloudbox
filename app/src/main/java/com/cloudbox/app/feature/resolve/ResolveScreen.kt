@@ -106,13 +106,24 @@ fun ResolveScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Text("直链有效期约 2 小时且绑定 Referer；批量解析间隔 1-3s 防风控",
+            Text("直链有效期约 2 小时且绑定 Referer；文件夹链接（/b…）会自动展开为目录内全部文件，批量解析间隔 1-3s 防风控",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
 
+            // 文件夹解析要逐文件请求（每文件 1-3s），必须给进度反馈，否则像卡死
+            state.progress?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
             LazyColumn(Modifier.weight(1f)) {
-                items(state.results, key = { it.shareUrl }) { item ->
+                items(state.results, key = { it.key }) { item ->
                     ResolveItemRow(item, viewModel)
                 }
             }

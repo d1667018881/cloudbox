@@ -92,6 +92,20 @@ class CookiePersistenceJar @Inject constructor(
     /** 是否有 phpdisk_info（登录凭证） */
     fun isLoggedIn(): Boolean = hasCookie("phpdisk_info")
 
+    /** 取指定 Cookie 的值（拼 Referer / 诊断用；不存在返回 null） */
+    fun cookieValue(name: String): String? = synchronized(lock) {
+        cache.values.flatten().firstOrNull { it.name == name }?.value
+    }
+
+    /**
+     * 当前凭证是否具备上传所需的最小集合。
+     *
+     * 为什么单独判定：html5up.php 在凭证不完整时不会明确报错，而是返回 zt=1 却不入库
+     * ——正是"显示成功但文件没上去"的典型成因。上传前先自检，能提前给出可读错误。
+     * 实测/社区经验：phpdisk_info 必需，ylogin 与 uag 存在时成功率显著更高。
+     */
+    fun hasUploadCredentials(): Boolean = hasCookie("phpdisk_info")
+
     /** 把外部计算的 cookie（如 acw_sc__v2）写入 jar，由统一 Cookie 头管理（#5） */
     fun putCookie(cookie: Cookie) {
         synchronized(lock) {

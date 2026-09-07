@@ -1,6 +1,6 @@
 package com.cloudbox.app.core.data.remote
 
-import com.cloudbox.app.core.data.dto.AjaxmResponse
+import com.cloudbox.app.core.data.dto.AjaxFileResponse
 import com.cloudbox.app.core.data.dto.CommonResponse
 import com.cloudbox.app.core.data.dto.DirListResponse
 import com.cloudbox.app.core.data.dto.FileListResponse
@@ -71,17 +71,25 @@ interface LanzouApiService {
 
     /**
      * 分享页文件夹内文件列表（filemoreajax.php，无需登录）。
-     * 参数 lx/pg/k/t/fid/pwd —— t/k 必须从分享页 HTML 实时提取（HtmlExtractor），
-     * 禁止缓存复用（需求规格 3 节 + 源码证实：t/k 每次从页面重新正则提取）。
+     *
+     * 2026-09 实测校准：新版接口在 URL 上带 `?file=<fid>` 查询，且表单必须携带
+     * uid / puid / rep / up 四个字段（页面 JS 实证，缺任一都可能被判为非法请求）。
+     * t / k / fid / uid / puid 全部从分享页 HTML **实时**提取（HtmlExtractor），
+     * 禁止缓存复用——这些值是每次页面渲染时动态下发的。
      */
     @FormUrlEncoded
     @POST("filemoreajax.php")
     suspend fun getShareFileList(
-        @Field("lx") lx: Int,
+        @Query("file") fileFid: String,
+        @Field("lx") lx: Int = 2,
+        @Field("fid") fid: String,
+        @Field("uid") uid: String = "",
+        @Field("puid") puid: String = "",
         @Field("pg") pg: Int,
-        @Field("k") k: String,
+        @Field("rep") rep: String = "0",
         @Field("t") t: String,
-        @Field("fid") fid: Long,
+        @Field("k") k: String,
+        @Field("up") up: Int = 1,
         @Field("pwd") pwd: String = ""
     ): ShareFileListResponse
 
@@ -210,11 +218,20 @@ interface LanzouApiService {
 
     /**
      * 上传文件（html5up.php，multipart）。
+     *
      * V6 协议迁移（2026-09 实测）：旧 fileup.php 已下线（pc/up.woozooo.com 均 404），
-     * 网页端现走 html5up.php（HTML5 上传入口）。新增字段 type（MIME）与
-     * lastModifiedDate（浏览器 File 对象元数据，服务端不严格校验但需携带）。
-     * 响应成功形态：{"zt":1,"text":[{id,name,time,size,icon,downs}]}（text 为数组）；
-     * 未登录：{"zt":9,"info":"login not"}。
+     * 网页端现走 html5up.php。
+     *
+     * 字段说明与坑位：
+     * - folder_id 与 folder_id_bb_n **同时发送**：公开实现里两种写法都存在
+     *   （AList 用 folder_id_bb_n，多份上传脚本用 folder_id），服务端只认其中一个，
+     *   双写可在不同站点版本下都命中，多传一个字段无害。
+     * - type / lastModifiedDate 为浏览器 File 对象元数据，服务端不严格校验但需携带。
+     * - Referer 由 [LanzouRefererInterceptor] 自动补全为网盘文件页——缺失 Referer 时
+     *   接口会返回 zt=1 却不入库，是"假成功"的成因之一。
+     *
+     * 响应：成功 {"zt":1,"text":[{id,name,time,size,icon,downs}]}（text 为数组）；
+     *       未登录 {"zt":9,"info":"login not","text":"error"}（text 为字符串）。
      */
     @Multipart
     @POST("html5up.php")
@@ -223,7 +240,8 @@ interface LanzouApiService {
         @Part("vie") vie: RequestBody,
         @Part("ve") ve: RequestBody,
         @Part("id") id: RequestBody,
-        @Part("folder_id_bb_n") folderId: RequestBody,
+        @Part("folder_id_bb_n") folderIdBbN: RequestBody,
+        @Part("folder_id") folderId: RequestBody,
         @Part("name") name: RequestBody,
         @Part("type") type: RequestBody,
         @Part("lastModifiedDate") lastModifiedDate: RequestBody,
@@ -233,22 +251,30 @@ interface LanzouApiService {
     // ==================== 直链解析 ====================
 
     /**
-     * 直链解析（ajaxm.php）。
-     * 需求规格：action=downprocess, sign, file_id, p, kd=1。
-     * 源码差异：sign 来源分两种（有/无提取码分支），直链拼接为 dom + '/file/' + url
-     * 后 GET 一次拿 Location 才是真直链（本仓库用 @Streaming 防止 Gson 尝试解析下载页）。
-     * kd 参数源码未使用，保留需求规格的 kd=1。
+     * 直链解析（现行端点 ajaxfile.php，2026-09 实测可用）。
+     *
+     * 旧端点 ajaxm.php + 参数 {action, sign, file_id, p, kd, ves} 已随页面改版废弃：
+     * 新版单文件页把签名藏在 iframe（/fn?…）的 `var wp_sign` 里，fid 用 URL 查询传递，
+     * 并新增 websignkey / signs / websign 三个校验字段。继续打 ajaxm.php 必然拿不到直链。
+     *
+     * 实测请求：POST /ajaxfile.php?file=96810913
+     *   action=downprocess&websignkey=asXy&signs=asXy&sign=<wp_sign>&websign=&kd=1&ves=1
+     * 成功响应：{"zt":1,"dom":"https://developer2.lanrar.com","url":"?A2VUags6…","inf":0}
+     * 直链拼接：dom + "/file/" + url
      */
     @FormUrlEncoded
-    @POST("ajaxm.php")
+    @POST("ajaxfile.php")
     suspend fun downProcess(
+        @Query("file") fileId: String,
         @Field("action") action: String = "downprocess",
+        @Field("websignkey") websignkey: String = "",
+        @Field("signs") signs: String = "",
         @Field("sign") sign: String,
-        @Field("file_id") fileId: String? = null,
-        @Field("p") pwd: String = "",
+        @Field("websign") websign: String = "",
         @Field("kd") kd: Int = 1,
-        @Field("ves") ves: Int? = null
-    ): AjaxmResponse
+        @Field("ves") ves: Int = 1,
+        @Field("p") pwd: String = ""
+    ): AjaxFileResponse
 
     /** 通用 GET（分享页/iframe 页/重定向探测），不经过 Retrofit 转换器 */
     @Streaming

@@ -9,6 +9,12 @@ data class ResolveFolderResult(
     val totalCount: Int
 )
 
+/**
+ * 专用错误码：链接是【文件夹分享】，单文件解析流程不适用。
+ * 调用方（ResolveViewModel）捕获后应改走 [DirectLinkRepository.resolveFolder] 展开整个目录。
+ */
+const val ERR_FOLDER_LINK = -1001
+
 /** 直链解析仓库 */
 interface DirectLinkRepository {
 

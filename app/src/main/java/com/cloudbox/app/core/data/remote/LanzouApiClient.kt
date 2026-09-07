@@ -30,6 +30,7 @@ class LanzouApiClient @Inject constructor(
     val domainInterceptor: LanzouDomainInterceptor,
     private val uaInterceptor: UserAgentInterceptor,
     private val retryInterceptor: RetryInterceptor,
+    private val refererInterceptor: LanzouRefererInterceptor,
     val cookieJar: CookiePersistenceJar,
     private val settingsStore: SettingsStore
 ) {
@@ -42,9 +43,11 @@ class LanzouApiClient @Inject constructor(
             .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
             .cookieJar(cookieJar)
             // 顺序说明：Application 拦截器按注册顺序执行。
-            // 重试在最外层（重试整个请求链）→ UA → 域名重写（最内层，保证 cookieJar 看到真实 URL）
+            // 重试（最外层，重试整条链）→ UA → Referer 补全 → 域名重写（最内层，
+            // 保证 cookieJar 与 Referer 拼装看到的是真实 URL）
             .addInterceptor(retryInterceptor)
             .addInterceptor(uaInterceptor)
+            .addInterceptor(refererInterceptor)
             .addInterceptor(domainInterceptor)
         if (BuildConfig.DEBUG) {
             builder.addInterceptor(HttpLoggingInterceptor().apply {

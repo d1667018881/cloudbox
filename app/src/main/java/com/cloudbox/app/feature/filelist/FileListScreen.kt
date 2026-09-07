@@ -95,6 +95,15 @@ fun FileListScreen(
         }
     }
 
+    // 官方网页上传通道（兜底）：原生直传被风控/协议变更挡住时，
+    // 用已登录 Cookie 打开官方上传页（原版 App 走的就是这条路）。
+    val webUploadLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        // 网页里传完后返回，刷新当前目录
+        viewModel.refresh()
+    }
+
     // 上传会话结束（含部分失败）→ 刷新当前目录（V5：修复"上传成功但列表不更新"）
     LaunchedEffect(Unit) {
         uploadViewModel.uploadFinished.collect { viewModel.refresh() }
@@ -195,6 +204,25 @@ fun FileListScreen(
                             onClick = {
                                 showFabMenu = false
                                 filePicker.launch(arrayOf("*/*"))
+                            }
+                        )
+                        // 兜底通道：官方网页上传（与原版 App 同款做法）。
+                        // 原生直传反复失败时用它——由蓝奏云官方网页 JS 处理签名与风控。
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("网页上传（官方通道·兜底）") },
+                            leadingIcon = { Icon(Icons.Filled.Language, null) },
+                            onClick = {
+                                showFabMenu = false
+                                val ctx = androidx.compose.ui.platform.LocalContext.current
+                                webUploadLauncher.launch(
+                                    android.content.Intent(
+                                        ctx,
+                                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                                    ).putExtra(
+                                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                                        state.folderStack.last().first
+                                    )
+                                )
                             }
                         )
                     }

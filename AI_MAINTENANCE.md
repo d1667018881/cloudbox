@@ -610,3 +610,130 @@ v0.1.96 起生效。修复方 = 复审 AI 本人（V5 改动的自查，方法�
 不确定的 API 一律先查证或从已编译通过的既有代码里找同款用法。
 
 v0.1.99 起生效。验收补充：传两批文件（第二批在第一批完成后）→ 杀进程 → 重进应只接管第二批的进度基数。
+
+---
+
+## 15. 协议迁移：对齐原版 App（2026-09-07，逆向 + 抓包实测驱动）
+
+> 背景：蓝奏云 2025-2026 连续改版，本仓库沿用的旧协议（来自 2025 年的
+> LanZouCloud-API 文档）**全线失效**，表现为"上传显示成功但云端没有文件"、
+> "直连解析必失败"。本次以**原版 App（蓝云 AndroLua，1.3.4.8）反编译产物为对照**、
+> 以**线上抓包实测为准**，重写了直链解析与上传两条主链路。
+>
+> ⚠️ 本文档是唯一权威来源。任何"某篇文章说应该这样"的信息都要先抓包验证再改代码。
+
+### 15.1 原版 App 逆向结论（可直接指导实现的三条）
+
+| 结论 | 证据 | 对本仓库的影响 |
+|---|---|---|
+| 原版**没有任何 multipart 上传调用** | 反编译 55 个 lua 模块 + `Http.java` 全部调用点枚举：只有 `doupload.php`/`mlogin.php`/`mydisk.php?item=recycle`/`filemoreajax.php` | 原版"能稳定上传"是因为它 **WebView 直接打开官方上传页**（`设置.upload_url = "/html5up.php"` 是给网页页用的）。本仓库补了同款兜底通道 `WebViewUploadActivity` |
+| 上传端点已迁移到 `html5up.php` | `fileup.php` 实测 404；`up.woozooo.com/html5up.php` 未登录返回 `{"zt":9,"info":"login not"}` | `LanzouApiService.upload` 改打 `html5up.php` |
+| 回收站表单**必须带 `ref`** | `recycle.lua` 原版取值正则 `name="ref" value="(.-)"`，POST 串固定含 `&ref=…&formhash=…` | 旧实现没传 ref → 服务端拒绝 → "回收站点了没反应" |
+
+### 15.2 现行直链协议（2026-09 实测通过）
+
+**单文件**（样本 `https://www.lanzoui.com/i1evj0klyr0d`）：
+
+1. `GET` 分享页（原始域，桌面 UA）→ 可能被 `acw_sc__v2` 挑战拦截
+2. 挑战页含 `var arg1='…'` → `AcwScV2.compute()` → 写 CookieJar → **重取**
+   （⚠️ 必须走 `cookieJar.putCookie()`，手动 Cookie 头会被 OkHttp `BridgeInterceptor` 整体覆盖）
+3. 文件名取 `<title>`（实测 `Fluent v3.zip - 蓝奏云`，去掉 ` - 蓝奏云` 后缀）
+4. `fid` 取 `var fid = 96810913;`
+5. 页面里**没有 sign**，只有一个 iframe：`<iframe class="ifr2" src="/fn?VzFV…_c_c">`
+6. `GET` iframe 页 → `var wp_sign='…'`、`var ajaxdata='asXy'`、`var kdns=1`
+7. `POST {原始域}/ajaxfile.php?file=<fid>`：
+   `action=downprocess&websignkey=<ajaxdata>&signs=<ajaxdata>&sign=<wp_sign>&websign=&kd=<kdns>&ves=1`（有提取码加 `p`）
+8. 直链 = `dom + "/file/" + url`。**注意 url 以 `?` 开头**（`?A2VUags6…`），不能剥前导字符
+9. 响应 `inf` 正常时是**数字 0**，不是文件名 → `AjaxFileResponse.inf` 用 `Any?` 承接
+10. 探测：读直链前 1KB，若含 `down_r(` 说明是**验证中间页** → POST 同目录 `ajax.php{file,el,sign}` 换真实地址
+
+**文件夹**（样本 `https://wwe.lanzoui.com/b01tpeg7i`）：
+
+1. `GET` 分享页 → 页面 JS：
+   `$.ajax({url:'/filemoreajax.php?file=2553948', data:{'lx':2,'fid':2553948,'uid':'1702063','puid':'ATBUN…','pg':pgs,'rep':'0','t':ib280v,'k':_h0k2o}})`
+2. `t`/`k` 是**随机变量名**（实测 `ib280v` / `_h0k2o`），值分别是 10 位时间戳 / 32 位 hex
+   → 旧正则 `var [0-9a-z]{6} = '…'`（定长 6 位且不含下划线）**永远匹配不到 k**
+3. `POST {原始域}/filemoreajax.php?file=<fid>`，表单 `lx/fid/uid/puid/pg/rep/t/k/up/pwd`
+4. 翻页终止：实测 `zt=1` 继续；`zt=2` + `text="no file"` 取完；`zt=3` 提取码错误
+5. 目录内文件 id 形如 `iGLa524otx7a`（**字符串**）→ 子链接 = `{原始域}/{id}`，再走单文件流程
+
+**页面类型判定**：`html.contains("filemoreajax") && 无 /fn? iframe` → 文件夹页。
+失效页返回约 1KB 的 `文件不存在，或已删除` 空壳页，需早退。
+
+### 15.3 ⚠️ Gson 数组字段陷阱（本仓库最容易复发的崩溃源）
+
+蓝奏云在"无数据"时**不返回空数组，而是把数组字段换成字符串**：
+
+```
+filemoreajax 最后一页：{"zt":2,"info":"没有了","text":"no file"}
+doupload task=5 空目录： {"zt":2,"info":0,"text":"no file"}
+```
+
+若 DTO 字段声明为 `List<T>`，Gson 在**反序列化阶段**就抛 `JsonSyntaxException`，
+调用方连 `zt` 都读不到 —— 后果是"翻页必崩""往空文件夹上传后云端确认失败"。
+
+**对策（已在 `Dtos.kt` 落地，新增 DTO 请照抄）**：字段一律用 `Any?` 承接，
+再提供类型化访问器（`.items` / `.dirs` / `.folders` / `.hasMore`），
+访问器对非数组返回空列表、对 id 同时容忍数字与字符串。
+
+### 15.4 上传：三条"假成功"路径与封堵
+
+| # | 假成功路径 | 封堵方式 |
+|---|---|---|
+| 1 | `verifyOnCloud` 返回 `null`（列表请求失败）被判成功 | **null 一律判失败**（宁可让用户重试，不给假成功） |
+| 2 | 缺 `Referer`：`html5up.php` 不报错、返回 `zt=1` 却不入库 | `LanzouRefererInterceptor` 自动补全为网盘文件页 |
+| 3 | 凭证半失效：只有 `phpdisk_info` 全缺才返回 `zt=9` | 上传前 `hasUploadCredentials()` 自检，缺失直接失败提示重新登录 |
+
+成功判定收紧为：`zt==1 && text 是数组 && 首元素带非空 id`。
+云端确认最多重试 3 次（0 / 1.2s / 2.4s），区分 `false`（目录里真没有）与 `null`（请求失败）。
+
+### 15.5 本次改动文件清单
+
+| 文件 | 改动 |
+|---|---|
+| `common/HtmlExtractor.kt` | 重写全部正则（随机变量名、`filemoreajax?file=`、`wp_sign`/`ajaxdata`/`kdns`、formhash 双形态） |
+| `core/data/dto/Dtos.kt` | 数组字段改 `Any?` + 类型化访问器；新增 `ShareFileItem`；`AjaxFileResponse.inf` 改 `Any?` |
+| `core/data/remote/LanzouApiService.kt` | `upload` → `html5up.php` + `folder_id` 双写；`downProcess` → `ajaxfile.php?file=`；`getShareFileList` 带 `?file=` + `uid/puid/rep/up` |
+| `core/data/remote/LanzouDomainInterceptor.kt` | 路由加 `filemoreajax` / `ajaxfile` / `ajaxm` → 分享域 |
+| `core/data/remote/LanzouRefererInterceptor.kt` | **新建**：上传自动补 Referer |
+| `core/data/remote/LanzouApiClient.kt` / `CookiePersistenceJar.kt` | 注入 Referer 拦截器；新增 `cookieValue()` / `hasUploadCredentials()` |
+| `core/data/repository/UploadRepositoryImpl.kt` | 重写（见 §15.4）；新增 `uploadPageUrl()` 网页兜底 |
+| `core/data/repository/DirectLinkRepositoryImpl.kt` | 重写（见 §15.2）；新增文件夹自动分流 + 失效页早退 + 验证中间页二次解析 |
+| `core/data/repository/FileRepositoryImpl.kt` | 回收站改用原版实证正则；POST 补 `ref`；成败改按 HTTP 状态判定 |
+| `core/domain/repository/DirectLinkRepository.kt` | 新增 `ERR_FOLDER_LINK` |
+| `core/domain/repository/UploadRepository.kt` | 新增 `uploadPageUrl()` |
+| `feature/upload/WebViewUploadActivity.kt` | **新建**：官方网页上传通道（原版同款做法） |
+| `feature/upload/UploadViewModel.kt` | 汇总失败原因并展示（不再只说"部分失败"） |
+| `feature/filelist/FileListScreen.kt` | FAB 加"网页上传（官方通道·兜底）" |
+| `feature/resolve/ResolveViewModel.kt` / `ResolveScreen.kt` | 文件夹链接自动展开 + 进度提示 |
+| `AndroidManifest.xml` | 注册 `WebViewUploadActivity` |
+
+### 15.6 以后怎么自查协议是否又变了
+
+```bash
+# 1) 抓分享页（桌面 UA 必须带，手机 UA 页面结构不同）
+curl -sk -A "<桌面UA>" "https://<域>/<id>" -o page.html
+grep -oE "filemoreajax\.php\?file=[0-9]+|var [a-zA-Z_0-9]+ = '[0-9]{10}';|var [a-zA-Z_0-9]+ = '[0-9a-f]{16,}';|<title>[^<]*</title>" page.html
+
+# 2) 抓 iframe 页看签名三件套
+grep -oE "var wp_sign = '[^']+'|var ajaxdata = '[^']*'|var kdns = [0-9]+" fn.html
+
+# 3) 拿不到直链就先确认端点还活着（未登录应返回 zt=9，404 说明端点已下线）
+curl -sk -X POST "https://<域>/ajaxfile.php?file=<fid>" -d "action=downprocess&sign=xxx"
+```
+
+**排查顺序**：端点是否 404 → 页面关键字段是否还能用现有正则抠到 →
+响应 JSON 字段名/类型是否变了（尤其注意"数组变字符串"）→ Cookie/Referer 是否缺失。
+
+### 15.7 编译环境说明
+
+本次改动**未能真机编译验证**（沙箱无 Android SDK，`dl.google.com` /
+`services.gradle.org` 不可达）。已做的替代校验：
+
+1. 逐文件括号配平检查（对照改动前基线，确认无结构退化）
+2. 跨文件符号交叉核对（方法签名、参数名、import、Hilt 绑定、Manifest 注册）
+3. 依赖版本核对：`LinearProgressIndicator` 在 material3 1.3.0 是 `progress: Float`，
+   **1.7.0 才改成 lambda 版** —— 本项目锁前者，写 `{ }` 编译不过（已修）
+
+首次编译若有报错，优先怀疑：`Dtos.kt` 访问器用法、`HtmlExtractor` 正则转义、
+`WebViewUploadActivity` 的 Compose 导入。
