@@ -817,3 +817,29 @@ curl -s -b cookies.txt https://pc.woozooo.com/mydisk.php | grep -o "index&u=[0-9
 
 若 1) 返回 HTML 而非 JSON → mlogin 已下线，删除主通道改走账号中心；
 若 2) 返回 404 → 上传端点又换了，抓网页版上传页的 form action。
+
+## 17. 编译阻塞修复：LinearProgressIndicator 版本不兼容（2026-09-08）
+
+**这个仓库此前根本编译不过**——不是功能问题，是硬编译错误：
+
+material3 1.3.0（本项目锁 BOM `2024.09.03`）的签名是
+`LinearProgressIndicator(progress: Float, ...)`；
+`progress: () -> Float` 的 lambda 版是 **1.7.0 才引入**的。
+四处用了 lambda 版，Kotlin 编译器直接报错：
+
+| 文件 | 行 |
+|---|---|
+| `feature/download/DownloadScreen.kt` | 118 |
+| `feature/upload/UploadScreen.kt` | 107 |
+| `feature/search/SearchScreen.kt` | 91 |
+| `feature/filelist/FileListScreen.kt` | 298 |
+
+已全部改回 `progress = <Float 表达式>`，并在每处加注释锁死版本约束，
+避免以后被"顺手升级"改回去。
+
+**已核对无问题的同类疑点**：`PullToRefreshBox` 在 material3 1.3.0 中确实存在
+（1.3.0-alpha05 引入，1.4.0 才去掉 `@ExperimentalMaterial3Api`），
+`FileListScreen` 已带 `@OptIn(ExperimentalMaterial3Api::class)`，可正常使用。
+
+**日后升级 material3 到 1.7+ 时**：这 4 处（及 `WebViewUploadActivity`）需要
+改回 lambda 版，否则会收到弃用警告 / 编译错误。
