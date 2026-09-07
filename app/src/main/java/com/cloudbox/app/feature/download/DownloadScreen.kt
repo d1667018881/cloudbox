@@ -115,7 +115,9 @@ private fun DownloadItem(task: DownloadTask, viewModel: DownloadViewModel) {
         }
         if (!finished) {
             LinearProgressIndicator(
-                progress = { progress },
+                // material3 1.3.0（BOM 2024.09.03）签名是 progress: Float，
+                // 1.7.0 才改成 () -> Float 的 lambda 版——本项目锁前者
+                progress = progress,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             )
         }

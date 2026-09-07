@@ -88,9 +88,9 @@ fun SearchScreen(
             if (state.syncing) {
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
-                    progress = {
-                        if (state.syncTotal > 0) state.syncProgress.toFloat() / state.syncTotal else 0f
-                    },
+                    // material3 1.3.0（BOM 2024.09.03）签名是 progress: Float，
+                    // 1.7.0 才改成 () -> Float 的 lambda 版——本项目锁前者
+                    progress = if (state.syncTotal > 0) state.syncProgress.toFloat() / state.syncTotal else 0f,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text("正在同步索引 ${state.syncProgress}/${state.syncTotal}（首次同步较慢）",

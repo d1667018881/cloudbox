@@ -295,7 +295,9 @@ fun FileListScreen(
                             Spacer(Modifier.height(6.dp))
                             val total = uploadState.total.coerceAtLeast(1)
                             androidx.compose.material3.LinearProgressIndicator(
-                                progress = { uploadState.progress.toFloat() / total },
+                                // material3 1.3.0（BOM 2024.09.03）签名是 progress: Float，
+                                // 1.7.0 才改成 () -> Float 的 lambda 版——本项目锁前者
+                                progress = uploadState.progress.toFloat() / total,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
