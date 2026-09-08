@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
@@ -186,6 +187,10 @@ fun FileListScreen(
         floatingActionButton = {
             if (!state.selectionMode) {
                 Box {
+                    // LocalContext.current 必须在 @Composable 作用域里取值；
+                    // 放进 onClick（非 Composable lambda）会报
+                    // "@Composable invocations can only happen from the context of a @Composable function"
+                    val context = androidx.compose.ui.platform.LocalContext.current
                     FloatingActionButton(onClick = { showFabMenu = true }) {
                         Icon(Icons.Filled.Add, "新建/上传")
                     }
@@ -213,10 +218,9 @@ fun FileListScreen(
                             leadingIcon = { Icon(Icons.Filled.Language, null) },
                             onClick = {
                                 showFabMenu = false
-                                val ctx = androidx.compose.ui.platform.LocalContext.current
                                 webUploadLauncher.launch(
                                     android.content.Intent(
-                                        ctx,
+                                        context,
                                         com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
                                     ).putExtra(
                                         com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
