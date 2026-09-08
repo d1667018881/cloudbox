@@ -35,11 +35,39 @@ jobs:
           gradle-version: 8.9
 
       - name: Build APK
+        id: build
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: "0.1.${{ github.run_number }}"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        # tee 保留完整输出，供下一步失败时留存；PIPESTATUS 保证 gradle 的真实退出码不被管道吞掉
+        run: |
+          set +e
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          code=${PIPESTATUS[0]}
+          echo "gradle_exit=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      # 失败排查用：GitHub 的 Actions 日志下载域名常被网络劫持拿不到，
+      # 这里把日志推到 ci-logs 孤儿分支，用 raw.githubusercontent.com 就能读。
+      # 不需要时可整段删除，不影响 APK 产物。
+      - name: Publish build log (debug)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p .ci
+          tail -c 400000 build.log > .ci/build.log 2>/dev/null
+          [ -s .ci/build.log ] || echo "(no build.log captured)" > .ci/build.log
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git checkout -B ci-logs
+          git add -f .ci/build.log
+          git commit -m "ci log run ${{ github.run_number }} (${{ github.sha }})" 
+          git push -f origin ci-logs
+          echo "log branch pushed"
+          exit 0
 
       - name: Verify signature
         run: |
