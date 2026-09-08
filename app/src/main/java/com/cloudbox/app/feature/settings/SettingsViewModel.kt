@@ -25,6 +25,8 @@ data class SettingsUiState(
     val suffixSpoof: Boolean = true,
     val thirdPartyResolver: String = "",
     val darkMode: String = "system",
+    /** true = 上传默认走官方网页通道（默认开，见 SettingsStore.preferWebUpload 的说明） */
+    val preferWebUpload: Boolean = true,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
     val cookieExported: String? = null,
@@ -48,10 +50,11 @@ class SettingsViewModel @Inject constructor(
             val spoof = settingsStore.suffixSpoofEnabled.first()
             val resolver = settingsStore.thirdPartyResolverUrl.first()
             val dark = settingsStore.darkMode.first()
+            val web = settingsStore.preferWebUpload.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
-                    thirdPartyResolver = resolver, darkMode = dark
+                    thirdPartyResolver = resolver, darkMode = dark, preferWebUpload = web
                 )
             }
         }
@@ -95,6 +98,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setDarkMode(mode)
             _uiState.update { it.copy(darkMode = mode) }
+        }
+    }
+
+    /**
+     * 上传通道：true = 官方网页上传（推荐，原版 App 的做法）；false = 原生直传。
+     * 原生直传被风控或协议变更挡住时，切回 true 即可恢复可用。
+     */
+    fun savePreferWebUpload(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setPreferWebUpload(enabled)
+            _uiState.update { it.copy(preferWebUpload = enabled) }
         }
     }
 

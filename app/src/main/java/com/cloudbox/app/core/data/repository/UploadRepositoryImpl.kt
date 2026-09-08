@@ -197,19 +197,32 @@ class UploadRepositoryImpl @Inject constructor(
             ?.firstOrNull()
             ?.let { entry -> (entry as? Map<*, *>)?.get("id")?.toString() }
 
+        // 把服务端原始响应摘要进失败原因：只有看到 zt + info + text 的真实形态，
+        // 才能判断是"未登录""参数不对"还是"服务端假成功"，而不是靠猜。
+        val raw = "zt=${resp.zt}, info=${resp.info ?: "空"}, text=${resp.text.brief()}"
+
         return when {
             resp.zt == 1 && !fileId.isNullOrBlank() ->
                 UploadResult(uploadName, fileId, true)
             resp.zt == 9 || resp.info?.contains("login", true) == true ->
                 UploadResult(uploadName, null, false,
-                    "登录态已失效，请重新登录（${resp.info ?: "login not"}）")
+                    "登录态已失效，请重新登录（$raw）")
             resp.zt == 1 ->
                 UploadResult(uploadName, null, false,
-                    "服务器返回成功但未返回文件 ID（疑似未真正上传）")
+                    "服务端回了成功却没给文件 ID，未真正上传（$raw）")
             else ->
                 UploadResult(uploadName, null, false,
-                    resp.info?.takeIf { it.isNotBlank() } ?: "上传失败（zt=${resp.zt}）")
+                    "${resp.info?.takeIf { it.isNotBlank() } ?: "上传失败"}（$raw）")
         }
+    }
+
+    /** 任意响应体的简短画像：仅供失败诊断展示，不参与成功判定 */
+    private fun Any?.brief(): String = when (this) {
+        null -> "空"
+        is String -> "字符串「${if (length > 40) take(40) + "…" else this}」"
+        is List<*> -> "数组(${size} 项)"
+        is Map<*, *> -> "对象{${keys.take(5).joinToString()}}"
+        else -> toString().take(40)
     }
 
     /** 按扩展名取 MIME（html5up 的 type 字段；模拟浏览器 File.type） */

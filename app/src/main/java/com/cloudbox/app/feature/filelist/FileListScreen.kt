@@ -85,6 +85,10 @@ fun FileListScreen(
     var descTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    // 在 @Composable 作用域取 context：上传失败点"网页上传"时要用它启动 Activity
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // 上传默认通道（true = 官方网页上传，设置页可切回原生直传）
+    val preferWebUpload by viewModel.preferWebUpload.collectAsState()
 
     // V5：+ FAB 直传当前目录（SAF 多选）——上传不再是独立 Tab
     val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -111,9 +115,30 @@ fun FileListScreen(
     }
 
     // 上传结果提示（消费即清，防止 Tab 切换重建 composition 时重放同一条）
+    //
+    // 失败时：停留更久（Long），并给一个"网页上传"动作 —— 原生直传被风控/协议变更
+    // 挡住时，网页通道（原版 App 走的就是它）往往仍可用，别让用户卡在这里无从下手。
     LaunchedEffect(uploadState.message) {
-        uploadState.message?.let {
-            snackbarHostState.showSnackbar(it)
+        uploadState.message?.let { msg ->
+            val res = snackbarHostState.showSnackbar(
+                message = msg,
+                actionLabel = if (uploadState.hasFailure) "网页上传" else null,
+                duration = if (uploadState.hasFailure)
+                    androidx.compose.material3.SnackbarDuration.Long
+                else
+                    androidx.compose.material3.SnackbarDuration.Short
+            )
+            if (res == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                webUploadLauncher.launch(
+                    android.content.Intent(
+                        context,
+                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                    ).putExtra(
+                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                        state.folderStack.last().first
+                    )
+                )
+            }
             uploadViewModel.dismissMessage()
         }
     }
@@ -204,29 +229,51 @@ fun FileListScreen(
                             onClick = { showFabMenu = false; showNewFolder = true }
                         )
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("上传文件到当前目录") },
+                            text = { Text(if (preferWebUpload) "上传文件（官方网页通道）" else "上传文件到当前目录") },
                             leadingIcon = { Icon(Icons.Filled.UploadFile, null) },
                             onClick = {
                                 showFabMenu = false
-                                filePicker.launch(arrayOf("*/*"))
+                                // 默认走官方网页上传：原生直传是逆向协议，改版即"假成功"。
+                                // 设置里关掉开关才回到原生直传。
+                                if (preferWebUpload) {
+                                    webUploadLauncher.launch(
+                                        android.content.Intent(
+                                            context,
+                                            com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                                        ).putExtra(
+                                            com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                                            state.folderStack.last().first
+                                        )
+                                    )
+                                } else {
+                                    filePicker.launch(arrayOf("*/*"))
+                                }
                             }
                         )
-                        // 兜底通道：官方网页上传（与原版 App 同款做法）。
-                        // 原生直传反复失败时用它——由蓝奏云官方网页 JS 处理签名与风控。
+                        // 另一个通道：与上面那一项互斥，无论偏好如何都能临时换一条路走。
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("网页上传（官方通道·兜底）") },
+                            text = {
+                                Text(
+                                    if (preferWebUpload) "改用原生直传（可能假成功）"
+                                    else "改用官方网页上传（推荐）"
+                                )
+                            },
                             leadingIcon = { Icon(Icons.Filled.Language, null) },
                             onClick = {
                                 showFabMenu = false
-                                webUploadLauncher.launch(
-                                    android.content.Intent(
-                                        context,
-                                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
-                                    ).putExtra(
-                                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
-                                        state.folderStack.last().first
+                                if (preferWebUpload) {
+                                    filePicker.launch(arrayOf("*/*"))
+                                } else {
+                                    webUploadLauncher.launch(
+                                        android.content.Intent(
+                                            context,
+                                            com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                                        ).putExtra(
+                                            com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                                            state.folderStack.last().first
+                                        )
                                     )
-                                )
+                                }
                             }
                         )
                     }

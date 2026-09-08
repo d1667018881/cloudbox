@@ -48,7 +48,14 @@ class UploadViewModel @Inject constructor(
         val total: Int = 0,
         val currentFile: String = "",
         val message: String? = null,
-        val failedFiles: List<String> = emptyList()
+        val failedFiles: List<String> = emptyList(),
+        /**
+         * 本轮是否存在失败。UI 靠它决定 Snackbar 的停留时长与"改走网页上传"入口。
+         *
+         * 不要拿 failedFiles.isEmpty() 代替：用户 dismiss 后 failedFiles 仍在，
+         * 需要一个能随会话重置的独立标志。
+         */
+        val hasFailure: Boolean = false
     )
 
     private val _uiState = MutableStateFlow(UploadUiState())
@@ -106,7 +113,10 @@ class UploadViewModel @Inject constructor(
             globalTotal = activeSession.filter { it.state != WorkInfo.State.CANCELLED }.sumOf { batchSizeOf(it) }
 
             _uiState.update {
-                it.copy(uploading = true, progress = initialFinished, total = globalTotal, message = null)
+                it.copy(
+                    uploading = true, progress = initialFinished,
+                    total = globalTotal, message = null, hasFailure = false
+                )
             }
             observeWorks(currentWorkIds, active.map { batchSizeOf(it) }, initialFinished)
         }
@@ -195,6 +205,7 @@ class UploadViewModel @Inject constructor(
                     total = globalTotal,
                     message = null,
                     failedFiles = emptyList(),
+                    hasFailure = false,
                     currentFile = ""
                 )
             }
@@ -242,20 +253,37 @@ class UploadViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 全部批次终态后汇总结果。
+     *
+     * ⚠️ 这里曾经是"假成功"的最后一环：旧实现无论成败都以「上传完成」开头，
+     * （`上传完成，N 个失败：…`），用户看到"上传完成"就以为文件上去了，
+     * 于是出现"App 显示成功、云端却没有"的经典误判。
+     * 现在按"失败数量占比"改成三种**语义互斥**的文案，失败时不出现"完成/成功"字样。
+     */
     private fun checkAllFinished() {
         if (currentWorkIds.any { it !in workStates }) return
         val failed = failedAccumulator.distinct()
-        // 带上失败原因：只说"部分失败"用户无法判断该怎么办（重新登录？改后缀？走网页上传？）
+        val okCount = (globalTotal - failed.size).coerceAtLeast(0)
+        // 失败原因（去重）：只说"部分失败"用户无法判断该怎么办（重新登录？改后缀？走网页上传？）
         val reason = failedReasons.distinct().firstOrNull()
+        val suffix = reason?.let { "｜原因：$it" } ?: ""
+
+        val (msg, hasFailure) = when {
+            failed.isEmpty() -> "全部上传成功（$globalTotal 个）" to false
+            // 全灭：最容易被误读成成功的场景，必须显眼
+            okCount == 0 ->
+                "上传失败：${failed.size} 个文件都没传上去$suffix" to true
+            else ->
+                "只成功 $okCount 个，${failed.size} 个失败$suffix" to true
+        }
+
         _uiState.update {
             it.copy(
                 uploading = false,
-                message = when {
-                    failed.isEmpty() -> "上传完成"
-                    reason != null -> "上传完成，${failed.size} 个失败：$reason"
-                    else -> "上传完成，${failed.size} 个失败"
-                },
+                message = msg,
                 failedFiles = failed,
+                hasFailure = hasFailure,
                 progress = 0,
                 currentFile = ""
             )

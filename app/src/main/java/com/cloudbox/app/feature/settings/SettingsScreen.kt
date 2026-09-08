@@ -140,6 +140,23 @@ fun SettingsScreen(
                 }
                 Switch(checked = state.suffixSpoof, onCheckedChange = viewModel::saveSuffixSpoof)
             }
+            // 上传通道：默认走官方网页。原生直传是逆向出来的协议，
+            // 蓝奏云一改版就容易出现「显示成功但文件没上去」的假成功。
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("上传默认走官方网页通道", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "原生直传基于逆向的 multipart 协议，对方改版会「假成功」；" +
+                            "网页通道由官方页面自己处理，原版 App 也是这么做的。关闭则用原生直传。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.preferWebUpload, onCheckedChange = viewModel::savePreferWebUpload)
+            }
             HorizontalDivider()
 
             // ==================== 账号中心设置（task=7/8/10/15，对齐原版 account.lua） ====================

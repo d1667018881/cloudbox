@@ -7,8 +7,10 @@ import com.cloudbox.app.core.domain.model.ShareInfo
 import com.cloudbox.app.core.domain.repository.FileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -33,11 +35,16 @@ data class FileListUiState(
 
 @HiltViewModel
 class FileListViewModel @Inject constructor(
-    val fileRepository: FileRepository
+    val fileRepository: FileRepository,
+    private val settingsStore: com.cloudbox.app.core.data.local.datastore.SettingsStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FileListUiState())
     val uiState: StateFlow<FileListUiState> = _uiState.asStateFlow()
+
+    /** 上传默认通道：true = 官方网页上传。设置页可切回原生直传。 */
+    val preferWebUpload: StateFlow<Boolean> = settingsStore.preferWebUpload
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     private var page = 1
 
