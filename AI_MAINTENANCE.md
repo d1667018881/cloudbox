@@ -949,3 +949,64 @@ e: …FileListScreen.kt:216:85 @Composable invocations can only happen
 **能真编译就别靠猜**；本地编不了的时候（本沙箱 `dl.google.com` /
 `repo1.maven.org` / `services.gradle.org` 全被劫持，装不了 Android SDK），
 宁可多花几分钟让 CI 把日志吐回来。
+
+---
+
+## 19. V10：补齐原版 account.lua 的账号中心设置（2026-09-08）
+
+做了一次**系统性的功能对照**（而不是继续逐行读代码），方法是把所有
+调用点按"服务端端点 + task 编号"抽出来两边比对：
+
+| 来源 | 端点 |
+|---|---|
+| 原版（47 个 lua 模块） | `doupload.php`(48) `mydisk.php`(42) `mlogin.php`(8) `html5up.php`(8) `myfile.php`(4) `fileup.php`(4, 现已 404) `filemoreajax.php`(2) `account.php`(1) |
+| 本仓库 | `doupload.php`(15) `html5up.php`(1) `filemoreajax.php`(1) `ajaxfile.php`(1) |
+
+按 task 比对的结果：
+
+* 仓库已覆盖 `2 3 4 5 6 11 12 16 18 19 20 22 23 46 47` —— 文件/文件夹的
+  增删改移、提取码、描述、分享、列表、上传、直链，**业务主干是全的**。
+* 仓库**缺** `7 8 10 15 43`，全部位于原版 `account.lua`（账号中心设置）。
+
+本次补齐前四个：
+
+| task | 功能 | 服务端参数（极易踩坑） |
+|---|---|---|
+| 7 | 个人分享链访问码 | `codeoff` 是**反**的：`0`=需要访问码，`1`=关闭。别照抄 task=23 的 `shows` |
+| 8 | 修改登录密码 | `old_pwd` / `new_pwd`，**明文提交**（与登录同源，原版就没做 md5） |
+| 10 | 外链（个人主页）标题/简介 | `ubt`=标题、`usm`=简介。字段名看着像 URL，其实是文案 |
+| 15 | 显示发布者 | 复用了"提取码"那对字段名 `shows`/`shownames`，但语义是**是否显示 / 昵称** |
+
+**刻意没做 task=43（修改手机号）**：需要短信验证码，App 侧拿不到，
+做出来必然失败，只会误导用户。若以后接入，注意它的失败响应同样只看 `zt`。
+
+### 代码结构
+
+```
+core/domain/repository/ProfileRepository.kt      // sealed class ProfileResult + 4 个方法
+core/data/repository/ProfileRepositoryImpl.kt    // 统一走 safe{...}：前置校验 → 调接口 → judge(zt)
+core/data/remote/LanzouApiService.kt             // setPersonalLinkCode / changePassword / setExternalLink / setPublisher
+core/di/AppModule.kt                             // @Binds ProfileRepositoryImpl → ProfileRepository
+feature/settings/SettingsScreen.kt               // 「账号中心设置」区块 + 4 个对话框
+feature/settings/SettingsViewModel.kt            // 注入 ProfileRepository，结果映射成 Snackbar
+```
+
+### 两个实现细节（照抄会踩坑）
+
+1. **`inline fun` + `withContext` 不能用带标签的非局部返回**。
+   最初写成 `private inline fun runCatchingProfile(block: () -> ProfileResult)`，
+   Kotlin 直接拒绝：`it may contain non-local returns`（block 被塞进
+   `withContext` 的另一个 lambda，跨 lambda 边界不允许非局部返回）。
+   → 改成 `private suspend fun safe(block: suspend () -> ProfileResult)`，
+   调用方用 `return@safe`。
+
+2. **`CommonResponse` 加了 `info: Any?`**（而非 `String?`）。
+   原版靠 `json.decode(resp).info` 给用户中文提示；实测失败时服务端偶尔返回
+   数字 `0`，声明成 `String` 会让 Gson 在**反序列化阶段**抛异常，反而盖掉 `zt` 判定。
+   同时提供 `infoText` 访问器，只认非空字符串。
+
+### 验证状态
+
+* CI：**Run 34188151273 success** → Release **v0.1.108**（`app-release.apk` 13,810,538 B）
+* ⚠️ **这四个接口的运行时正确性未经真机实测**（需要已登录的真实账号）。
+  若某接口报错，先看 Snackbar 里服务端的 `info` 文案，再对照上表的参数语义。
