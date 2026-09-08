@@ -11,6 +11,20 @@ data class UploadResult(
 )
 
 /**
+ * 上传自检（探针）结果：把服务端原始回包摊开，便于定位"假成功"。
+ *
+ * @param httpCode  HTTP 状态码（-1 表示请求根本没发出去）
+ * @param requestUrl 实际请求的完整 URL（确认域名/端点是否符合预期）
+ * @param rawBody   服务端返回的原始文本（**不截断**，包含 zt / info / text 全部字段）
+ */
+data class UploadProbeResult(
+    val httpCode: Int = -1,
+    val requestUrl: String = "",
+    val rawBody: String = "",
+    val hasCredential: Boolean = false
+)
+
+/**
  * 上传仓库。
  *
  * 大小限制策略（需求规格 4 节，严格执行）：
@@ -24,13 +38,31 @@ interface UploadRepository {
     fun isOversize(file: File): Boolean
 
     /**
-     * 官方网页上传页地址（兜底通道）。
+     * 官方网页上传页地址（**仅作兜底**，不是默认通道）。
      *
-     * 为什么留这条：原版 App（蓝云）并不自己拼 multipart，而是 WebView 打开官方
-     * 上传页交给网页 JS 处理——这是它能稳定上传的真正原因。原生直传遇到风控或
-     * 协议变更时，UI 可用 WebView 打开本地址作为兜底（folderId <= 0 时为根目录）。
+     * ⚠️ 本注释曾经写反过，2026-09-08 更正：
+     * 旧注释称"原版 App 并不自己拼 multipart，全靠 WebView 网页上传"——这是错的。
+     * 错因：home.lua / webview.lua 当年反编译失败，只剩字节码反汇编，当时没深挖，
+     * 把"没找到"当成了"不存在"。
+     * 真相在 disasm/home.txt:6537-6560：原版**确实**自己拼 multipart，
+     * 且只有 3 个字段（task / folder_id / upload_file），每个字段都带
+     * `Content-Type` + `Content-Transfer-Encoding` 子头。
+     * 教训：反编译失败的模块只能标注"未覆盖"，不能反推成"没有该功能"。
+     *
+     * 本仓库已按原版逐字节复刻（见 UploadRepositoryImpl.buildOriginalMultipart），
+     * 默认走原生直传；本地址只在直传异常时由用户手动选用。
      */
     fun uploadPageUrl(folderId: Long): String
+
+    /**
+     * 上传通道自检（探针）：往目标目录传一个几十字节的临时 txt，
+     * 把服务端**原始回包**完整返回供排障。
+     *
+     * 为什么需要它：html5up.php 在参数不符时往往不报错，而是回 `zt=1` 却不入库
+     * （表现为"显示成功、云端没有文件"）。只看 App 的成功/失败文案无法定位，
+     * 必须看到 zt / info / text 的真实形态。
+     */
+    suspend fun probeUpload(folderId: Long): UploadProbeResult
 
     /** 单文件直传（不支持格式会按设置伪装后缀） */
     suspend fun uploadFile(file: File, folderId: Long, spoofSuffix: Boolean): UploadResult

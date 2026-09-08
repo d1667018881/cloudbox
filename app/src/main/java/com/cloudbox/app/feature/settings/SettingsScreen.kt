@@ -38,7 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Context
+import com.cloudbox.app.core.domain.repository.UploadProbeResult
 import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
@@ -156,6 +159,30 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.preferWebUpload, onCheckedChange = viewModel::savePreferWebUpload)
+            }
+            HorizontalDivider()
+
+            // ==================== 上传通道自检 ====================
+            SectionTitle("上传通道自检")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("上传自检（探针）", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "往根目录传一个 40 字节的 txt，并原样显示服务端回包。" +
+                            "上传失败/假成功时点它，把结果截图发来即可定位。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = viewModel::runUploadProbe, enabled = !state.probing) {
+                    Text(if (state.probing) "检测中…" else "开始")
+                }
+            }
+            state.probeResult?.let {
+                UploadProbeDialog(it, onDismiss = viewModel::dismissProbe)
             }
             HorizontalDivider()
 
@@ -348,6 +375,55 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { pwdDialog = false }) { Text("取消") } }
         )
     }
+}
+
+/**
+ * 上传自检结果弹窗。
+ *
+ * 展示 HTTP 码 / 实际请求地址 / 凭证状态 / **服务端原始回包**，
+ * 并提供"复制"——排障时把这四行发出来，就能判断是没登录、参数不对还是端点失效。
+ */
+@Composable
+private fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("上传自检结果") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("HTTP ${result.httpCode}", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(6.dp))
+                Text("请求地址：${result.requestUrl}",
+                    style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (result.hasCredential) "登录凭证：已检测到"
+                    else "登录凭证：缺失 —— 请先退出重新登录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (result.hasCredential) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("服务端原始回包：", style = MaterialTheme.typography.labelLarge)
+                Text(result.rawBody, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                cm.setPrimaryClip(
+                    android.content.ClipData.newPlainText(
+                        "probe",
+                        "HTTP ${result.httpCode}\n${result.requestUrl}\n"
+                            + "credential=${result.hasCredential}\n${result.rawBody}"
+                    )
+                )
+                onDismiss()
+            }) { Text("复制") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
 }
 
 @Composable

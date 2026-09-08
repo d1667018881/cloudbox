@@ -11,9 +11,11 @@ import com.cloudbox.app.core.data.dto.UploadResponse
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
+import retrofit2.http.Body
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Query
 import retrofit2.http.Streaming
@@ -242,9 +244,26 @@ interface LanzouApiService {
      * （"Unexpected header: Content-Type"），而原版每个字段都必须带
      * `Content-Type: text/plain; charset=UTF-8` + `Content-Transfer-Encoding: 8bit`。
      * 所以这里退化成直接收 RequestBody，由我们自己写字节流。
+     *
+     * `Charset: UTF-8` 请求头（原版 disasm/home.txt:6537，K37="Charset"/K38="UTF-8"）：
+     * 非标准头，但原版每个上传请求都带；推测服务端据此决定文件名字节如何解码，
+     * 中文文件名异常可能与此有关，照抄即可。
      */
     @POST("html5up.php")
-    suspend fun upload(@Body body: RequestBody): UploadResponse
+    suspend fun upload(
+        @Body body: RequestBody,
+        @Header("Charset") charset: String
+    ): UploadResponse
+
+    /**
+     * 上传自检专用：返回**未解析**的原始响应，用于把服务端回包原样呈现给用户排障
+     * （DTO 只声明已知字段，排障时恰恰需要看未知字段）。
+     */
+    @POST("html5up.php")
+    suspend fun uploadProbe(
+        @Body body: RequestBody,
+        @Header("Charset") charset: String
+    ): Response<ResponseBody>
 
     // ==================== 账号中心设置（原版 account.lua） ====================
 

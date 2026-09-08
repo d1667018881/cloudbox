@@ -1010,3 +1010,126 @@ feature/settings/SettingsViewModel.kt            // 注入 ProfileRepository，�
 * CI：**Run 34188151273 success** → Release **v0.1.108**（`app-release.apk` 13,810,538 B）
 * ⚠️ **这四个接口的运行时正确性未经真机实测**（需要已登录的真实账号）。
   若某接口报错，先看 Snackbar 里服务端的 `info` 文案，再对照上表的参数语义。
+
+---
+
+## 20. V12：原生上传失败的真因 —— 原版 multipart 协议（2026-09-08）
+
+> 这一节是整个项目最贵的教训，值得单独记住。
+
+### 20.1 曾经的错误结论（已推翻，别再信）
+
+在 §15 里我写过一句话：
+
+> 原版 App（蓝云）**并不自己拼 multipart**，而是 WebView 打开官方上传页交给网页 JS 处理。
+
+**这是错的。** 错误推理链：
+
+1. `home.lua` / `webview.lua` 当年反编译失败，只剩字节码反汇编 `disasm/home.txt`（663KB）。
+2. 我在反汇编里扫了几眼没找到上传构造，就判断"原版不做原生上传"。
+3. 于是把仓库的上传实现按"浏览器行为"推测出了 **10 个字段**
+   （`vie / ve / id / folder_id_bb_n / name / type / lastModifiedDate` …）。
+4. 结果：**假成功**——服务端回 `zt=1`，文件却没入库。
+
+> **教训（写进方法论）**：反编译失败的模块，只能在文档里标注"未覆盖"，
+> **绝不能反推成"没有这个功能"**。这是本项目踩过代价最大的一次。
+
+### 20.2 真相：`disasm/home.txt:6537-6560`
+
+原版**确实**自己拼 multipart，而且非常朴素——只有 **3 个字段**：
+
+| 字段 | 值 |
+|---|---|
+| `task` | `1` |
+| `folder_id` | 目标目录 id（根目录 `-1`） |
+| `upload_file` | 文件本体 |
+
+每个字段都带两个子头：
+
+```
+--<boundary>\r\n
+Content-Disposition: form-data; name="task"\n
+Content-Type: text/plain; charset=UTF-8\n
+Content-Transfer-Encoding: 8bit\n\n
+1\n
+--<boundary>\n
+Content-Disposition: form-data; name="folder_id"\n
+Content-Type: text/plain; charset=UTF-8\n
+Content-Transfer-Encoding: 8bit\n\n
+<folderId>\n
+--<boundary>\n
+Content-Disposition: form-data; name="upload_file"; filename="<name>"\n
+Content-Type: <mime>\n
+Content-Transfer-Encoding: binary\n\r\n
+<文件字节>
+```
+
+请求头（同样出自字节码 K35-K45）：
+
+| 头 | 值 |
+|---|---|
+| `Connection` | `Keep-Alive` |
+| `Charset` | `UTF-8`（非标准头，但原版必带） |
+| `User-Agent` | 原版 UA |
+| `Cookie` | 完整 Cookie 串 |
+| `Content-Type` | `multipart/form-data;boundary=<b>` |
+
+**注意：原版没有 Referer。** 本仓库的 `LanzouRefererInterceptor` 仍然会补一个，
+这是我们的加固项（此前实测 Referer 缺失会导致 zt=1 不入库），与原版不同但无害。
+
+### 20.3 为什么不能用 OkHttp 的 `MultipartBody`
+
+`MultipartBody.Part.create()` 会**拒绝** part 里出现 `Content-Type`，
+抛 `IllegalArgumentException: Unexpected header: Content-Type`。
+而原版每个 part 都必须带它。所以只能手写 `RequestBody` 输出字节流——
+见 `UploadRepositoryImpl.buildOriginalMultipart`。
+
+### 20.4 端点与域名（原版原文）
+
+`home_func.lua:1334/1496`、`ty_core.lua:509`：
+
+```
+上传 URL = "https://" .. 设置.domain_name .. "/html5up.php"
+设置.domain_name 默认 "pc.woozooo.com"（可选切换 up.woozooo.com）
+```
+
+* **不带 `?uid=`**——`uid` 只加在 `doupload.php` 上（`LanzouUidInterceptor` 已按此实现）。
+* 默认 `LanzouDomainConfig.uploadServer = https://pc.woozooo.com/`，与原版一致。
+
+### 20.5 排障工具：上传自检（探针）
+
+`html5up.php` 在参数不符时**不报错**，只回 `zt=1` 却不入库。光看 App 文案无法定位。
+因此在设置页加了「上传通道自检」：往根目录传一个 40 字节 txt，把
+**HTTP 码 / 实际请求 URL / 凭证状态 / 服务端原始回包**原样显示，并可一键复制。
+
+拿到回包后按这个表判断：
+
+| 回包 | 含义 | 处理 |
+|---|---|---|
+| `{"zt":9,...}` | 未登录 / Cookie 失效 | 退出重登 |
+| `{"zt":1,"text":[{...id...}]}` | 真的成功了 | 检查是不是查错了目录 |
+| `{"zt":1,"text":"..."}`（text 不是数组） | **假成功**，参数不对 | 核对 3 字段与子头 |
+| HTTP 404 / 返回 HTML | 端点或域名失效 | 改 `uploadServer`，或试 `up.woozooo.com` |
+| `httpCode = -1` | 请求根本没发出 | 看异常栈（网络/证书/拦截器） |
+
+代码位置：
+
+* `core/domain/repository/UploadRepository.kt` → `UploadProbeResult` + `probeUpload()`
+* `core/data/repository/UploadRepositoryImpl.kt` → `probeUpload()`、`buildOriginalMultipart()`
+* `core/data/remote/LanzouApiService.kt` → `upload()` / `uploadProbe()`（都带 `@Header("Charset")`）
+* `feature/settings/SettingsScreen.kt` → `UploadProbeDialog`
+
+### 20.6 本轮修掉的编译错误（V12 提交 `7dc41bc` CI 失败）
+
+```
+e: .../core/data/remote/LanzouApiService.kt:247:25 Unresolved reference 'Body'.
+```
+
+改 `@Body` 时忘了 `import retrofit2.http.Body`。
+
+**更值得记住的是误判过程**：日志里只有这**一个**错误，我一度以为只有一处问题。
+实际上 Kotlin 编译器在 `upload()` 返回类型解析失败后，会把调用点 `resp` 变成 error type，
+从而**吞掉**后续所有相关错误。所以：
+
+> CI 日志里错误越少，越要警惕——可能是上游错误把下游错误"屏蔽"了。
+> 修完一批错误后必须**再跑一次**，别假设"只剩一个"。

@@ -9,6 +9,8 @@ import com.cloudbox.app.core.domain.model.AccountInfo
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.ProfileRepository
 import com.cloudbox.app.core.domain.repository.ProfileResult
+import com.cloudbox.app.core.domain.repository.UploadProbeResult
+import com.cloudbox.app.core.domain.repository.UploadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +32,10 @@ data class SettingsUiState(
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
     val cookieExported: String? = null,
+    /** 上传自检进行中 */
+    val probing: Boolean = false,
+    /** 上传自检结果（含服务端原始回包），非空时 UI 弹出详情 */
+    val probeResult: UploadProbeResult? = null,
     val message: String? = null
 )
 
@@ -38,7 +44,8 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
-    private val profileRepository: ProfileRepository
+    private val profileRepository: ProfileRepository,
+    private val uploadRepository: UploadRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -158,6 +165,24 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(message = if (ok) "Cookie 已恢复" else "恢复失败") }
         }
     }
+
+    // ==================== 上传通道自检 ====================
+
+    /**
+     * 跑一次探针上传：往根目录传一个 40 字节 txt，把服务端原始回包展示出来。
+     *
+     * 用途：上传"显示成功却没上去"时，用它一眼看出是没登录（zt=9）、
+     * 参数不对（zt=1 但 text 不是数组），还是域名/端点不对（404、HTML 页面）。
+     */
+    fun runUploadProbe() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(probing = true, probeResult = null) }
+            val r = uploadRepository.probeUpload(-1L)
+            _uiState.update { it.copy(probing = false, probeResult = r) }
+        }
+    }
+
+    fun dismissProbe() = _uiState.update { it.copy(probeResult = null) }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 

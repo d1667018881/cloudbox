@@ -4,6 +4,7 @@ import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.common.SplitZipUtil
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.data.remote.LanzouApiClient
+import com.cloudbox.app.core.domain.repository.UploadProbeResult
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import com.cloudbox.app.core.domain.repository.UploadResult
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,8 @@ import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okio.source
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.ThreadLocalRandom
 import javax.inject.Inject
@@ -59,6 +62,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class UploadRepositoryImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val apiClient: LanzouApiClient,
     private val settingsStore: SettingsStore
 ) : UploadRepository {
@@ -184,7 +188,8 @@ class UploadRepositoryImpl @Inject constructor(
             java.util.UUID.randomUUID().toString().replace("-", "")
 
         val resp = apiClient.apiService.upload(
-            buildOriginalMultipart(boundary, folderId, uploadName, mime, file)
+            buildOriginalMultipart(boundary, folderId, uploadName, mime, file),
+            "UTF-8"
         )
 
         val fileId: String? = (resp.text as? List<*>)
@@ -209,6 +214,43 @@ class UploadRepositoryImpl @Inject constructor(
                     "${resp.info?.takeIf { it.isNotBlank() } ?: "上传失败"}（$raw）")
         }
     }
+
+    /**
+     * 上传自检：用一个 40 字节的临时 txt 走一遍完整上传链路，返回服务端原始回包。
+     *
+     * 不走 [doUpload] 的原因：那里会把响应解析成 UploadResponse 再拼摘要，
+     * 而排障恰恰需要**未经处理的原文**（可能包含我们 DTO 里没声明的字段）。
+     */
+    override suspend fun probeUpload(folderId: Long): UploadProbeResult =
+        withContext(Dispatchers.IO) {
+            val hasCred = apiClient.cookieJar.hasUploadCredentials()
+            runCatching {
+                val probe = File(context.cacheDir, "cloudbox_upload_probe.txt").apply {
+                    writeText("cloudbox upload probe ${System.currentTimeMillis()}\n")
+                }
+                val boundary = "----CloudBoxBoundary" +
+                    java.util.UUID.randomUUID().toString().replace("-", "")
+                val body = buildOriginalMultipart(
+                    boundary, folderId, probe.name, "text/plain", probe
+                )
+                val resp = apiClient.apiService.uploadProbe(body, "UTF-8")
+                val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
+                    .getOrElse { "<读取响应失败: ${it.message}>" }
+                UploadProbeResult(
+                    httpCode = resp.code(),
+                    requestUrl = resp.raw().request.url.toString(),
+                    rawBody = raw,
+                    hasCredential = hasCred
+                )
+            }.getOrElse {
+                UploadProbeResult(
+                    httpCode = -1,
+                    requestUrl = "请求未发出",
+                    rawBody = "异常：${it.javaClass.simpleName} ${it.message}",
+                    hasCredential = hasCred
+                )
+            }
+        }
 
     /**
      * 逐字节复刻原版 home.lua 的 multipart（2026-09-08 复核）。
