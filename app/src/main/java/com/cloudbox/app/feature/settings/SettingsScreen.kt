@@ -58,6 +58,19 @@ fun SettingsScreen(
     var resolverDialog by remember { mutableStateOf(false) }
     var uaInput by remember { mutableStateOf(state.userAgent) }
     var resolverInput by remember { mutableStateOf(state.thirdPartyResolver) }
+    // 账号中心设置（task=7/8/10/15）
+    var extLinkDialog by remember { mutableStateOf(false) }
+    var linkCodeDialog by remember { mutableStateOf(false) }
+    var publisherDialog by remember { mutableStateOf(false) }
+    var pwdDialog by remember { mutableStateOf(false) }
+    var extLinkTitle by remember { mutableStateOf("") }
+    var extLinkSummary by remember { mutableStateOf("") }
+    var linkCodeEnabled by remember { mutableStateOf(true) }
+    var linkCodeValue by remember { mutableStateOf("") }
+    var publisherEnabled by remember { mutableStateOf(true) }
+    var publisherName by remember { mutableStateOf("") }
+    var oldPwd by remember { mutableStateOf("") }
+    var newPwd by remember { mutableStateOf("") }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -129,6 +142,14 @@ fun SettingsScreen(
             }
             HorizontalDivider()
 
+            // ==================== 账号中心设置（task=7/8/10/15，对齐原版 account.lua） ====================
+            SectionTitle("账号中心设置")
+            SettingRow("外链标题与简介", "个人主页展示的标题/简介（task=10）") { extLinkDialog = true }
+            SettingRow("个人分享链访问码", "给个人主页分享链加一道码（task=7）") { linkCodeDialog = true }
+            SettingRow("显示发布者", "是否在分享页露出昵称（task=15）") { publisherDialog = true }
+            SettingRow("修改登录密码", "需验证旧密码，改后请重新登录（task=8）") { pwdDialog = true }
+            HorizontalDivider()
+
             SectionTitle("深色模式")
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                 listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEach { (mode, label) ->
@@ -198,6 +219,116 @@ fun SettingsScreen(
                 }) { Text("保存") }
             },
             dismissButton = { TextButton(onClick = { resolverDialog = false }) { Text("取消") } }
+        )
+    }
+
+    // ---------- 外链标题与简介 task=10（ubt/usm） ----------
+    if (extLinkDialog) {
+        AlertDialog(
+            onDismissRequest = { extLinkDialog = false },
+            title = { Text("外链标题与简介") },
+            text = {
+                Column {
+                    Text("对应服务端字段 ubt（标题）与 usm（简介），填写后立即生效。",
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = extLinkTitle, onValueChange = { extLinkTitle = it },
+                        label = { Text("标题") }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = extLinkSummary, onValueChange = { extLinkSummary = it },
+                        label = { Text("简介（可留空）") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setExternalLink(extLinkTitle, extLinkSummary)
+                    extLinkDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { extLinkDialog = false }) { Text("取消") } }
+        )
+    }
+
+    // ---------- 个人分享链访问码 task=7（codeoff/code，注意 codeoff 语义是反的） ----------
+    if (linkCodeDialog) {
+        AlertDialog(
+            onDismissRequest = { linkCodeDialog = false },
+            title = { Text("个人分享链访问码") },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("启用访问码", Modifier.weight(1f))
+                        Switch(checked = linkCodeEnabled, onCheckedChange = { linkCodeEnabled = it })
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = linkCodeValue, onValueChange = { linkCodeValue = it },
+                        label = { Text("访问码") }, modifier = Modifier.fillMaxWidth(),
+                        enabled = linkCodeEnabled)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setPersonalLinkCode(linkCodeEnabled, linkCodeValue)
+                    linkCodeDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { linkCodeDialog = false }) { Text("取消") } }
+        )
+    }
+
+    // ---------- 显示发布者 task=15（shows/shownames） ----------
+    if (publisherDialog) {
+        AlertDialog(
+            onDismissRequest = { publisherDialog = false },
+            title = { Text("显示发布者") },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("在分享页显示发布者", Modifier.weight(1f))
+                        Switch(checked = publisherEnabled, onCheckedChange = { publisherEnabled = it })
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = publisherName, onValueChange = { publisherName = it },
+                        label = { Text("发布者昵称") }, modifier = Modifier.fillMaxWidth(),
+                        enabled = publisherEnabled)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setPublisher(publisherEnabled, publisherName)
+                    publisherDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { publisherDialog = false }) { Text("取消") } }
+        )
+    }
+
+    // ---------- 修改密码 task=8（old_pwd/new_pwd，明文提交，沿用登录时的做法） ----------
+    if (pwdDialog) {
+        AlertDialog(
+            onDismissRequest = { pwdDialog = false },
+            title = { Text("修改登录密码") },
+            text = {
+                Column {
+                    Text("旧密码会以明文提交（与原版一致）。修改成功后请重新登录。",
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = oldPwd, onValueChange = { oldPwd = it },
+                        label = { Text("旧密码") }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = newPwd, onValueChange = { newPwd = it },
+                        label = { Text("新密码（至少 6 位）") }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.changePassword(oldPwd, newPwd)
+                    oldPwd = ""
+                    newPwd = ""
+                    pwdDialog = false
+                }) { Text("提交") }
+            },
+            dismissButton = { TextButton(onClick = { pwdDialog = false }) { Text("取消") } }
         )
     }
 }

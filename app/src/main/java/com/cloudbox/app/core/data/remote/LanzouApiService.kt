@@ -252,6 +252,69 @@ interface LanzouApiService {
         @Part file: MultipartBody.Part
     ): UploadResponse
 
+    // ==================== 账号中心设置（原版 account.lua） ====================
+
+    /**
+     * 个人分享链访问码 task=7。
+     *
+     * 原版 account.lua:2104 调用：`个人分享链("0", 个人文字.text)` →
+     * `task=7&codeoff=0&code=<内容>`。
+     * codeoff：0=启用访问码 / 1=不需要访问码（与文件提取码的 shows 语义相反，
+     * **别**照抄 task=23 的 shows 写法）。
+     */
+    @FormUrlEncoded
+    @POST("doupload.php")
+    suspend fun setPersonalLinkCode(
+        @Field("task") task: Int = 7,
+        @Field("codeoff") codeoff: Int,
+        @Field("code") code: String
+    ): CommonResponse
+
+    /**
+     * 修改密码 task=8。
+     *
+     * 原版 account.lua:1116：`task=8&new_pwd=<新>&old_pwd=<旧>`，
+     * 两边都是**明文**（与登录同源，服务端自己处理）。
+     */
+    @FormUrlEncoded
+    @POST("doupload.php")
+    suspend fun changePassword(
+        @Field("task") task: Int = 8,
+        @Field("old_pwd") oldPwd: String,
+        @Field("new_pwd") newPwd: String
+    ): CommonResponse
+
+    /**
+     * 外链（个人主页）标题与简介 task=10。
+     *
+     * 原版 account.lua:1517 调用：`外链设置(标题文字.text, 简介文字.text)` →
+     * `task=10&ubt=<标题>&usm=<简介>`。
+     * 字段名很反直觉：ubt=标题(url bt)，usm=简介(url summary)。
+     */
+    @FormUrlEncoded
+    @POST("doupload.php")
+    suspend fun setExternalLink(
+        @Field("task") task: Int = 10,
+        @Field("ubt") ubt: String,
+        @Field("usm") usm: String
+    ): CommonResponse
+
+    /**
+     * 是否显示发布者 task=15。
+     *
+     * 原版 account.lua:1794 调用：`显示发布者("0", 显示文字.text)` →
+     * `task=15&shows=0&shownames=<昵称>`。
+     * 注意这里 shows/shownames 复用的是"提取码"那一对字段名，但语义完全不同：
+     * shows=显示开关(0/1)，shownames=展示的发布者昵称。
+     */
+    @FormUrlEncoded
+    @POST("doupload.php")
+    suspend fun setPublisher(
+        @Field("task") task: Int = 15,
+        @Field("shows") shows: Int,
+        @Field("shownames") shownames: String
+    ): CommonResponse
+
     // ==================== 直链解析 ====================
 
     /**

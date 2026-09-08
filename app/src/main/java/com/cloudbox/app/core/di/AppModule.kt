@@ -9,6 +9,7 @@ import com.cloudbox.app.core.data.repository.DirectLinkRepositoryImpl
 import com.cloudbox.app.core.data.repository.DomainRepositoryImpl
 import com.cloudbox.app.core.data.repository.DownloadRepositoryImpl
 import com.cloudbox.app.core.data.repository.FileRepositoryImpl
+import com.cloudbox.app.core.data.repository.ProfileRepositoryImpl
 import com.cloudbox.app.core.data.repository.SearchRepositoryImpl
 import com.cloudbox.app.core.data.repository.ShareRepositoryImpl
 import com.cloudbox.app.core.data.repository.UploadRepositoryImpl
@@ -17,6 +18,7 @@ import com.cloudbox.app.core.domain.repository.DirectLinkRepository
 import com.cloudbox.app.core.domain.repository.DomainRepository
 import com.cloudbox.app.core.domain.repository.DownloadRepository
 import com.cloudbox.app.core.domain.repository.FileRepository
+import com.cloudbox.app.core.domain.repository.ProfileRepository
 import com.cloudbox.app.core.domain.repository.SearchRepository
 import com.cloudbox.app.core.domain.repository.ShareRepository
 import com.cloudbox.app.core.domain.repository.UploadRepository
@@ -96,4 +98,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindSearchRepository(impl: SearchRepositoryImpl): SearchRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindProfileRepository(impl: ProfileRepositoryImpl): ProfileRepository
 }

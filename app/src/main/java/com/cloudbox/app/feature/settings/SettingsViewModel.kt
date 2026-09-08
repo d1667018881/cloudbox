@@ -7,6 +7,8 @@ import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.model.AccountInfo
 import com.cloudbox.app.core.domain.repository.AuthRepository
+import com.cloudbox.app.core.domain.repository.ProfileRepository
+import com.cloudbox.app.core.domain.repository.ProfileResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +35,8 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsStore: SettingsStore,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val profileRepository: ProfileRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -143,4 +146,56 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
+
+    // ==================== 账号中心设置（task=7/8/10/15） ====================
+
+    /** 统一渲染 ProfileResult：成功弹服务端提示（没有就给默认文案），失败弹原因 */
+    private fun emitProfileResult(result: ProfileResult, defaultOk: String) {
+        _uiState.update {
+            it.copy(
+                message = when (result) {
+                    is ProfileResult.Success -> result.info ?: defaultOk
+                    is ProfileResult.Failure -> result.reason
+                }
+            )
+        }
+    }
+
+    /** 个人分享链访问码 */
+    fun setPersonalLinkCode(enableCode: Boolean, code: String) {
+        viewModelScope.launch {
+            emitProfileResult(
+                profileRepository.setPersonalLinkCode(enableCode, code),
+                if (enableCode) "已启用访问码" else "已关闭访问码"
+            )
+        }
+    }
+
+    /** 修改登录密码 */
+    fun changePassword(oldPwd: String, newPwd: String) {
+        viewModelScope.launch {
+            emitProfileResult(
+                profileRepository.changePassword(oldPwd, newPwd), "密码已修改，请用新密码重新登录"
+            )
+        }
+    }
+
+    /** 外链（个人主页）标题与简介 */
+    fun setExternalLink(title: String, summary: String) {
+        viewModelScope.launch {
+            emitProfileResult(
+                profileRepository.setExternalLink(title, summary), "外链信息已更新"
+            )
+        }
+    }
+
+    /** 是否显示发布者 */
+    fun setPublisher(show: Boolean, nickname: String) {
+        viewModelScope.launch {
+            emitProfileResult(
+                profileRepository.setPublisher(show, nickname),
+                if (show) "已开启显示发布者" else "已关闭显示发布者"
+            )
+        }
+    }
 }

@@ -114,8 +114,17 @@ data class RemoteFolder(
 
 /** 通用操作响应：{"zt": 1} 成功 */
 data class CommonResponse(
-    @SerializedName("zt") val zt: Int
-)
+    @SerializedName("zt") val zt: Int,
+    /**
+     * 服务端提示文案（成功时如 "设置成功"，失败时如 ""）。
+     * 用 Any? 而非 String?：实测部分接口失败时 info 是数字 0 或数组，
+     * 声明成 String 会让 Gson 抛 JsonSyntaxException，反而盖掉 zt 判定。
+     */
+    @SerializedName("info") val info: Any? = null
+) {
+    /** info 转字符串；非字符串形态一律返回 null */
+    val infoText: String? get() = (info as? String)?.takeIf { it.isNotBlank() }
+}
 
 /** 分享信息响应（task=22 文件 / task=18 文件夹） */
 data class ShareResponse(
