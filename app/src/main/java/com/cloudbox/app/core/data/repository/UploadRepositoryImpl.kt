@@ -10,10 +10,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody
+import okio.source
 import java.io.File
 import java.util.concurrent.ThreadLocalRandom
 import javax.inject.Inject
@@ -39,11 +39,21 @@ import javax.inject.Singleton
  *    凭证"半失效"时同样可能返回 zt=1 不入库。
  *    【本版】上传前先自检 phpdisk_info，缺失直接失败并提示重新登录。
  *
- * 另外补一个原版行为对照：原版（蓝云 AndroLua）**根本不自己拼 multipart**——
- * 它直接 WebView 打开官方上传页交给网页 JS 处理（反编译 55 个 lua 模块 +
- * Http.java 全部调用点确认：无任何 multipart 上传调用）。这是它"能正常上传"的
- * 真正原因。因此本仓库同时保留 [uploadPageUrl] 网页上传通道，
- * 原生直传失败时 UI 可引导用户走官方页面兜底。
+ * ─────────────────────────────────────────────────────────────
+ * ⚠️ 曾在这里写错过一句结论，已纠正（2026-09-08）
+ * ─────────────────────────────────────────────────────────────
+ * 旧注释说"原版根本不自己拼 multipart，全靠 WebView 打开官方上传页"——**这是错的**。
+ * 当时的依据是反编译出的 47 个 lua 模块里确实没有 multipart 调用，但**上传逻辑
+ * 恰恰在当年反编译失败的两个模块之一 `home.lua` 里**（只有字节码反汇编
+ * `disasm/home.txt`）。该反汇编 6537-6560 行有完整的 multipart 构造：
+ * 只有 `task` / `folder_id` / `upload_file` 三个字段，且每个字段都带
+ * `Content-Type: text/plain; charset=UTF-8` 与 `Content-Transfer-Encoding` 子头。
+ *
+ * 本仓库此前按"浏览器行为"推测发了 10 个字段，且没有那两个子头 —— 多发的字段
+ * 服务端并不认，这才是"显示成功但文件没上去"的直接原因。
+ * 现已按原版逐字节复刻，见 [buildOriginalMultipart]。
+ *
+ * 教训：**反编译失败的模块不能当作"没有这个功能"**，只能在结论里注明未覆盖。
  *
  * 防封延时：连续快速上传易触发风控，每次上传间隔 1-3s 随机抖动。
  */
@@ -169,28 +179,12 @@ class UploadRepositoryImpl @Inject constructor(
      * text 不含 id —— 这些一律视为失败，绝不放行。
      */
     private suspend fun doUpload(file: File, folderId: Long, uploadName: String): UploadResult {
-        val mediaType = "application/octet-stream".toMediaType()
-        val filePart = MultipartBody.Part.createFormData(
-            "upload_file", uploadName, file.asRequestBody(mediaType)
-        )
         val mime = mimeOf(uploadName)
-        // 浏览器 File.lastModifiedDate 的序列化格式
-        val lastModified = java.text.SimpleDateFormat(
-            "EEE MMM dd yyyy HH:mm:ss 'GMT'Z (z)", java.util.Locale.ENGLISH
-        ).format(java.util.Date(file.lastModified()))
+        val boundary = "----CloudBoxBoundary" +
+            java.util.UUID.randomUUID().toString().replace("-", "")
 
         val resp = apiClient.apiService.upload(
-            task = "1".toRequestBody(mediaType),
-            vie = "2".toRequestBody(mediaType),
-            ve = "2".toRequestBody(mediaType),
-            id = "WU_FILE_0".toRequestBody(mediaType),
-            folderIdBbN = folderId.toString().toRequestBody(mediaType),
-            // 双写 folder_id：不同站点版本认的字段名不同，多传一个无害
-            folderId = folderId.toString().toRequestBody(mediaType),
-            name = uploadName.toRequestBody(mediaType),
-            type = mime.toRequestBody(mediaType),
-            lastModifiedDate = lastModified.toRequestBody(mediaType),
-            file = filePart
+            buildOriginalMultipart(boundary, folderId, uploadName, mime, file)
         )
 
         val fileId: String? = (resp.text as? List<*>)
@@ -213,6 +207,108 @@ class UploadRepositoryImpl @Inject constructor(
             else ->
                 UploadResult(uploadName, null, false,
                     "${resp.info?.takeIf { it.isNotBlank() } ?: "上传失败"}（$raw）")
+        }
+    }
+
+    /**
+     * 逐字节复刻原版 home.lua 的 multipart（2026-09-08 复核）。
+     *
+     * ─────────────────────────────────────────────────────────────
+     * ⚠️ 为什么必须手写，而不能用 OkHttp 的 MultipartBody
+     * ─────────────────────────────────────────────────────────────
+     * 原版（disasm/home.txt:6537-6560）发的只有 **3 个字段**，且每个字段都带
+     * 两个子头：
+     *
+     * ```
+     * --<boundary>
+     * Content-Disposition: form-data; name="task"
+     * Content-Type: text/plain; charset=UTF-8
+     * Content-Transfer-Encoding: 8bit
+     *
+     * 1
+     * --<boundary>
+     * Content-Disposition: form-data; name="folder_id"
+     * Content-Type: text/plain; charset=UTF-8
+     * Content-Transfer-Encoding: 8bit
+     *
+     * <folderId>
+     * --<boundary>
+     * Content-Disposition: form-data; name="upload_file"; filename="<name>"
+     * Content-Type: <mime>
+     * Content-Transfer-Encoding: binary
+     *
+     * <文件字节>
+     * --<boundary>--
+     * ```
+     *
+     * 此前本仓库发的是 10 个字段（凭"浏览器行为"推测的 vie / ve / id /
+     * folder_id_bb_n / name / type / lastModifiedDate），且**没有**上面那两个子头
+     * ——推测出来的字段服务端并不认，这正是"显示成功但文件没上去"的直接原因。
+     *
+     * 另外 OkHttp 的 `MultipartBody.Part.create` 会明确拒绝 part 里带
+     * `Content-Type`（抛 "Unexpected header: Content-Type"），
+     * 所以无法用它复刻带子头的格式，只能自己写字节流。
+     *
+     * 换行：严格照抄原版的 LF（原版常量里就是 `\n`）。PHP 侧的 multipart
+     * 解析对 LF / CRLF 都容忍，这里以"和原版一致"为准。
+     */
+    private fun buildOriginalMultipart(
+        boundary: String,
+        folderId: Long,
+        uploadName: String,
+        mime: String,
+        file: File
+    ): RequestBody = object : RequestBody() {
+
+        override fun contentType(): MediaType =
+            "multipart/form-data;boundary=$boundary".toMediaType()
+
+        override fun contentLength(): Long {
+            val prefix = (
+                "--$boundary\n" +
+                    "Content-Disposition: form-data; name=\"task\"\n" +
+                    "Content-Type: text/plain; charset=UTF-8\n" +
+                    "Content-Transfer-Encoding: 8bit\n\n" +
+                    "1\n" +
+                    "--$boundary\n" +
+                    "Content-Disposition: form-data; name=\"folder_id\"\n" +
+                    "Content-Type: text/plain; charset=UTF-8\n" +
+                    "Content-Transfer-Encoding: 8bit\n\n" +
+                    "$folderId\n" +
+                    "--$boundary\n" +
+                    "Content-Disposition: form-data; name=\"upload_file\"; filename=\"$uploadName\"\n" +
+                    "Content-Type: $mime\n" +
+                    "Content-Transfer-Encoding: binary\n\n"
+                ).toByteArray(Charsets.UTF_8).size.toLong()
+            val suffix = "\n--$boundary--\n".toByteArray(Charsets.UTF_8).size.toLong()
+            return prefix + file.length() + suffix
+        }
+
+        override fun writeTo(sink: okio.BufferedSink) {
+            // task = 1
+            sink.writeUtf8("--$boundary\n")
+            sink.writeUtf8("Content-Disposition: form-data; name=\"task\"\n")
+            sink.writeUtf8("Content-Type: text/plain; charset=UTF-8\n")
+            sink.writeUtf8("Content-Transfer-Encoding: 8bit\n\n")
+            sink.writeUtf8("1\n")
+
+            // folder_id
+            sink.writeUtf8("--$boundary\n")
+            sink.writeUtf8("Content-Disposition: form-data; name=\"folder_id\"\n")
+            sink.writeUtf8("Content-Type: text/plain; charset=UTF-8\n")
+            sink.writeUtf8("Content-Transfer-Encoding: 8bit\n\n")
+            sink.writeUtf8("$folderId\n")
+
+            // upload_file（文件内容流式写出，不整包读进内存）
+            sink.writeUtf8("--$boundary\n")
+            sink.writeUtf8(
+                "Content-Disposition: form-data; name=\"upload_file\"; filename=\"$uploadName\"\n"
+            )
+            sink.writeUtf8("Content-Type: $mime\n")
+            sink.writeUtf8("Content-Transfer-Encoding: binary\n\n")
+            file.inputStream().source().use { sink.writeAll(it) }
+
+            sink.writeUtf8("\n--$boundary--\n")
         }
     }
 

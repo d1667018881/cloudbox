@@ -8,16 +8,13 @@ import com.cloudbox.app.core.data.dto.FolderListResponse
 import com.cloudbox.app.core.data.dto.ShareFileListResponse
 import com.cloudbox.app.core.data.dto.ShareResponse
 import com.cloudbox.app.core.data.dto.UploadResponse
-import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
-import retrofit2.http.Multipart
 import retrofit2.http.POST
-import retrofit2.http.Part
 import retrofit2.http.Query
 import retrofit2.http.Streaming
 import retrofit2.http.Url
@@ -237,20 +234,17 @@ interface LanzouApiService {
      * 响应：成功 {"zt":1,"text":[{id,name,time,size,icon,downs}]}（text 为数组）；
      *       未登录 {"zt":9,"info":"login not","text":"error"}（text 为字符串）。
      */
-    @Multipart
+    /**
+     * 上传：整包 body 由调用方构造（[UploadRepositoryImpl] 按原版 home.lua 逐字节拼装）。
+     *
+     * 为什么不用 `@Multipart` + `@Part`：
+     * OkHttp 的 `MultipartBody.Part.create` 会拒绝 part 里出现 `Content-Type`
+     * （"Unexpected header: Content-Type"），而原版每个字段都必须带
+     * `Content-Type: text/plain; charset=UTF-8` + `Content-Transfer-Encoding: 8bit`。
+     * 所以这里退化成直接收 RequestBody，由我们自己写字节流。
+     */
     @POST("html5up.php")
-    suspend fun upload(
-        @Part("task") task: RequestBody,
-        @Part("vie") vie: RequestBody,
-        @Part("ve") ve: RequestBody,
-        @Part("id") id: RequestBody,
-        @Part("folder_id_bb_n") folderIdBbN: RequestBody,
-        @Part("folder_id") folderId: RequestBody,
-        @Part("name") name: RequestBody,
-        @Part("type") type: RequestBody,
-        @Part("lastModifiedDate") lastModifiedDate: RequestBody,
-        @Part file: MultipartBody.Part
-    ): UploadResponse
+    suspend fun upload(@Body body: RequestBody): UploadResponse
 
     // ==================== 账号中心设置（原版 account.lua） ====================
 
