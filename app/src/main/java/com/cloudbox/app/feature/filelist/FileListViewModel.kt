@@ -44,7 +44,7 @@ class FileListViewModel @Inject constructor(
 
     /** 上传默认通道：true = 官方网页上传。设置页可切回原生直传。 */
     val preferWebUpload: StateFlow<Boolean> = settingsStore.preferWebUpload
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var page = 1
 

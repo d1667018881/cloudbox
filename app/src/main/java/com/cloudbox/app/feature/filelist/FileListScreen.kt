@@ -87,7 +87,7 @@ fun FileListScreen(
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     // 在 @Composable 作用域取 context：上传失败点"网页上传"时要用它启动 Activity
     val context = androidx.compose.ui.platform.LocalContext.current
-    // 上传默认通道（true = 官方网页上传，设置页可切回原生直传）
+    // 上传通道：默认 false = App 原生直传；设置页可临时切到官方网页通道
     val preferWebUpload by viewModel.preferWebUpload.collectAsState()
 
     // V5：+ FAB 直传当前目录（SAF 多选）——上传不再是独立 Tab

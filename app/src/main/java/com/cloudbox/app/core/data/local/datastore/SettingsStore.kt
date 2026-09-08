@@ -46,15 +46,20 @@ class SettingsStore @Inject constructor(private val context: Context) {
     }
 
     /**
-     * 上传默认通道：true = 网页上传（官方通道），false = 原生直传。
+     * 上传默认通道：true = 网页上传（官方页面），false = 原生直传（App 自己传）。
      *
-     * **默认 true**。原生直传拼的是我们逆向出来的 multipart 协议，蓝奏云一改就废
-     * （典型症状：返回 zt=1 却不入库，即"显示成功但文件没上去"）；
-     * 网页上传走的是官方页面自己的 JS —— 原版 App 正是这么做的，实测稳定得多。
-     * 想要原生通道的便捷性，可在设置里切回去。
+     * **默认 false（原生直传）** —— 这才是 App 该有的形态：选完文件自动上传，
+     * 不需要用户在网页里手动点一遍。
+     *
+     * V12 起原生直传已按原版 home.lua 逐字节复刻（只有 task / folder_id /
+     * upload_file 三个字段，且每个字段都带 Content-Type 与 Content-Transfer-Encoding
+     * 子头，见 UploadRepositoryImpl.buildOriginalMultipart）。之前"假成功"是协议
+     * 写错导致的，不是原生路线本身不可行。
+     *
+     * 万一蓝奏云再改版导致原生失效，把这个开关打开即可临时切到网页通道。
      */
     val preferWebUpload: Flow<Boolean> = context.settingsDataStore.data.map {
-        it[keyPreferWebUpload] ?: true
+        it[keyPreferWebUpload] ?: false
     }
 
     suspend fun setUserAgent(ua: String) = edit { p -> p[keyUserAgent] = ua }

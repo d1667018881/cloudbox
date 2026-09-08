@@ -25,8 +25,8 @@ data class SettingsUiState(
     val suffixSpoof: Boolean = true,
     val thirdPartyResolver: String = "",
     val darkMode: String = "system",
-    /** true = 上传默认走官方网页通道（默认开，见 SettingsStore.preferWebUpload 的说明） */
-    val preferWebUpload: Boolean = true,
+    /** true = 走官方网页通道；默认 false = App 原生直传（见 SettingsStore.preferWebUpload） */
+    val preferWebUpload: Boolean = false,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
     val cookieExported: String? = null,

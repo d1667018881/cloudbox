@@ -147,10 +147,10 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("上传默认走官方网页通道", style = MaterialTheme.typography.bodyLarge)
+                    Text("上传改用官方网页通道（临时兜底）", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "原生直传基于逆向的 multipart 协议，对方改版会「假成功」；" +
-                            "网页通道由官方页面自己处理，原版 App 也是这么做的。关闭则用原生直传。",
+                        "默认关闭：App 自己拼 multipart 直传（选完文件自动传）。" +
+                            "若蓝奏云改版导致直传失效，打开它改用官方网页上传。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
