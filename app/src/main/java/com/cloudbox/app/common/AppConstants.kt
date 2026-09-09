@@ -93,6 +93,16 @@ object AppConstants {
     const val TIMEOUT_READ_MS = 30_000L
     const val TIMEOUT_WRITE_MS = 30_000L
 
+    /**
+     * 上传专用读/写超时（10 分钟）。
+     *
+     * 为什么必须比上面的 30s 长得多：30s 是"普通 API 请求"的合理上限，
+     * 但上传是**长时间持续写入**——30s 只够传二三十 MB（弱网时更少），
+     * 稍大一点的文件必然被掐断，表现为"上传失败、云端也没有"。
+     * 蓝奏云免费用户单文件上限 100MB，10 分钟对较差网络也足够。
+     */
+    const val TIMEOUT_UPLOAD_MS = 10L * 60 * 1000
+
     /** 重试策略：最多重试 3 次，指数退避基数 2s */
     const val MAX_RETRIES = 3
     const val RETRY_BASE_DELAY_MS = 2_000L

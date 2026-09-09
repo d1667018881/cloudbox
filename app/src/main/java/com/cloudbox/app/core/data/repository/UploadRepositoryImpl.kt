@@ -76,6 +76,14 @@ class UploadRepositoryImpl @Inject constructor(
                 if (!file.exists() || !file.isFile) {
                     return@runCatching UploadResult(file.name, null, false, "本地文件不存在")
                 }
+                // 0 字节要单独拦：SAF 从第三方 App 拷贝到缓存失败时，文件存在但是空的，
+                // 传上去要么被服务端拒，要么变成一个空文件——两种都很难从结果反推原因。
+                if (file.length() == 0L) {
+                    return@runCatching UploadResult(
+                        file.name, null, false,
+                        "本地文件是空的（0 字节），可能是从其它 App 选择时拷贝失败"
+                    )
+                }
                 // ① 凭证自检：没有 phpdisk_info 就不要发请求（否则大概率假成功）
                 if (!apiClient.cookieJar.hasUploadCredentials()) {
                     return@runCatching UploadResult(
@@ -119,7 +127,18 @@ class UploadRepositoryImpl @Inject constructor(
                     result
                 }
             }.getOrElse { e ->
-                UploadResult(file.name, null, false, e.message ?: "上传失败")
+                // 超时单独给一句人话：SocketTimeoutException 对普通用户毫无意义，
+                // 而"文件太大/网络太慢"才是他真正能采取行动的信息。
+                val reason = when (e) {
+                    is java.net.SocketTimeoutException ->
+                        "上传超时：文件偏大或网络太慢，建议换 Wi-Fi，或把文件分卷后再传"
+                    is java.io.IOException -> "网络错误：${e.message}"
+                    else -> e.message ?: "上传失败"
+                }
+                UploadResult(
+                    file.name, null, false,
+                    "$reason（大小 ${file.length() / 1024}KB）"
+                )
             }
         }
 
@@ -193,7 +212,7 @@ class UploadRepositoryImpl @Inject constructor(
         val boundary = "----CloudBoxBoundary" +
             java.util.UUID.randomUUID().toString().replace("-", "")
 
-        val resp = apiClient.apiService.upload(
+        val resp = apiClient.uploadApiService.upload(
             buildOriginalMultipart(boundary, folderId, uploadName, mime, file),
             "UTF-8"
         )
@@ -239,7 +258,7 @@ class UploadRepositoryImpl @Inject constructor(
                 val body = buildOriginalMultipart(
                     boundary, folderId, probe.name, "text/plain", probe
                 )
-                val resp = apiClient.apiService.uploadProbe(body, "UTF-8")
+                val resp = apiClient.uploadApiService.uploadProbe(body, "UTF-8")
                 val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
                     .getOrElse { "<读取响应失败: ${it.message}>" }
                 UploadProbeResult(

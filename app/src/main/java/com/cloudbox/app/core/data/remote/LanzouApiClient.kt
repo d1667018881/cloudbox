@@ -69,6 +69,30 @@ class LanzouApiClient @Inject constructor(
 
     val apiService: LanzouApiService by lazy { retrofit.create(LanzouApiService::class.java) }
 
+    /**
+     * 上传专用 OkHttpClient：只放宽读/写超时，其余（拦截器、连接池、Cookie）全量复用。
+     *
+     * 为什么必须单独开一个：默认 client 的 `writeTimeout` 是 30s（需求规格对
+     * 普通 API 的要求），但上传是**长时间持续写入**——30s 只够传二三十 MB，
+     * 大文件必然被掐断，表现为"传了半天最后失败，云端也没有文件"。
+     * OkHttp 的超时绑在 client 上、无法按单个请求覆盖，所以只能另建实例。
+     *
+     * 用 `newBuilder()` 派生：连接池、拦截器、CookieJar 全部继承，
+     * 额外成本只有一个 client 实例，不破坏 keep-alive 复用。
+     */
+    val uploadOkHttpClient: OkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .readTimeout(AppConstants.TIMEOUT_UPLOAD_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(AppConstants.TIMEOUT_UPLOAD_MS, TimeUnit.MILLISECONDS)
+            .build()
+    }
+
+    /** 上传专用 Retrofit：同一个 interface，只换了 client */
+    val uploadApiService: LanzouApiService by lazy {
+        retrofit.newBuilder().client(uploadOkHttpClient).build()
+            .create(LanzouApiService::class.java)
+    }
+
     /** 启动时调用：订阅设置里的自定义 UA，热更新到拦截器（无需重建 client） */
     fun bindSettings(scope: kotlinx.coroutines.CoroutineScope) {
         scope.launch {

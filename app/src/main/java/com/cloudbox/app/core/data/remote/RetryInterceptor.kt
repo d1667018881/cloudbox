@@ -26,9 +26,17 @@ class RetryInterceptor @Inject constructor() : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        // #20 修复：上传请求（fileup.php）IOException 不自动重试——
-        // 上传中途断流重试可能导致服务端已收到、重复上传（非幂等）；交给上层决策
-        val isUpload = request.method == "POST" && request.url.encodedPath.contains("/fileup.php")
+        // #20 修复：上传请求 IOException 不自动重试——上传中途断流重试可能导致
+        // 服务端已收到、重复上传（非幂等）；交给上层决策。
+        //
+        // ⚠️ 2026-09-09 补漏：这里原先只判 `/fileup.php`，而 V6 起实际端点
+        // 早已换成 `/html5up.php`（fileup.php 已 404）。结果上传请求**没被豁免**，
+        // 一旦超时就整包重传 3 次（2s/4s/8s 退避）——用户干等十几秒最后还是失败。
+        // 两个端点都写上，避免以后再换端点时重蹈覆辙。
+        val isUpload = request.method == "POST" && (
+            request.url.encodedPath.contains("/fileup.php") ||
+                request.url.encodedPath.contains("/html5up.php")
+            )
         var attempt = 0
         while (true) {
             val response = try {
