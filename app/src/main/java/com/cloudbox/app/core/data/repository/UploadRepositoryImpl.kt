@@ -96,21 +96,27 @@ class UploadRepositoryImpl @Inject constructor(
                 val result = doUpload(file, folderId, uploadName)
                 if (!result.success) return@runCatching result
 
-                // ④ 云端确认（关键）：zt=1 不代表真的入库，必须回查目录确认。
-                //    verifyOnCloud 内部已重试 3 次（0/1.2s/2.4s），这里不再叠加外层重试
-                //    ——批量上传时每多一轮就是每个文件多等几秒。
-                val verified = verifyOnCloud(folderId, uploadName)
-                when (verified) {
-                    true -> result
-                    false -> UploadResult(
-                        uploadName, result.fileId, false,
-                        "服务器返回成功，但云端目录未找到该文件（未真正上传，请重试）"
-                    )
-                    // 旧实现在这里返回 success=true —— 假成功的唯一入口，本版改为失败
-                    null -> UploadResult(
-                        uploadName, result.fileId, false,
-                        "上传结果无法确认：云端列表请求失败，请稍后在文件列表核实"
-                    )
+                // ④ 云端二次确认 —— 2026-09-09 起**降级为提示，不再能否决成功**
+                //
+                //    ⚠️ 这里曾经是"App 说失败、网盘里其实有文件"的元凶。
+                //    设置页「上传通道自检」的实测证据（用户两次跑探针）：
+                //      HTTP 200 / zt=1 / info="上传成功" / text[0].id="316683085"
+                //    两个 id 不同且真实 → 服务端给 id 就是**真的创建了文件**。
+                //    而 verifyOnCloud 靠"列表里能查到同名文件"来判定，一旦碰上
+                //    分页（新文件不在第一页）、排序、或入库延迟，就会把真实成功的
+                //    上传误判成失败，还给出"未真正上传，请重试"的误导文案。
+                //
+                //    【现在的规则】成败只由服务端回包决定：
+                //    doUpload 已严格判定 zt==1 且 text 是数组且首元素带非空 id，
+                //    满足这个条件文件就已经在网盘里了。
+                //
+                //    列表确认只剩一个用途：查到了就给一句正面反馈，让用户安心。
+                //    **查不到就当没发生**——绝不再据此报失败或弹提示，
+                //    那正是上一版把真成功误判成失败的原因。
+                if (verifyOnCloud(folderId, uploadName)) {
+                    result.copy(message = "已上传，且已在文件列表中确认")
+                } else {
+                    result
                 }
             }.getOrElse { e ->
                 UploadResult(file.name, null, false, e.message ?: "上传失败")
@@ -372,25 +378,21 @@ class UploadRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 上传后云端确认：在目标目录第一页（按时间倒序，刚上传的排最前）查文件名。
+     * 上传后云端确认：在目标目录第一页按文件名查找。
      *
-     * 返回：true=确认存在；false=目录里确实没有（假成功）；null=列表请求失败，无法判断。
-     * 注意区分 false 与 null：只有请求本身成功、但列表里没有该文件，才是 false。
+     * ⚠️ 2026-09-09 重写：本函数**只用来给一句正面反馈，绝不决定成败**
+     * （理由见 uploadFile 步骤 ④）。既然不承担判定职责，就必须足够轻：
+     *
+     * - **不重试、不翻页**：只查第一页一次。旧实现要跑 3 轮 × 最多 5 页，
+     *   批量上传时每个文件都要多等好几秒，纯粹是拖慢自己。
+     * - 新增文件按时间倒序排在最前，查第一页已经足够。
+     * - 任何异常都吞掉返回 false —— 确认失败不代表上传失败。
      */
-    private suspend fun verifyOnCloud(folderId: Long, uploadName: String): Boolean? {
-        // 服务端入库有短暂延迟，最多重试 3 次（0 / 1.2s / 2.4s）
-        repeat(3) { attempt ->
-            if (attempt > 0) delay(1_200L * attempt)
-            val listed: Boolean? = runCatching {
-                val resp = apiClient.apiService.getFileList(folderId = folderId, pg = 1)
-                resp.items.any { it.nameAll == uploadName }
-            }.getOrNull()
-            if (listed == true) return true
-            // 请求成功但没找到 → 再等一轮；连续 3 轮都没有才判 false
-            if (listed == false && attempt == 2) return false
-        }
-        return null
-    }
+    private suspend fun verifyOnCloud(folderId: Long, uploadName: String): Boolean =
+        runCatching {
+            apiClient.apiService.getFileList(folderId = folderId, pg = 1)
+                .items.any { it.nameAll == uploadName }
+        }.getOrDefault(false)
 
     /** 需要伪装后缀的格式：exe/apk 等蓝奏云限制上传的格式 */
     private fun needsSpoof(file: File): Boolean {

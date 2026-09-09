@@ -56,6 +56,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var uaDialog by remember { mutableStateOf(false) }
     var resolverDialog by remember { mutableStateOf(false) }
@@ -143,22 +144,21 @@ fun SettingsScreen(
                 }
                 Switch(checked = state.suffixSpoof, onCheckedChange = viewModel::saveSuffixSpoof)
             }
-            // 上传通道：默认走官方网页。原生直传是逆向出来的协议，
-            // 蓝奏云一改版就容易出现「显示成功但文件没上去」的假成功。
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // 上传通道：**没有开关**。App 一律自己拼 multipart 直传（原版就这么做，
+            // 自检也实测通过）。网页上传降级为下面这个手动入口，只在需要时点开。
+            SettingRow(
+                "打开官方网页上传页（备用）",
+                "传超大文件、或原生通道被风控挡住时才用；日常上传不用它"
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("上传改用官方网页通道（临时兜底）", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "默认关闭：App 自己拼 multipart 直传（选完文件自动传）。" +
-                            "若蓝奏云改版导致直传失效，打开它改用官方网页上传。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = state.preferWebUpload, onCheckedChange = viewModel::savePreferWebUpload)
+                context.startActivity(
+                    android.content.Intent(
+                        context,
+                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                    ).putExtra(
+                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                        -1L
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
             }
             HorizontalDivider()
 

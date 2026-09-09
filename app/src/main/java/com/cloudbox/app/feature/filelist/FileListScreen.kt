@@ -87,8 +87,6 @@ fun FileListScreen(
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     // 在 @Composable 作用域取 context：上传失败点"网页上传"时要用它启动 Activity
     val context = androidx.compose.ui.platform.LocalContext.current
-    // 上传通道：默认 false = App 原生直传；设置页可临时切到官方网页通道
-    val preferWebUpload by viewModel.preferWebUpload.collectAsState()
 
     // V5：+ FAB 直传当前目录（SAF 多选）——上传不再是独立 Tab
     val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -228,52 +226,33 @@ fun FileListScreen(
                             leadingIcon = { Icon(Icons.Filled.Add, null) },
                             onClick = { showFabMenu = false; showNewFolder = true }
                         )
+                        // 上传**永远**走 App 原生直传：选完文件立刻自己传，不弹网页。
+                        // 原版 App 就是这么做的（disasm/home.txt:6537-6560），
+                        // 设置页的「上传通道自检」也实测证明这条路确实传得上去。
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(if (preferWebUpload) "上传文件（官方网页通道）" else "上传文件到当前目录") },
+                            text = { Text("上传文件到当前目录") },
                             leadingIcon = { Icon(Icons.Filled.UploadFile, null) },
                             onClick = {
                                 showFabMenu = false
-                                // 默认走官方网页上传：原生直传是逆向协议，改版即"假成功"。
-                                // 设置里关掉开关才回到原生直传。
-                                if (preferWebUpload) {
-                                    webUploadLauncher.launch(
-                                        android.content.Intent(
-                                            context,
-                                            com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
-                                        ).putExtra(
-                                            com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
-                                            state.folderStack.last().first
-                                        )
-                                    )
-                                } else {
-                                    filePicker.launch(arrayOf("*/*"))
-                                }
+                                filePicker.launch(arrayOf("*/*"))
                             }
                         )
-                        // 另一个通道：与上面那一项互斥，无论偏好如何都能临时换一条路走。
+                        // 官方网页上传页：仅作**手动备用入口**（传超大文件、或哪天
+                        // 原生通道被风控挡住时用）。它不是默认路径。
                         androidx.compose.material3.DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (preferWebUpload) "改用原生直传（可能假成功）"
-                                    else "改用官方网页上传（推荐）"
-                                )
-                            },
+                            text = { Text("打开官方网页上传页（备用）") },
                             leadingIcon = { Icon(Icons.Filled.Language, null) },
                             onClick = {
                                 showFabMenu = false
-                                if (preferWebUpload) {
-                                    filePicker.launch(arrayOf("*/*"))
-                                } else {
-                                    webUploadLauncher.launch(
-                                        android.content.Intent(
-                                            context,
-                                            com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
-                                        ).putExtra(
-                                            com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
-                                            state.folderStack.last().first
-                                        )
+                                webUploadLauncher.launch(
+                                    android.content.Intent(
+                                        context,
+                                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                                    ).putExtra(
+                                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                                        state.folderStack.last().first
                                     )
-                                }
+                                )
                             }
                         )
                     }
