@@ -1298,3 +1298,66 @@ V6 起实际端点早已从 `fileup.php` 换成 `html5up.php`（前者已 404）
 3. 剩下就是"请求发出去了但没成功" → 直奔超时与重试
 
 > **先造探针，再修 bug。** 没有第 1 步，我们还在协议里打转。
+
+---
+
+## 23. V15 复查：multipart 格式实测 + 分卷命名 bug（2026-09-10）
+
+### 23.1 用真实 HTTP 请求验证 multipart 格式
+
+`buildOriginalMultipart` 生成的 body 到底合不合法，光看代码看不出来。
+写了 `verify_multipart.py`（工作区，未入库）做端到端验证：
+
+1. 按 Kotlin 代码**逐行复现**字节序列
+2. 真的发一次 HTTP POST 到本地起的临时服务
+3. 服务端用 Python 标准库 `email.parser`（RFC 7578 兼容）解析
+
+结果全绿（含中文文件名）：
+
+```
+字段清单: ['folder_id', 'task', 'upload_file']
+[OK ] 字段数量: 3
+[OK ] task 值: b'1'
+[OK ] upload_file 文件名: '中文 测试.txt'
+[OK ] upload_file 内容一致（69 字节，含中文）
+[OK ] 文件段 Content-Type / CTE
+[OK ] 请求头 Charset: UTF-8
+```
+
+结合真机自检（HTTP 200 / zt=1 / 真实 id），协议层可以判定为**已确认**。
+
+### 23.2 修掉的分卷命名 bug
+
+`SplitZipUtil.split` 收集分卷时：
+
+```kotlin
+File(outPath.replace(".zip", ".z%02d".format(idx)))   // 错
+```
+
+`String.replace` 替换**所有**匹配。文件名自带 `.zip` 时：
+
+```
+archive.zip.bak  →  nameWithoutExtension = "archive.zip"
+                →  outPath = "archive.zip.zip"
+                →  replace 得 "archive.z01.z01"   ← 错
+                →  正确应为 "archive.zip.z01"
+```
+
+后果：一个分卷都收集不到，`volumes` 只剩那个**未切分**的 .zip，
+它通常超过 100MB 上限，直接被服务端拒绝——表现为"大文件上传必失败"。
+
+修法：只去掉**末尾**的 `.zip` 再拼分卷号（`removeSuffix`）。
+
+> 教训：**`String.replace` 是全局替换，不是替换第一个**。
+> 处理"去掉扩展名"这类需求时，一律用 `removeSuffix` / `substringBeforeLast`。
+
+### 23.3 本次复查的其它结论
+
+* 权限已就绪：`FOREGROUND_SERVICE` 与 `FOREGROUND_SERVICE_DATA_SYNC` 都已在
+  Manifest 声明——将来若要把 UploadWorker 提为前台服务以突破 10 分钟限制，
+  不需要再动权限。
+* `copyUriToCache` 在 `openInputStream` 返回 null 时会返回一个 0 字节文件，
+  但 `uploadFile` 已有 0 字节检查并给出明确提示，不会静默传空文件。
+* `contentLength()` 与 `writeTo()` 的字节数一致（都用 UTF-8、文件按 length 流式写出），
+  不会触发 OkHttp 的长度校验异常。
+* CI 日志 18 条警告全是既有废弃 API（图标/进度条），与上传链路无关。

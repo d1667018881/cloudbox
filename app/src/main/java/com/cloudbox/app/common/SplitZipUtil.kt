@@ -36,10 +36,20 @@ object SplitZipUtil {
         zipFile.createSplitZipFile(listOf(source), params, true, volumeBytes)
 
         // 收集生成的分卷：.zip + .z01 + .z02 ...
+        //
+        // ⚠️ 2026-09-10 修复：这里原先写 outPath.replace(".zip", ".zNN")，
+        // 而 String.replace 替换的是**所有**匹配项。文件名里自带 ".zip" 时
+        // （典型：archive.zip.bak → nameWithoutExtension 得 "archive.zip"
+        //  → outPath = "archive.zip.zip"），会被替换成 "archive.z01.z01"，
+        // 于是下面一个分卷都收集不到 → volumes 只剩那个未切分的 .zip，
+        // 它往往超过 100MB 上限，直接被服务端拒绝。
+        // 正确做法是只去掉**末尾**的 .zip 再拼分卷号。
+        val stem = outPath.removeSuffix(".zip")
         val volumes = mutableListOf<File>()
         var idx = 0
         while (true) {
-            val candidate = if (idx == 0) File(outPath) else File(outPath.replace(".zip", ".z%02d".format(idx)))
+            val candidate =
+                if (idx == 0) File(outPath) else File("$stem.z%02d".format(idx))
             if (candidate.exists()) {
                 volumes.add(candidate)
                 idx++
