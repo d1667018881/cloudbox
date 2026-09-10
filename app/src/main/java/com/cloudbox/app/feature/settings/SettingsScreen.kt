@@ -58,6 +58,10 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    // 真实文件自检：选完文件直接跑一遍上传链路
+    val probePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.runUploadProbeWith(it) } }
     var uaDialog by remember { mutableStateOf(false) }
     var resolverDialog by remember { mutableStateOf(false) }
     var uaInput by remember { mutableStateOf(state.userAgent) }
@@ -179,6 +183,25 @@ fun SettingsScreen(
                 }
                 TextButton(onClick = viewModel::runUploadProbe, enabled = !state.probing) {
                     Text(if (state.probing) "检测中…" else "开始")
+                }
+            }
+            // 拿真实文件测：内置探针只有 40 字节，它能过只说明链路通。
+            // 真正失败的文件往往是太大/格式受限，必须用它自己测才暴露得出来。
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("用真实文件自检", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "选那个一直传不上去的文件，按同样流程跑一遍并原样显示回包。" +
+                            "这是定位问题最快的方式。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = { probePicker.launch(arrayOf("*/*")) }, enabled = !state.probing) {
+                    Text(if (state.probing) "检测中…" else "选文件")
                 }
             }
             state.probeResult?.let {
@@ -393,6 +416,13 @@ private fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) 
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("HTTP ${result.httpCode}", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(6.dp))
+                if (result.fileName.isNotBlank()) {
+                    Text(
+                        "文件：${result.fileName}（${result.fileSize / 1024} KB）",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
                 Text("请求地址：${result.requestUrl}",
                     style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(6.dp))
@@ -416,7 +446,9 @@ private fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) 
                     android.content.ClipData.newPlainText(
                         "probe",
                         "HTTP ${result.httpCode}\n${result.requestUrl}\n"
-                            + "credential=${result.hasCredential}\n${result.rawBody}"
+                            + "credential=${result.hasCredential}\n"
+                            + "file=${result.fileName} (${result.fileSize / 1024} KB)\n"
+                            + result.rawBody
                     )
                 )
                 onDismiss()

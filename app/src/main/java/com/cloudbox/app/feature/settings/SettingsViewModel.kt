@@ -17,8 +17,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /** 设置页 UI 状态 */
@@ -167,6 +169,50 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(probing = false, probeResult = r) }
         }
     }
+
+    /**
+     * 用**用户选的真实文件**跑自检——排障主力。
+     *
+     * 内置探针只有 40 字节，它能过只说明链路通；
+     * 真正失败的文件可能是太大（超时）、格式受限、或文件名编码有问题，
+     * 这些只有拿原文件测才会暴露。
+     */
+    fun runUploadProbeWith(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(probing = true, probeResult = null) }
+            val r = withContext(Dispatchers.IO) {
+                val f = copyUriToCache(uri)
+                if (f == null) {
+                    UploadProbeResult(
+                        httpCode = -1,
+                        requestUrl = "未发出",
+                        rawBody = "无法读取所选文件（把它拷进 App 缓存失败）",
+                        hasCredential = false
+                    )
+                } else {
+                    uploadRepository.probeUploadWith(f, -1L)
+                }
+            }
+            _uiState.update { it.copy(probing = false, probeResult = r) }
+        }
+    }
+
+    /** SAF uri → 缓存文件，保留原始文件名（与 UploadViewModel 的做法一致） */
+    private fun copyUriToCache(uri: android.net.Uri): java.io.File? = runCatching {
+        val name = runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && !c.isNull(idx)) c.getString(idx) else null
+            }
+        }.getOrNull() ?: "probe_${System.currentTimeMillis()}"
+        val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val dir = java.io.File(context.cacheDir, "probe").apply { mkdirs() }
+        val out = java.io.File(dir, safeName)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { output -> input.copyTo(output) }
+        }
+        out.takeIf { it.exists() && it.length() > 0 }
+    }.getOrNull()
 
     fun dismissProbe() = _uiState.update { it.copy(probeResult = null) }
 

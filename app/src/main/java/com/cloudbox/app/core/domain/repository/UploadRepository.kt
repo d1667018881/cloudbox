@@ -16,12 +16,16 @@ data class UploadResult(
  * @param httpCode  HTTP 状态码（-1 表示请求根本没发出去）
  * @param requestUrl 实际请求的完整 URL（确认域名/端点是否符合预期）
  * @param rawBody   服务端返回的原始文本（**不截断**，包含 zt / info / text 全部字段）
+ * @param fileName  被测文件名（判断"是不是这个文件本身有问题"时要用）
+ * @param fileSize  被测文件字节数
  */
 data class UploadProbeResult(
     val httpCode: Int = -1,
     val requestUrl: String = "",
     val rawBody: String = "",
-    val hasCredential: Boolean = false
+    val hasCredential: Boolean = false,
+    val fileName: String = "",
+    val fileSize: Long = 0
 )
 
 /**
@@ -63,6 +67,15 @@ interface UploadRepository {
      * 必须看到 zt / info / text 的真实形态。
      */
     suspend fun probeUpload(folderId: Long): UploadProbeResult
+
+    /**
+     * 用**指定文件**跑自检（排障主力）。
+     *
+     * 为什么必须有它：内置探针只有 40 字节，能过不代表真实文件能过。
+     * 文件太大（超时）、格式受限、文件名编码异常，这些只有拿真文件测才暴露得出来。
+     * 用户拿那个"一直失败的文件"点一下，回包原文就能直接定性。
+     */
+    suspend fun probeUploadWith(file: File, folderId: Long): UploadProbeResult
 
     /** 单文件直传（不支持格式会按设置伪装后缀） */
     suspend fun uploadFile(file: File, folderId: Long, spoofSuffix: Boolean): UploadResult

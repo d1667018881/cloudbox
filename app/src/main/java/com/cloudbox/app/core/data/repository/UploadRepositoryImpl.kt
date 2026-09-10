@@ -67,8 +67,16 @@ class UploadRepositoryImpl @Inject constructor(
     private val settingsStore: SettingsStore
 ) : UploadRepository {
 
+    /**
+     * 超限判定：**95MB 就走分卷，而不是等到 100MB**。
+     *
+     * 为什么提前 5MB：100MB 这个上限来自社区共识而非官方承诺，
+     * 贴线上传极易被服务端拒绝（表现为传了半天最后失败）。
+     * 分卷只是多一步，代价远小于"传完被拒"——所以阈值直接取分卷单卷大小
+     * [AppConstants.SPLIT_VOLUME_BYTES]，让判定和分卷行为对齐。
+     */
     override fun isOversize(file: File): Boolean =
-        file.length() > AppConstants.FREE_FILE_LIMIT_BYTES
+        file.length() > AppConstants.SPLIT_VOLUME_BYTES
 
     override suspend fun uploadFile(file: File, folderId: Long, spoofSuffix: Boolean): UploadResult =
         withContext(Dispatchers.IO) {
@@ -188,8 +196,12 @@ class UploadRepositoryImpl @Inject constructor(
     // ==================== 内部实现 ====================
 
     /**
-     * 网页上传通道：返回官方上传页地址（原版 App 走的就是这条路）。
-     * 原生直传被风控/协议变更挡住时，UI 可用 WebView 打开它兜底。
+     * 官方网页上传页地址（**仅作兜底**，不是原版做法）。
+     *
+     * ⚠️ 注释更正：这里原先写着"原版 App 走的就是这条路"——错了。
+     * 原版是**自己拼 multipart 直传**的（disasm/home.txt:6537-6560），
+     * 详见 UploadRepository 接口声明处的说明。保留本方法只是给极端情况
+     * （原生通道被风控挡住）留一个手动出口。
      *
      * 带上目标文件夹时蓝奏云网页会在该目录下上传；不同站点版本对
      * folder_id 的支持不一致，故只在 folderId > 0 时附加。
@@ -241,41 +253,57 @@ class UploadRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 上传自检：用一个 40 字节的临时 txt 走一遍完整上传链路，返回服务端原始回包。
-     *
-     * 不走 [doUpload] 的原因：那里会把响应解析成 UploadResponse 再拼摘要，
-     * 而排障恰恰需要**未经处理的原文**（可能包含我们 DTO 里没声明的字段）。
-     */
+    /** 内置探针：40 字节临时 txt */
     override suspend fun probeUpload(folderId: Long): UploadProbeResult =
         withContext(Dispatchers.IO) {
-            val hasCred = apiClient.cookieJar.hasUploadCredentials()
-            runCatching {
-                val probe = File(context.cacheDir, "cloudbox_upload_probe.txt").apply {
-                    writeText("cloudbox upload probe ${System.currentTimeMillis()}\n")
-                }
-                val boundary = "----CloudBoxBoundary" +
-                    java.util.UUID.randomUUID().toString().replace("-", "")
-                val body = buildOriginalMultipart(
-                    boundary, folderId, probe.name, "text/plain", probe
-                )
-                val resp = apiClient.uploadApiService.uploadProbe(body, "UTF-8")
-                val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
-                    .getOrElse { "<读取响应失败: ${it.message}>" }
-                UploadProbeResult(
-                    httpCode = resp.code(),
-                    requestUrl = resp.raw().request.url.toString(),
-                    rawBody = raw,
-                    hasCredential = hasCred
-                )
-            }.getOrElse {
-                UploadProbeResult(
-                    httpCode = -1,
-                    requestUrl = "请求未发出",
-                    rawBody = "异常：${it.javaClass.simpleName} ${it.message}",
-                    hasCredential = hasCred
-                )
+            val probe = File(context.cacheDir, "cloudbox_upload_probe.txt").apply {
+                writeText("cloudbox upload probe ${System.currentTimeMillis()}\n")
             }
+            runProbe(probe, "text/plain", folderId)
         }
+
+    /** 用真实文件跑自检（排障主力：内置探针太小，过得了不代表真文件过得了） */
+    override suspend fun probeUploadWith(file: File, folderId: Long): UploadProbeResult =
+        withContext(Dispatchers.IO) { runProbe(file, mimeOf(file.name), folderId) }
+
+    /**
+     * 自检公共实现：完整走一遍上传链路，返回服务端**原始**回包。
+     *
+     * 不走 [doUpload] 的原因：那里会把响应解析成 UploadResponse 再拼摘要，
+     * 而排障恰恰需要未经处理的原文（可能包含我们 DTO 里没声明的字段）。
+     */
+    private suspend fun runProbe(
+        file: File,
+        mime: String,
+        folderId: Long
+    ): UploadProbeResult {
+        val hasCred = apiClient.cookieJar.hasUploadCredentials()
+        return runCatching {
+            val boundary = "----CloudBoxBoundary" +
+                java.util.UUID.randomUUID().toString().replace("-", "")
+            val body = buildOriginalMultipart(boundary, folderId, file.name, mime, file)
+            val resp = apiClient.uploadApiService.uploadProbe(body, "UTF-8")
+            val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
+                .getOrElse { "<读取响应失败: ${it.message}>" }
+            UploadProbeResult(
+                httpCode = resp.code(),
+                requestUrl = resp.raw().request.url.toString(),
+                rawBody = raw,
+                hasCredential = hasCred,
+                fileName = file.name,
+                fileSize = file.length()
+            )
+        }.getOrElse {
+            UploadProbeResult(
+                httpCode = -1,
+                requestUrl = "请求未发出",
+                rawBody = "异常：${it.javaClass.simpleName} ${it.message}",
+                hasCredential = hasCred,
+                fileName = file.name,
+                fileSize = file.length()
+            )
+        }
+    }
 
     /**
      * 逐字节复刻原版 home.lua 的 multipart（2026-09-08 复核）。
