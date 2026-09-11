@@ -10,6 +10,7 @@ import com.cloudbox.app.core.domain.repository.UploadProbeResult
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -18,6 +19,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
@@ -148,7 +151,7 @@ class UploadViewModel @Inject constructor(
      * 只有 LiveData 版），用 suspendCancellableCoroutine 手动桥接，避免引 guava 协程依赖。
      */
     private suspend fun workInfosByTag(tag: String): List<WorkInfo> =
-        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        suspendCancellableCoroutine { cont ->
             val future = workManager.getWorkInfosByTag(tag)
             future.addListener({
                 cont.resumeWith(kotlin.runCatching { future.get() })
@@ -167,7 +170,7 @@ class UploadViewModel @Inject constructor(
         _uiState.update { it.copy(uploading = true, message = null) }
         viewModelScope.launch {
             // 大文件拷贝必须在 IO 线程（默认 viewModelScope = Main）
-            val paths = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val paths = withContext(Dispatchers.IO) {
                 uris.mapNotNull { copyUriToCache(it)?.absolutePath }
             }
             if (paths.isEmpty()) {
@@ -264,7 +267,7 @@ class UploadViewModel @Inject constructor(
         viewModelScope.launch {
             _probeResult.value = null
             _uiState.update { it.copy(diagnosing = true) }
-            val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val r = withContext(Dispatchers.IO) {
                 val f = copyUriToCache(uri)
                 if (f == null) {
                     UploadProbeResult(
