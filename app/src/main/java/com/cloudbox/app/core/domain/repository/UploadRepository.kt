@@ -18,6 +18,8 @@ data class UploadResult(
  * @param rawBody   服务端返回的原始文本（**不截断**，包含 zt / info / text 全部字段）
  * @param fileName  被测文件名（判断"是不是这个文件本身有问题"时要用）
  * @param fileSize  被测文件字节数
+ * @param targetFolderId 目标目录 id（-1 = 根目录）。必须带上：根目录传得上去 ≠ 子目录传得上去，
+ *                  而此前设置页自检写死根目录，用户实际失败的多在子目录，压根复现不了。
  */
 data class UploadProbeResult(
     val httpCode: Int = -1,
@@ -25,7 +27,16 @@ data class UploadProbeResult(
     val rawBody: String = "",
     val hasCredential: Boolean = false,
     val fileName: String = "",
-    val fileSize: Long = 0
+    val fileSize: Long = 0,
+    val targetFolderId: Long = -1,
+    /**
+     * 实际提交给服务端的文件名（可能与 [fileName] 不同：后缀伪装开启时会加 .zip）。
+     * 空串表示未改名。
+     *
+     * 必须带上：探针若用原名、真实上传却用伪装名，那"探针成功"就不能证明
+     * 真实上传没问题——失败恰恰可能出在改名后的文件名上。
+     */
+    val uploadAs: String = ""
 )
 
 /**

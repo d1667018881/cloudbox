@@ -62,39 +62,63 @@ class UploadWorker @AssistedInject constructor(
 
         val results = mutableListOf<UploadResult>()
         val filesSucceeded = mutableListOf<Boolean>()
-        files.forEachIndexed { index, file ->
-            // N1(V3)：普通文件连续上传防风控——除第一个外，每个文件上传前延时 1-3s
-            if (index > 0) {
-                delay(ThreadLocalRandom.current().nextLong(1_000, 3_001))
+        try {
+          files.forEachIndexed { index, file ->
+              // N1(V3)：连续上传防风控——每个文件上传前都延时（含第一个）。
+              //
+              // 旧值是 1-3s 且只在 index>0 时延时；现在 UploadViewModel 改成
+              // 「一个文件一个 Worker」后 index 恒为 0，等于完全没延时了，
+              // 所以改为每文件都延；同时把区间压到 300-800ms——原版 Lua 里
+              // 压根没有上传延时，1-3s 是我们自己加的，多文件时会把总时长
+              // 推向 WorkManager 的 10 分钟上限，得不偿失。
+              delay(ThreadLocalRandom.current().nextLong(300, 801))
+              setProgress(
+                  workDataOf(
+                      KEY_PROGRESS to index,
+                      KEY_TOTAL to total,
+                      KEY_CURRENT_FILE to file.name
+                  )
+              )
+              val result = if (uploadRepository.isOversize(file)) {
+                  // 超限文件：走分卷上传，分卷结果逐条记录，便于失败重试
+                  val splitResults = uploadRepository.uploadSplit(file, folderId)
+                  results.addAll(splitResults)
+                  UploadResult(
+                      file.name, null,
+                      splitResults.all { it.success },
+                      "分卷 ${splitResults.count { it.success }}/${splitResults.size} 成功"
+                  )
+              } else {
+                  uploadRepository.uploadFile(file, folderId, spoof)
+              }
+              results.add(result)
+              filesSucceeded.add(result.success)
+              setProgress(
+                  workDataOf(
+                      KEY_PROGRESS to index + 1,
+                      KEY_TOTAL to total,
+                      KEY_CURRENT_FILE to file.name
+                  )
+              )
+          }
+        } catch (t: Throwable) {
+            // 任务级异常兜底：绝不让 doWork 把异常抛出去。
+            // 抛出去 = Result.failure() = FAILED，而 FAILED 的 outputData 是空的，
+            // UI 侧只能报"被中断"，用户和我们都拿不到真正原因。
+            // 这里把没结果的文件补成失败并带上异常信息，仍返回 success 交给名单上报。
+            // CancellationException 必须原样抛出——协程取消不是错误，吞掉会破坏结构化并发。
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            files.forEachIndexed { index, file ->
+                if (filesSucceeded.getOrNull(index) == null) {
+                    results.add(
+                        UploadResult(
+                            file.name, null, false,
+                            "任务异常：${t.javaClass.simpleName} ${t.message}"
+                        )
+                    )
+                    filesSucceeded.add(false)
+                }
             }
-            setProgress(
-                workDataOf(
-                    KEY_PROGRESS to index,
-                    KEY_TOTAL to total,
-                    KEY_CURRENT_FILE to file.name
-                )
-            )
-            val result = if (uploadRepository.isOversize(file)) {
-                // 超限文件：走分卷上传，分卷结果逐条记录，便于失败重试
-                val splitResults = uploadRepository.uploadSplit(file, folderId)
-                results.addAll(splitResults)
-                UploadResult(
-                    file.name, null,
-                    splitResults.all { it.success },
-                    "分卷 ${splitResults.count { it.success }}/${splitResults.size} 成功"
-                )
-            } else {
-                uploadRepository.uploadFile(file, folderId, spoof)
-            }
-            results.add(result)
-            filesSucceeded.add(result.success)
-            setProgress(
-                workDataOf(
-                    KEY_PROGRESS to index + 1,
-                    KEY_TOTAL to total,
-                    KEY_CURRENT_FILE to file.name
-                )
-            )
         }
 
         // N3(V3)：只删本次上传成功的缓存文件；失败的文件保留副本，便于用户重试。

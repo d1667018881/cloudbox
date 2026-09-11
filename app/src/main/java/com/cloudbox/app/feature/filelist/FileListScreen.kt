@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -78,6 +79,7 @@ fun FileListScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val uploadState by uploadViewModel.uiState.collectAsState()
+    val uploadProbeResult by uploadViewModel.probeResult.collectAsState()
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
     var moveTarget by remember { mutableStateOf(false) }
@@ -100,6 +102,12 @@ fun FileListScreen(
 
     // 官方网页上传通道（兜底）：原生直传被风控/协议变更挡住时，
     // 用已登录 Cookie 打开官方上传页（原版 App 走的就是这条路）。
+    // 诊断用单选：拿真实文件在当前目录跑一遍上传链路，直接看服务端回包
+    val diagnosePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { uploadViewModel.diagnoseUpload(it, state.folderStack.last().first) }
+    }
     val webUploadLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) {
@@ -239,6 +247,16 @@ fun FileListScreen(
                         )
                         // 官方网页上传页：仅作**手动备用入口**（传超大文件、或哪天
                         // 原生通道被风控挡住时用）。它不是默认路径。
+                        // 诊断：拿**真实文件**在**当前目录**跑一遍上传链路，
+                        // 直接把服务端原始回包显示出来，成败一眼定性，不用猜。
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("诊断上传（拿文件测一遍）") },
+                            leadingIcon = { Icon(Icons.Filled.BugReport, null) },
+                            onClick = {
+                                showFabMenu = false
+                                diagnosePicker.launch(arrayOf("*/*"))
+                            }
+                        )
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("打开官方网页上传页（备用）") },
                             leadingIcon = { Icon(Icons.Filled.Language, null) },
@@ -373,6 +391,30 @@ fun FileListScreen(
     }
     state.shareResult?.let { share ->
         ShareDialog(share = share, onDismiss = viewModel::dismissShare)
+    }
+
+    // 诊断进行中：真实文件要读流 + 真发一次请求，大文件会等一会儿，给个反馈免得像卡死
+    if (uploadState.diagnosing) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { },
+            title = { Text("正在诊断上传…") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Spacer(Modifier.size(12.dp))
+                    Text("正在把文件真发一次，请稍候", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // 诊断结果：HTTP 码 + 目录 + 文件名大小 + 服务端原始回包，可一键复制
+    uploadProbeResult?.let { r ->
+        com.cloudbox.app.feature.upload.UploadProbeDialog(
+            result = r,
+            onDismiss = uploadViewModel::dismissProbe
+        )
     }
 }
 

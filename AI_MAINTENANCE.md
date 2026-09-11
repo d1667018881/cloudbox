@@ -1361,3 +1361,105 @@ archive.zip.bak  →  nameWithoutExtension = "archive.zip"
 * `contentLength()` 与 `writeTo()` 的字节数一致（都用 UTF-8、文件按 length 流式写出），
   不会触发 OkHttp 的长度校验异常。
 * CI 日志 18 条警告全是既有废弃 API（图标/进度条），与上传链路无关。
+
+---
+
+## 24. V17：「App 说全部成功、云端一个文件都没有」的最后一环（2026-09-10）
+
+### 24.1 现象与既往误判
+
+用户反复反馈：**上传显示成功，网页端/手机端都看不到文件**。
+此前几轮我们按"协议不对"的方向查，并把协议层彻底排除了：
+
+* 真机探针两次返回 `HTTP 200 / zt=1 / info="上传成功" / text[0].id=316683085`
+  —— 域名、端点、凭证、multipart 格式全部正确；
+* `verify_multipart.py` 用 Python `email.parser`（RFC 7578 标准解析器）
+  解析我们生成的 body，含中文文件名在内全部通过。
+
+**协议没问题，但真实上传依然失败** —— 说明失败发生在"探针不走的那段路"上。
+探针与真实上传的差异清单：
+
+| | 探针 | 真实上传 |
+|---|---|---|
+| 调度方式 | ViewModel 里直接调 suspend 函数 | WorkManager Worker |
+| 每批文件数 | 1 | **50** |
+| 文件间延时 | 无 | **1–3 秒 × N** |
+| 运行时上限 | 无（普通协程） | **10 分钟硬上限** |
+| 命名 | 原名 | 可能被后缀伪装改成 `x.apk.zip` |
+
+### 24.2 真因：WorkManager 的两个坑叠在一起
+
+**坑一：单个 Worker 只有 10 分钟。**
+WorkManager 给每个 Worker 的运行时间是硬上限 10 分钟。超时后系统会中断它，
+状态置为 `FAILED`（不是重试，这一次就废了）。
+旧实现每批 50 个文件、每个之间 sleep 1–3s 防风控，
+光延时就最多 150 秒，再加上传时间，总时长轻易突破 10 分钟。
+
+**坑二（致命）：`FAILED` 被当成了成功。**
+
+```kotlin
+// 旧代码
+if (info.state.isFinished && workStates[workId] == null) {
+    finishedCount += batchSizes[idx]
+    info.outputData.getString(KEY_FAILED_FILES)?.let { failedAccumulator.addAll(...) }
+    checkAllFinished()
+}
+```
+
+`WorkInfo.State.isFinished` 对 **SUCCEEDED / FAILED / CANCELLED 都成立**，
+但只有 `SUCCEEDED` 的 Worker 才写了 outputData。
+于是：
+
+```
+Worker 超时 → FAILED → outputData 为空 → failed 名单为空
+→ okCount = globalTotal → 弹出「全部上传成功（N 个）」
+```
+
+**文件一个都没上去，App 却报告全部成功。** 这与用户描述完全吻合。
+
+### 24.3 修复（三处）
+
+1. **终态必须区分**（`UploadViewModel.observeWorks`）
+   只有 `SUCCEEDED` 才读 outputData 判成败；
+   `FAILED` / `CANCELLED` 单独计入 `abortedFiles` 并给出原因
+   （"上传任务被中断（单个文件超过 10 分钟，或进程被系统回收）"），
+   **绝不混进成功数**。会话恢复路径（`init`）同步改成同一口径。
+
+2. **每批只放 1 个文件**（`UploadViewModel.enqueueUpload`，`chunked(50)` → `chunked(1)`）
+   这样 10 分钟就是**单文件**的超时上限，与 `uploadOkHttpClient` 的
+   10 分钟写超时语义一致。副作用：进度天然精确（1 批 = 1 文件），
+   不再需要"批内进度 + 批间累计"的换算。
+
+3. **Worker 异常兜底**（`UploadWorker.doWork`）
+   整个上传循环包 `try/catch`，异常转成"失败 + 原因"仍返回 `success`，
+   绝不让 `doWork` 把异常抛出去变成无信息的 `FAILED`
+   （`CancellationException` 除外，协程取消不是错误，必须原样抛出）。
+
+顺带：文件间延时从 1–3s 降到 **300–800ms**。原版 Lua 里根本没有上传延时，
+1–3s 是我们自己加的，多文件时只会把总时长推向 10 分钟上限。
+
+### 24.4 同步修掉的两个"探针测不出真实问题"
+
+* **探针不走后缀伪装改名** —— 真实上传会把 `x.apk` 提交成 `x.apk.zip`，
+  探针却用原名，等于在测另一条路径。
+  现在 `probeUploadWith` 复用与 `uploadFile` 完全相同的命名逻辑，
+  结果里新增 `uploadAs` 字段显示实际提交名。
+* **探针固定传根目录** —— 用户多在子目录上传，根目录能传不代表子目录能传。
+  `UploadProbeResult` 新增 `targetFolderId`，并在网盘页加了
+  「诊断上传（拿文件测一遍）」入口（当前目录 + 真实文件）。
+
+### 24.5 教训
+
+> **不要用 `isFinished` 判断"任务成功"。**
+> 它只表示"不再运行了"。判断成败必须显式比对
+> `state == WorkInfo.State.SUCCEEDED`，其余终态一律视为失败。
+> 这类 bug 的可怕之处在于：**失败路径恰好产生了最乐观的文案**，
+> 用户看到的全是"成功"，问题永远浮不出来。
+
+> **WorkManager 不适合跑"一个可能很长的批量任务"。**
+> 它的 10 分钟是硬限制。长任务要么拆成一个文件一个 Worker（本项目采用），
+> 要么改用前台服务。需要长跑时，先算一遍最坏耗时再决定粒度。
+
+> **自检工具必须与真实路径逐环节一致。**
+> 探针少了任何一个环节（改名、目录、client、超时设置），
+> "探针成功"就不能证明真实路径成功，反而会误导排查方向。

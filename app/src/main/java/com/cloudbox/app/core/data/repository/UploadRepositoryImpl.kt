@@ -261,26 +261,42 @@ class UploadRepositoryImpl @Inject constructor(
             runProbe(probe, "text/plain", folderId)
         }
 
-    /** 用真实文件跑自检（排障主力：内置探针太小，过得了不代表真文件过得了） */
+    /**
+     * 用真实文件跑自检（排障主力：内置探针太小，过得了不代表真文件过得了）。
+     *
+     * ⚠️ 命名必须与 [uploadFile] 完全一致：真实上传会按"后缀伪装"开关改名
+     * （如 x.apk → x.apk.zip），探针若用原名，就等于在测另一条路径——
+     * 失败若恰好出在改名后的文件名上，探针永远测不出来，还会反过来误导
+     * 我们得出"协议没问题"的结论。
+     */
     override suspend fun probeUploadWith(file: File, folderId: Long): UploadProbeResult =
-        withContext(Dispatchers.IO) { runProbe(file, mimeOf(file.name), folderId) }
+        withContext(Dispatchers.IO) {
+            val effSpoof = runCatching { settingsStore.suffixSpoofEnabled.first() }
+                .getOrDefault(true)
+            val uploadName =
+                if (effSpoof && needsSpoof(file)) "${file.name}.zip" else file.name
+            runProbe(file, mimeOf(uploadName), folderId, uploadName)
+        }
 
     /**
      * 自检公共实现：完整走一遍上传链路，返回服务端**原始**回包。
      *
      * 不走 [doUpload] 的原因：那里会把响应解析成 UploadResponse 再拼摘要，
      * 而排障恰恰需要未经处理的原文（可能包含我们 DTO 里没声明的字段）。
+     *
+     * @param uploadName 实际提交的文件名（可能已被后缀伪装改写）
      */
     private suspend fun runProbe(
         file: File,
         mime: String,
-        folderId: Long
+        folderId: Long,
+        uploadName: String = file.name
     ): UploadProbeResult {
         val hasCred = apiClient.cookieJar.hasUploadCredentials()
         return runCatching {
             val boundary = "----CloudBoxBoundary" +
                 java.util.UUID.randomUUID().toString().replace("-", "")
-            val body = buildOriginalMultipart(boundary, folderId, file.name, mime, file)
+            val body = buildOriginalMultipart(boundary, folderId, uploadName, mime, file)
             val resp = apiClient.uploadApiService.uploadProbe(body, "UTF-8")
             val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
                 .getOrElse { "<读取响应失败: ${it.message}>" }
@@ -290,7 +306,9 @@ class UploadRepositoryImpl @Inject constructor(
                 rawBody = raw,
                 hasCredential = hasCred,
                 fileName = file.name,
-                fileSize = file.length()
+                fileSize = file.length(),
+                targetFolderId = folderId,
+                uploadAs = uploadName.takeIf { it != file.name }.orEmpty()
             )
         }.getOrElse {
             UploadProbeResult(
@@ -299,7 +317,9 @@ class UploadRepositoryImpl @Inject constructor(
                 rawBody = "异常：${it.javaClass.simpleName} ${it.message}",
                 hasCredential = hasCred,
                 fileName = file.name,
-                fileSize = file.length()
+                fileSize = file.length(),
+                targetFolderId = folderId,
+                uploadAs = uploadName.takeIf { it != file.name }.orEmpty()
             )
         }
     }

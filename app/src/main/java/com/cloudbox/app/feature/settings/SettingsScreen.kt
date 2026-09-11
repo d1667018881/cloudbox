@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.content.Context
-import com.cloudbox.app.core.domain.repository.UploadProbeResult
 import androidx.hilt.navigation.compose.hiltViewModel
 
 /**
@@ -205,7 +204,7 @@ fun SettingsScreen(
                 }
             }
             state.probeResult?.let {
-                UploadProbeDialog(it, onDismiss = viewModel::dismissProbe)
+                com.cloudbox.app.feature.upload.UploadProbeDialog(it, onDismiss = viewModel::dismissProbe)
             }
             HorizontalDivider()
 
@@ -398,64 +397,6 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { pwdDialog = false }) { Text("取消") } }
         )
     }
-}
-
-/**
- * 上传自检结果弹窗。
- *
- * 展示 HTTP 码 / 实际请求地址 / 凭证状态 / **服务端原始回包**，
- * 并提供"复制"——排障时把这四行发出来，就能判断是没登录、参数不对还是端点失效。
- */
-@Composable
-private fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("上传自检结果") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("HTTP ${result.httpCode}", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(6.dp))
-                if (result.fileName.isNotBlank()) {
-                    Text(
-                        "文件：${result.fileName}（${result.fileSize / 1024} KB）",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
-                Text("请求地址：${result.requestUrl}",
-                    style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    if (result.hasCredential) "登录凭证：已检测到"
-                    else "登录凭证：缺失 —— 请先退出重新登录",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (result.hasCredential) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.error
-                )
-                Spacer(Modifier.height(10.dp))
-                Text("服务端原始回包：", style = MaterialTheme.typography.labelLarge)
-                Text(result.rawBody, style = MaterialTheme.typography.bodySmall)
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(
-                    android.content.ClipData.newPlainText(
-                        "probe",
-                        "HTTP ${result.httpCode}\n${result.requestUrl}\n"
-                            + "credential=${result.hasCredential}\n"
-                            + "file=${result.fileName} (${result.fileSize / 1024} KB)\n"
-                            + result.rawBody
-                    )
-                )
-                onDismiss()
-            }) { Text("复制") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
-    )
 }
 
 @Composable
