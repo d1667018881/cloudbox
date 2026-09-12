@@ -491,11 +491,15 @@ class UploadViewModel @Inject constructor(
             }.getOrNull() ?: "upload_${System.currentTimeMillis()}"
 
             // 源文件的标称大小（0 = 提供方未告知，此时只能靠"读到了 0 字节"来判断）
-            val declaredSize = runCatching {
+            //
+            // ⚠️ 显式标注 : Long，并让 use{} 块内的两个分支都返回非空 Long。
+            //    若写成 `... ?: 0L`，Kotlin 会把整个表达式推断成 Long?，
+            //    后面的 `got < declaredSize` 就会报"不能在可空 Long 上做运算"。
+            val declaredSize: Long = runCatching {
                 context.contentResolver.query(uri, null, null, null, null)?.use { c ->
                     val idx = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
                     if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else 0L
-                }
+                } ?: 0L
             }.getOrDefault(0L)
 
             val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
