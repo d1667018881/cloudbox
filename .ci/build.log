@@ -1,0 +1,109 @@
+
+Welcome to Gradle 8.9!
+
+Here are the highlights of this release:
+ - Enhanced Error and Warning Messages
+ - IDE Integration Improvements
+ - Daemon JVM Information
+
+For more details see https://docs.gradle.org/8.9/release-notes.html
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseNativeLibs
+> Task :app:checkReleaseDuplicateClasses
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so.
+
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:generateReleaseBuildConfig
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:generateReleaseResValues
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:mergeReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:parseReleaseLocalResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:processReleaseManifestForPackage
+> Task :app:javaPreCompileRelease
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :app:processReleaseResources
+> Task :app:mergeExtDexRelease
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:optimizeReleaseResources
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:kspReleaseKotlin
+
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/core/data/repository/DownloadRepositoryImpl.kt:150:65 'static field COLUMN_LOCAL_FILENAME: String' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/core/data/repository/DownloadRepositoryImpl.kt:168:69 'static field COLUMN_LOCAL_FILENAME: String' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/download/DownloadScreen.kt:84:31 'val Icons.Filled.InsertDriveFile: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.InsertDriveFile.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/download/DownloadScreen.kt:117:13 'fun LinearProgressIndicator(progress: Float, modifier: Modifier = ..., color: Color = ..., trackColor: Color = ..., strokeCap: StrokeCap = ...): Unit' is deprecated. Use the overload that takes `progress` as a lambda.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/filelist/FileListScreen.kt:199:71 'val Icons.Filled.ViewList: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ViewList.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/filelist/FileListScreen.kt:211:55 'val Icons.Filled.DriveFileMove: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.DriveFileMove.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/filelist/FileListScreen.kt:348:56 'fun LinearProgressIndicator(progress: Float, modifier: Modifier = ..., color: Color = ..., trackColor: Color = ..., strokeCap: StrokeCap = ...): Unit' is deprecated. Use the overload that takes `progress` as a lambda.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/filelist/FileListScreen.kt:483:70 'val Icons.Filled.InsertDriveFile: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.InsertDriveFile.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/filelist/FileListScreen.kt:523:74 'val Icons.Filled.InsertDriveFile: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.InsertDriveFile.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/main/MainScreen.kt:76:26 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/recycle/RecycleScreen.kt:102:70 'val Icons.Filled.InsertDriveFile: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.InsertDriveFile.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/search/SearchScreen.kt:90:17 'fun LinearProgressIndicator(progress: Float, modifier: Modifier = ..., color: Color = ..., trackColor: Color = ..., strokeCap: StrokeCap = ...): Unit' is deprecated. Use the overload that takes `progress` as a lambda.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/search/SearchScreen.kt:114:104 'val Icons.Filled.InsertDriveFile: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.InsertDriveFile.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/upload/UploadScreen.kt:106:17 'fun LinearProgressIndicator(progress: Float, modifier: Modifier = ..., color: Color = ..., trackColor: Color = ..., strokeCap: StrokeCap = ...): Unit' is deprecated. Use the overload that takes `progress` as a lambda.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/upload/WebViewUploadActivity.kt:99:33 'fun LinearProgressIndicator(progress: Float, modifier: Modifier = ..., color: Color = ..., trackColor: Color = ..., strokeCap: StrokeCap = ...): Unit' is deprecated. Use the overload that takes `progress` as a lambda.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/upload/WebViewUploadActivity.kt:144:45 'fun startActivityForResult(intent: Intent, requestCode: Int): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)}
+      passing in a {@link StartActivityForResult} object for the {@link ActivityResultContract}.
+w: file:///home/runner/work/cloudbox/cloudbox/app/src/main/java/com/cloudbox/app/feature/upload/WebViewUploadActivity.kt:164:15 'fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Unit' is deprecated. This method has been deprecated in favor of using the Activity Result API
+      which brings increased type safety via an {@link ActivityResultContract} and the prebuilt
+      contracts for common intents available in
+      {@link androidx.activity.result.contract.ActivityResultContracts}, provides hooks for
+      testing, and allow receiving results in separate, testable classes independent from your
+      activity. Use
+      {@link #registerForActivityResult(ActivityResultContract, ActivityResultCallback)}
+      with the appropriate {@link ActivityResultContract} and handling the result in the
+      {@link ActivityResultCallback#onActivityResult(Object) callback}.
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:hiltAggregateDepsRelease
+> Task :app:hiltJavaCompileRelease
+> Task :app:processReleaseJavaRes
+> Task :app:transformReleaseClassesWithAsm
+> Task :app:mergeReleaseJavaResource
+> Task :app:dexBuilderRelease
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:mergeDexRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+w: Detected multiple Kotlin daemon sessions at 
+
+BUILD SUCCESSFUL in 4m
+49 actionable tasks: 49 executed
