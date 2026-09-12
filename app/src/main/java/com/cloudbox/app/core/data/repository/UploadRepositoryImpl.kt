@@ -109,11 +109,26 @@ class UploadRepositoryImpl @Inject constructor(
                     file.name
                 }
 
-                // ③ 直传
+                // ③ 扩展名前置校验
+                //
+                // 蓝奏云**按扩展名决定能不能上传**，实测（2026-09-12）送一个
+                // 没有扩展名的文件上去，服务端回：
+                //     {"zt":0,"info":"不能上传.格式的文件"}
+                // 与文件内容、大小、MIME 都无关。本地先挡一道，把原因说清楚，
+                // 比让服务端回一句语焉不详的中文有用得多。
+                if (!uploadName.contains('.') || uploadName.endsWith('.')) {
+                    return@runCatching UploadResult(
+                        uploadName, null, false,
+                        "这个文件没有扩展名（$uploadName），蓝奏云只按扩展名判断能否上传。" +
+                            "请确认原文件名是否完整，或改名为带扩展名的文件后再传"
+                    )
+                }
+
+                // ④ 直传
                 val result = doUpload(file, folderId, uploadName)
                 if (!result.success) return@runCatching result
 
-                // ④ 云端二次确认 —— 2026-09-09 起**降级为提示，不再能否决成功**
+                // ⑤ 云端二次确认 —— 2026-09-09 起**降级为提示，不再能否决成功**
                 //
                 //    ⚠️ 这里曾经是"App 说失败、网盘里其实有文件"的元凶。
                 //    设置页「上传通道自检」的实测证据（用户两次跑探针）：

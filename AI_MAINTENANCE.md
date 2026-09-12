@@ -1612,3 +1612,125 @@ V17 把每批从 50 改成 1，方向对（避开 10 分钟线）但**过头了*
 > 探针一直"成功"，反而让我反复得出"协议没问题"的结论。
 > 本轮把探针补上了改名、目录、耗时三处一致性，
 > 并让失败详情也用同一个弹窗呈现。
+
+---
+
+## 26. V19：实测定位真因（2026-09-12）
+
+用户提供了一份完整的诊断回包 + 时间线，一次性定位了两个此前完全没找到的问题。
+
+### 26.1 问题一：服务端拒绝 —— 文件没有扩展名（真正的上传失败原因）
+
+```
+HTTP 200   https://pc.woozooo.com/html5up.php   credential=true
+folder_id=13941316
+file=upload_1789223795017 (379 KB)      ← 注意：没有扩展名！
+elapsed=334ms
+{"zt":0,"info":"不能上传.格式的文件","text":null}
+```
+
+**`upload_1789223795017` 是 `copyUriToCache` 里"拿不到 DISPLAY_NAME 时的兜底名"。**
+旧实现只查一个渠道：
+
+```kotlin
+query(uri, null,null,null,null) 找 DISPLAY_NAME  ?: "upload_<时间戳>"
+```
+
+而 `contentResolver.query(uri, null, ...)` 在多 provider / 部分文件管理器下
+会返回 null 或没有该列（**尤其是 OpenDocument 选出来的、来自网盘类 App 的文档**），
+名字就退化成纯数字，**扩展名随之丢失**。
+
+蓝奏云**按扩展名决定能不能上传**，与内容/大小/MIME 都无关 ——
+没有扩展名一律回 `不能上传.格式的文件`。
+
+#### 修法（三层）
+
+1. **`resolveDisplayName` 按可靠度递减多渠道解析**
+   ① `OpenableColumns.DISPLAY_NAME`
+   ② `uri.lastPathSegment`（file:// 或部分 content://）
+   ③ **按 MIME 反推扩展名**，实在拿不到才用 `.bin` 兜底 ——
+   宁可扩展名是猜的，也不能交一个没有扩展名的文件上去。
+2. **上传前前置校验**：没有扩展名就在本地拦下并说明原因，
+   比让服务端回一句语焉不详的中文有用得多。
+3. **诊断入口 `OpenDocument` → `GetContent`**：实测 OpenDocument 正是
+   不返回 DISPLAY_NAME 的那个 contract，用它做诊断等于把假象当证据。
+
+#### 顺带验证
+
+用 Python 复刻同样的 multipart（379KB、无扩展名文件名）打生产端点，
+无凭证时 **159ms** 就回包 `{"zt":9,"info":"login not"}` ——
+说明服务端在鉴权阶段就会迅速拒绝。因而用户看到的 **334ms 对 379KB 完全正常**，
+服务端确实收到了完整文件并做出了判定。**链路本身是通的，卡在文件名上。**
+
+### 26.2 问题二：Worker 瞬间 FAILED（`Configuration.Provider` 的初始化时机陷阱）
+
+```
+批次 a8920de4 → ENQUEUED
+批次 a8920de4 → FAILED   runAttemptCount=0  outputData={}   ← 空
+裁决 total=1 失败=0 中断=1
+```
+
+Worker 从 ENQUEUED **直接跳到 FAILED**，没有 RUNNING，重试计数 0，
+outputData 完全为空 —— 即调度器**压根没能构造出 UploadWorker**。
+连 Worker 里那句 `Worker 启动` 日志都没出现，可以确证。
+
+#### 根因
+
+manifest 按 Hilt 官方要求用 `tools:node="remove"` 摘掉了
+`WorkManagerInitializer`，改为依赖 `Configuration.Provider` **按需初始化**。
+但"按需"的时机由**第一次 `WorkManager.getInstance()` 的调用点**决定 ——
+而 UploadViewModel 是 `@Inject workManager: WorkManager` 注入的，
+首次初始化可能赶在 `workerFactory` 注入完成**之前**，读到未初始化的
+`lateinit` → 初始化失败 → **之后所有 Worker 一律瞬间 FAILED，且无任何可读错误**。
+
+雪上加霜的是 `workManagerConfiguration` 写成了属性 getter：
+
+```kotlin
+override val workManagerConfiguration: Configuration
+    get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
+```
+
+getter 每次读取都重新求值，任何一次过早的读取都会踩雷。
+
+#### 修法
+
+1. `workManagerConfiguration` 由 `get()` 改为 **`by lazy`**，
+   把求值推迟到注入必然完成之后，且不再重复构建；
+2. **在 `onCreate` 里主动 `WorkManager.getInstance(this)` 一次**。
+   此刻 `@HiltAndroidApp` 的注入已在 `super.onCreate()` 内完成，
+   配置必然正确；后续所有 `getInstance()` 复用这个已初始化的单例。
+   —— 这一步是根治点：把"不可控的首次初始化时机"变成"确定的时机"。
+3. 自检日志输出实际生效的 factory，若读到配置失败立刻报错。
+
+> 这是本轮最有价值的发现：**它解释了此前所有"秒失败"**。
+> 而且症状极具迷惑性 —— UI 上没有任何错误，只有一行时线在说
+> "ENQUEUED 然后就 FAILED 了"。若没有 V18 加的时间线，
+> 这个问题还会继续被归因到"网络""协议""风控"上。
+
+### 26.3 时间线这次的实战表现
+
+对照 V18 写下的判读法，这次两条都能对上：
+
+| 观察 | 结论 |
+|---|---|
+| 有"任务已入队"，有 ENQUEUED | 入队没断 |
+| ENQUEUED **直接 FAILED**，无 RUNNING，`runAttemptCount=0` | **Worker 没被构造** → 工厂/初始化问题 |
+| 探针 `elapsed=334ms` + 服务端回中文错误 | 请求真的发出去了，链路通 |
+
+**一个"秒失败"，一个"秒成功"，同一条时间线把两者的性质完全分开了。**
+这正是上一轮加可观测性的价值所在。
+
+### 26.4 教训
+
+> **`ContentResolver.query(uri, null, ...)` 不可靠，必须有多渠道兜底。**
+> 它在不同 provider / 不同 contract 下返回的列集完全不同。
+> 尤其 `OpenDocument` 与 `OpenMultipleDocuments`/`GetContent` 的行为有差异，
+> **诊断工具必须用与真实路径相同的 contract**，否则测出来的不是同一个东西。
+
+> **`Configuration.Provider` + `tools:node="remove"` 组合有初始化时机陷阱。**
+> 按需初始化意味着时机不可控。凡是"初始化要读注入字段"的场景，
+> 都应在 `onCreate` 里显式触发一次，把时机钉死。
+
+> **"秒失败"和"秒成功"一样，都是"请求没真正走到目的地"的信号。**
+> 这次一个 334ms 的真回包（带中文错误）立刻澄清了性质 ——
+> 有服务端返回内容 = 链路通；只有 WorkManager 状态 = 卡在本地。

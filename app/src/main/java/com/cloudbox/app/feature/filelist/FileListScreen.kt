@@ -104,11 +104,15 @@ fun FileListScreen(
         }
     }
 
-    // 官方网页上传通道（兜底）：原生直传被风控/协议变更挡住时，
-    // 用已登录 Cookie 打开官方上传页（原版 App 走的就是这条路）。
-    // 诊断用单选：拿真实文件在当前目录跑一遍上传链路，直接看服务端回包
+    // 诊断用单选：拿真实文件在当前目录跑一遍上传链路，直接看服务端回包。
+    //
+    // ⚠️ 用 GetContent 而不是 OpenDocument：实测（2026-09-12）OpenDocument
+    //    在部分文件管理器下**不返回 DISPLAY_NAME**，文件名会退化成
+    //    `upload_<时间戳>` 这种没有扩展名的形式，服务端直接回
+    //    "不能上传.格式的文件" —— 诊断结果就被这个假象带偏了。
+    //    GetContent 返回的 uri 带完整文件名，也更接近真实上传的取件方式。
     val diagnosePicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { uploadViewModel.diagnoseUpload(it, state.folderStack.last().first) }
     }
@@ -252,7 +256,8 @@ fun FileListScreen(
                             leadingIcon = { Icon(Icons.Filled.BugReport, null) },
                             onClick = {
                                 showFabMenu = false
-                                diagnosePicker.launch(arrayOf("*/*"))
+                                // GetContent 的入参是单个 mime 字符串（不是数组）
+                                diagnosePicker.launch("*/*")
                             }
                         )
                         androidx.compose.material3.DropdownMenuItem(

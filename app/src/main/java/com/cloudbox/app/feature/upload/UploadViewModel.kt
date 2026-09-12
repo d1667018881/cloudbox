@@ -483,12 +483,7 @@ class UploadViewModel @Inject constructor(
     private fun copyUriToCache(uri: Uri): File? {
         lastCopyError = null
         return runCatching {
-            val name = runCatching {
-                context.contentResolver.query(uri, null, null, null, null)?.use { c ->
-                    val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0 && !c.isNull(idx)) c.getString(idx) else null
-                }
-            }.getOrNull() ?: "upload_${System.currentTimeMillis()}"
+            val name = resolveDisplayName(uri)
 
             // 源文件的标称大小（0 = 提供方未告知，此时只能靠"读到了 0 字节"来判断）
             //
@@ -542,6 +537,62 @@ class UploadViewModel @Inject constructor(
             null
         }
     }
+
+    /**
+     * 解析 SAF 文档的**真实文件名**（含扩展名）。
+     *
+     * ⚠️ 2026-09-12 新增，修的是"不能上传.格式的文件"。
+     *
+     * 起因：用户走「诊断上传」时，服务端回了
+     *     {"zt":0,"info":"不能上传.格式的文件"}
+     * 而传上去的名字是 `upload_1789223795017` —— **没有扩展名**。
+     * 根因是旧代码只查了一个渠道，查不到就用时间戳兜底：
+     *
+     * ```kotlin
+     * query(uri, null,null,null,null) 找 DISPLAY_NAME  ?: "upload_<时间戳>"
+     * ```
+     *
+     * `contentResolver.query(uri, null, ...)` 在多 provider / 部分文件管理器下
+     * 会返回 null 或没有该列（尤其是 OpenDocument 选出来的、来自网盘类 App 的文档），
+     * 于是名字退化成纯数字，扩展名随之丢失。
+     * 蓝奏云**按扩展名判断能否上传**，没有扩展名就直接拒绝 —— 与文件内容无关。
+     *
+     * 现在按"可靠度递减"依次尝试，并在最后**从 MIME 反推扩展名**，
+     * 宁可得到一个推测出来的扩展名，也不能交一个没有扩展名的文件上去。
+     */
+    private fun resolveDisplayName(uri: Uri): String {
+        // ① 首选：OpenableColumns.DISPLAY_NAME（绝大多数情况够用）
+        queryName(uri, android.provider.OpenableColumns.DISPLAY_NAME)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return sanitize(it) }
+
+        // ② 次选：uri 的最后一段路径（file:// 或部分 provider 的 content://）
+        uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() && it.contains('.') }
+            ?.let { return sanitize(it) }
+
+        // ③ 兜底：按 MIME 反推扩展名。宁可扩展名是猜的，也不能没有 ——
+        //    蓝奏云对无扩展名文件一律回"不能上传.格式的文件"。
+        val ext = runCatching {
+            android.webkit.MimeTypeMap.getSingleton()
+                .getExtensionFromMimeType(context.contentResolver.getType(uri))
+        }.getOrNull()
+        val base = "upload_${System.currentTimeMillis()}"
+        return if (ext.isNullOrBlank()) "$base.bin" else "$base.$ext"
+    }
+
+    private fun queryName(uri: Uri, column: String): String? =
+        runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(column)
+                if (idx >= 0 && !c.isNull(idx)) c.getString(idx) else null
+            }
+        }.getOrNull()
+
+    /** 去掉路径分隔符等不能出现在文件名里的字符（保留点，扩展名要靠它） */
+    private fun sanitize(name: String): String =
+        name.substringAfterLast('/').replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
     companion object {
         /** logcat 过滤：adb logcat -s CloudBoxUpload */
