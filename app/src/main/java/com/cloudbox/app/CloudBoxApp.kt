@@ -1,6 +1,7 @@
 package com.cloudbox.app
 
 import android.app.Application
+import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.cloudbox.app.core.data.remote.LanzouApiClient
@@ -45,6 +46,19 @@ class CloudBoxApp : Application(), Configuration.Provider {
             authRepository.ensureSession()
             // 启动时拉取远程域名配置（未配置远程 URL 时 refreshRemote 直接返回失败，静默忽略）
             domainRepository.refreshRemote()
+        }
+        // 自检：WorkManager 是否真的挂上了 Hilt 工厂。
+        //
+        // 为什么必须显式检查：如果 Factory 没生效，任何 @HiltWorker 都无法被构造，
+        // WorkManager 会在调度时抛异常并把任务记为 FAILED —— 而"上传"恰恰完全
+        // 依赖 Worker。这类故障在 UI 上表现为"秒失败/秒成功、文件没上去"，
+        // 且不会有任何可读错误。启动时打一行日志，排查时一眼就能排除这个方向。
+        runCatching {
+            Log.i(
+                "CloudBoxUpload",
+                "WorkManager 初始化：workerFactory=${workerFactory.javaClass.simpleName} " +
+                    "isDefault=${workManagerConfiguration.workerFactory === workerFactory}"
+            )
         }
     }
 }

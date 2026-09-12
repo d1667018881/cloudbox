@@ -24,7 +24,12 @@ import com.cloudbox.app.core.domain.repository.UploadProbeResult
  * 文件太大，还是端点失效。
  */
 @Composable
-fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) {
+fun UploadProbeDialog(
+    result: UploadProbeResult,
+    onDismiss: () -> Unit,
+    /** 上传过程时间线（可选）。有它就能看出 Worker 到底跑没跑、"秒成功"卡在哪一段。 */
+    timeline: List<String> = emptyList()
+) {
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -55,6 +60,20 @@ fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(6.dp))
+                if (result.elapsedMs >= 0) {
+                    // 耗时是判断"秒成功"性质的关键：几毫秒回包 = 请求没到服务端
+                    val verdict = when {
+                        result.elapsedMs < 100 -> "（过快：请求可能没真正发出去）"
+                        else -> ""
+                    }
+                    Text(
+                        "耗时：${result.elapsedMs} ms$verdict",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (verdict.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
                 Text(
                     "请求地址：${result.requestUrl}",
                     style = MaterialTheme.typography.bodySmall
@@ -70,6 +89,14 @@ fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) {
                 Spacer(Modifier.height(10.dp))
                 Text("服务端原始回包：", style = MaterialTheme.typography.labelLarge)
                 Text(result.rawBody, style = MaterialTheme.typography.bodySmall)
+                if (timeline.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("上传过程时间线：", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        timeline.joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         },
         confirmButton = {
@@ -84,7 +111,11 @@ fun UploadProbeDialog(result: UploadProbeResult, onDismiss: () -> Unit) {
                             + "folder_id=${result.targetFolderId}\n"
                             + "file=${result.fileName} (${result.fileSize / 1024} KB)\n"
                             + (if (result.uploadAs.isNotBlank()) "uploadAs=${result.uploadAs}\n" else "")
+                            + "elapsed=${result.elapsedMs}ms\n"
                             + result.rawBody
+                            + (if (timeline.isNotEmpty())
+                                "\n\n--- 上传时间线 ---\n" + timeline.joinToString("\n")
+                            else "")
                     )
                 )
                 onDismiss()

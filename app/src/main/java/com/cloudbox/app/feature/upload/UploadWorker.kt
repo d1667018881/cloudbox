@@ -1,6 +1,7 @@
 package com.cloudbox.app.feature.upload
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -40,7 +41,14 @@ class UploadWorker @AssistedInject constructor(
         val folderId = inputData.getLong(KEY_FOLDER_ID, -1L)
         val paths = inputData.getStringArray(KEY_FILE_PATHS)?.toList() ?: emptyList()
         val spoof = inputData.getBoolean(KEY_SPOOF, true)
-        if (paths.isEmpty()) return Result.failure()
+        // Worker 是否真的跑起来了，是"假成功"排查的第一分水岭：
+        // 只要这行没出现在 logcat，就说明任务压根没执行（Hilt 注入失败 /
+        // 约束未满足 / 被系统压制），而不是上传本身失败。
+        Log.i(TAG, "Worker 启动 id=$id folder=$folderId files=${paths.size} spoof=$spoof")
+        if (paths.isEmpty()) {
+            Log.w(TAG, "Worker 输入为空，直接判定失败 id=$id")
+            return Result.failure()
+        }
 
         val files = paths.map { File(it) }.filter { it.exists() }
         // V5 修复：缓存文件丢失（系统清理 cacheDir）时，旧逻辑会静默跳过丢失文件
@@ -131,10 +139,18 @@ class UploadWorker @AssistedInject constructor(
                 val inUploadsTree = file.absolutePath.startsWith(uploadsDir.absolutePath + File.separator)
                 if (success && inUploadsTree) {
                     file.delete()
-                    // 上传成功且子目录已空（如分卷临时文件已自清理）→ 删除 UUID 子目录
-                    file.parentFile?.let { dir ->
-                        if (dir.listFiles()?.isEmpty() != false) dir.delete()
-                    }
+                    // ⚠️ 去掉"目录空了就删目录"（2026-09-12）。
+                    //
+                    //    原写法 `if (dir.listFiles()?.isEmpty() != false) dir.delete()`
+                    //    有两个问题：
+                    //    1. `listFiles()` 返回 null（目录不存在/无权限）时，`null?.isEmpty()`
+                    //       是 null，`!= false` 判为 true —— 会把一个**都没读到的**目录当成空目录删掉；
+                    //    2. 多文件上传时同一 uploads/<uuid>/ 目录由多个 Worker 依次处理，
+                    //       只要某个时刻目录恰好为空（例如同批文件已被上一轮清走），
+                    //       就会把后面待传文件所在目录一并删除，后继 Worker 只能报
+                    //       "本地缓存文件已丢失"。
+                    //    残留的空 UUID 目录无害（系统会回收 cacheDir），不值得为它冒险。
+                    //    统一由 uploadsDir 的整体清理负责（见下方兜底）。
                 }
             }
             // 兜底：清理残留的分卷临时目录
@@ -147,6 +163,8 @@ class UploadWorker @AssistedInject constructor(
         val failed = results.filter { !it.success }
         // V5：部分丢失的文件并入失败名单（否则无声消失）
         val failedNames = (failed.map { it.fileName } + missingNames).distinct()
+        Log.i(TAG, "Worker 结束 id=$id 结果 ${results.size} 条，失败 ${failedNames.size} 个" +
+                (if (failed.isNotEmpty()) "：${failed.first().message}" else ""))
         return Result.success(
             workDataOf(
                 KEY_FAILED_FILES to failedNames.joinToString("\n"),
@@ -157,6 +175,9 @@ class UploadWorker @AssistedInject constructor(
     }
 
     companion object {
+        /** logcat 过滤：adb logcat -s CloudBoxUpload */
+        private const val TAG = "CloudBoxUpload"
+
         /** 查询 tag（固定值）：App 重启后 UploadViewModel 凭此找出全部上传批次（见其 init） */
         const val TAG_UPLOAD_SESSION = "cloudbox_upload_session"
 

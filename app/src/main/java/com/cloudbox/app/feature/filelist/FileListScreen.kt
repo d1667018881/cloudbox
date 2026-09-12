@@ -80,12 +80,16 @@ fun FileListScreen(
     val state by viewModel.uiState.collectAsState()
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadProbeResult by uploadViewModel.probeResult.collectAsState()
+    val uploadTimeline by uploadViewModel.timeline.collectAsState()
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
     var moveTarget by remember { mutableStateOf(false) }
     var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
     var descTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
+    // 上传失败详情弹窗开关。必须声明在 LaunchedEffect 之前——Snackbar 动作
+    // 要置位它，而 Compose 的 remember 在同一作用域内需先声明后使用。
+    var showFailureDetail by remember { mutableStateOf(false) }
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     // 在 @Composable 作用域取 context：上传失败点"网页上传"时要用它启动 Activity
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -120,30 +124,24 @@ fun FileListScreen(
         uploadViewModel.uploadFinished.collect { viewModel.refresh() }
     }
 
-    // 上传结果提示（消费即清，防止 Tab 切换重建 composition 时重放同一条）
+    // 上传结果提示（消费即清，防止 Tab 切换重建 composition 时重放同一条）。
     //
-    // 失败时：停留更久（Long），并给一个"网页上传"动作 —— 原生直传被风控/协议变更
-    // 挡住时，网页通道（原版 App 走的就是它）往往仍可用，别让用户卡在这里无从下手。
+    // 失败时：停留更久，动作改成「看详情」——用户第一需求是知道**为什么**失败。
+    // 详情弹窗里有完整时间线（任务是否入队、Worker 是否真的跑起来、服务端回包），
+    // 这才是能定性问题的东西。网页上传仍保留在 FAB 菜单里作备用入口。
     LaunchedEffect(uploadState.message) {
         uploadState.message?.let { msg ->
             val res = snackbarHostState.showSnackbar(
                 message = msg,
-                actionLabel = if (uploadState.hasFailure) "网页上传" else null,
+                actionLabel = if (uploadState.hasFailure) "看详情" else null,
+                withDismissAction = uploadState.hasFailure,
                 duration = if (uploadState.hasFailure)
                     androidx.compose.material3.SnackbarDuration.Long
                 else
                     androidx.compose.material3.SnackbarDuration.Short
             )
             if (res == androidx.compose.material3.SnackbarResult.ActionPerformed) {
-                webUploadLauncher.launch(
-                    android.content.Intent(
-                        context,
-                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
-                    ).putExtra(
-                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
-                        state.folderStack.last().first
-                    )
-                )
+                showFailureDetail = true
             }
             uploadViewModel.dismissMessage()
         }
@@ -413,7 +411,30 @@ fun FileListScreen(
     uploadProbeResult?.let { r ->
         com.cloudbox.app.feature.upload.UploadProbeDialog(
             result = r,
-            onDismiss = uploadViewModel::dismissProbe
+            onDismiss = uploadViewModel::dismissProbe,
+            timeline = uploadTimeline
+        )
+    }
+
+    // 上传失败时：用同一个弹窗把"时间线 + 失败名单"摊开。
+    // 用户看到"上传失败"时最需要知道的是"到底哪一步断了"，而不是再猜一次。
+    if (uploadState.hasFailure && uploadState.message != null && showFailureDetail) {
+        val detail = com.cloudbox.app.core.domain.repository.UploadProbeResult(
+            httpCode = -2,
+            requestUrl = "上传失败明细（非探针）",
+            rawBody = buildString {
+                append(uploadState.message).append("\n")
+                if (uploadState.failedFiles.isNotEmpty()) {
+                    append("\n失败文件：\n")
+                    uploadState.failedFiles.take(20).forEach { append("  · ").append(it).append("\n") }
+                }
+            },
+            hasCredential = true
+        )
+        com.cloudbox.app.feature.upload.UploadProbeDialog(
+            result = detail,
+            onDismiss = { showFailureDetail = false },
+            timeline = uploadTimeline
         )
     }
 }

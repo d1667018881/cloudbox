@@ -16,6 +16,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okio.source
 import android.content.Context
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.ThreadLocalRandom
@@ -138,8 +139,16 @@ class UploadRepositoryImpl @Inject constructor(
                 // 超时单独给一句人话：SocketTimeoutException 对普通用户毫无意义，
                 // 而"文件太大/网络太慢"才是他真正能采取行动的信息。
                 val reason = when (e) {
+                    // ⚠️ SocketTimeoutException 必须在 IOException **之前**判断：
+                    //    SocketTimeoutException 是 IOException 的子类，顺序反了会被
+                    //    IOException 分支先接住，用户只看到一句生涩的英文类名。
                     is java.net.SocketTimeoutException ->
                         "上传超时：文件偏大或网络太慢，建议换 Wi-Fi，或把文件分卷后再传"
+                    // 明文 HTTP 被系统拦截（Android 9+ 默认禁止 cleartext）。
+                    // 若哪天端点回落到 http:// 或跟随到一个明文跳转，会走这里，
+                    // 报出来比一句 "Failed to connect" 有用得多。
+                    is java.net.UnknownServiceException ->
+                        "连接被系统拦截（明文 HTTP）：端点或跳转回落到 http:// 了"
                     is java.io.IOException -> "网络错误：${e.message}"
                     else -> e.message ?: "上传失败"
                 }
@@ -224,10 +233,21 @@ class UploadRepositoryImpl @Inject constructor(
         val boundary = "----CloudBoxBoundary" +
             java.util.UUID.randomUUID().toString().replace("-", "")
 
+        // 发请求前把三件关键事实记下来：本地字节数、实际提交名、目标目录。
+        // "秒成功"这类问题只能靠"请求前后各一条日志"来区分：
+        // 如果请求耗时为 0 且这里报的 size 就是 0，那是本地读坏了；
+        // 如果 size 正常但耗时极短，那才是网络/协议层的事。
+        val t0 = System.currentTimeMillis()
+        Log.i(TAG, "上传开始 file=${file.name} as=$uploadName size=${file.length()}B " +
+                "folder=$folderId mime=$mime")
+
         val resp = apiClient.uploadApiService.upload(
             buildOriginalMultipart(boundary, folderId, uploadName, mime, file),
             "UTF-8"
         )
+
+        Log.i(TAG, "上传回包 file=$uploadName 耗时=${System.currentTimeMillis() - t0}ms " +
+                "zt=${resp.zt} info=${resp.info} text=${resp.text.brief()}")
 
         val fileId: String? = (resp.text as? List<*>)
             ?.firstOrNull()
@@ -293,6 +313,7 @@ class UploadRepositoryImpl @Inject constructor(
         uploadName: String = file.name
     ): UploadProbeResult {
         val hasCred = apiClient.cookieJar.hasUploadCredentials()
+        val t0 = System.currentTimeMillis()
         return runCatching {
             val boundary = "----CloudBoxBoundary" +
                 java.util.UUID.randomUUID().toString().replace("-", "")
@@ -300,6 +321,9 @@ class UploadRepositoryImpl @Inject constructor(
             val resp = apiClient.uploadApiService.uploadProbe(body, "UTF-8")
             val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
                 .getOrElse { "<读取响应失败: ${it.message}>" }
+            val elapsed = System.currentTimeMillis() - t0
+            Log.i(TAG, "探针 file=$uploadName size=${file.length()}B folder=$folderId " +
+                    "耗时=${elapsed}ms HTTP=${resp.code()} body=${raw.take(200)}")
             UploadProbeResult(
                 httpCode = resp.code(),
                 requestUrl = resp.raw().request.url.toString(),
@@ -308,7 +332,8 @@ class UploadRepositoryImpl @Inject constructor(
                 fileName = file.name,
                 fileSize = file.length(),
                 targetFolderId = folderId,
-                uploadAs = uploadName.takeIf { it != file.name }.orEmpty()
+                uploadAs = uploadName.takeIf { it != file.name }.orEmpty(),
+                elapsedMs = elapsed
             )
         }.getOrElse {
             UploadProbeResult(
@@ -319,7 +344,8 @@ class UploadRepositoryImpl @Inject constructor(
                 fileName = file.name,
                 fileSize = file.length(),
                 targetFolderId = folderId,
-                uploadAs = uploadName.takeIf { it != file.name }.orEmpty()
+                uploadAs = uploadName.takeIf { it != file.name }.orEmpty(),
+                elapsedMs = System.currentTimeMillis() - t0
             )
         }
     }
@@ -424,6 +450,11 @@ class UploadRepositoryImpl @Inject constructor(
 
             sink.writeUtf8("\n--$boundary--\n")
         }
+    }
+
+    companion object {
+        /** logcat 过滤：adb logcat -s CloudBoxUpload */
+        private const val TAG = "CloudBoxUpload"
     }
 
     /** 任意响应体的简短画像：仅供失败诊断展示，不参与成功判定 */
