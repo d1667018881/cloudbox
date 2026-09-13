@@ -1,11 +1,11 @@
 package com.cloudbox.app.feature.upload
 
 import android.content.Context
-import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.cloudbox.app.common.UploadTrace
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import com.cloudbox.app.core.domain.repository.UploadResult
 import dagger.assisted.Assisted
@@ -34,7 +34,8 @@ import kotlinx.coroutines.delay
 class UploadWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val uploadRepository: UploadRepository
+    private val uploadRepository: UploadRepository,
+    private val uploadTrace: UploadTrace
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -42,11 +43,15 @@ class UploadWorker @AssistedInject constructor(
         val paths = inputData.getStringArray(KEY_FILE_PATHS)?.toList() ?: emptyList()
         val spoof = inputData.getBoolean(KEY_SPOOF, true)
         // Worker 是否真的跑起来了，是"假成功"排查的第一分水岭：
-        // 只要这行没出现在 logcat，就说明任务压根没执行（Hilt 注入失败 /
+        // 只要这行没出现在时间线里，就说明任务压根没执行（Hilt 注入失败 /
         // 约束未满足 / 被系统压制），而不是上传本身失败。
-        Log.i(TAG, "Worker 启动 id=$id folder=$folderId files=${paths.size} spoof=$spoof")
+        //
+        // 与之对照：若时间线里出现「ENQUEUED → FAILED, runAttemptCount=0」
+        // 且**没有**这一行，那就是 Worker 没被构造（工厂/注解处理器问题），
+        // 而 @HiltWorker 的工厂绑定由 androidx.hilt:hilt-compiler 生成。
+        uploadTrace.log("Worker 启动 id=${id.toString().take(8)} folder=$folderId files=${paths.size} spoof=$spoof")
         if (paths.isEmpty()) {
-            Log.w(TAG, "Worker 输入为空，直接判定失败 id=$id")
+            uploadTrace.log("Worker 输入为空，直接判定失败 id=${id.toString().take(8)}")
             return Result.failure()
         }
 
@@ -163,8 +168,10 @@ class UploadWorker @AssistedInject constructor(
         val failed = results.filter { !it.success }
         // V5：部分丢失的文件并入失败名单（否则无声消失）
         val failedNames = (failed.map { it.fileName } + missingNames).distinct()
-        Log.i(TAG, "Worker 结束 id=$id 结果 ${results.size} 条，失败 ${failedNames.size} 个" +
-                (if (failed.isNotEmpty()) "：${failed.first().message}" else ""))
+        uploadTrace.log(
+            "Worker 结束 id=${id.toString().take(8)} 结果 ${results.size} 条，失败 ${failedNames.size} 个" +
+                    (if (failed.isNotEmpty()) "：${failed.first().message}" else "")
+        )
         return Result.success(
             workDataOf(
                 KEY_FAILED_FILES to failedNames.joinToString("\n"),
@@ -175,10 +182,11 @@ class UploadWorker @AssistedInject constructor(
     }
 
     companion object {
-        /** logcat 过滤：adb logcat -s CloudBoxUpload */
-        private const val TAG = "CloudBoxUpload"
-
-        /** 查询 tag（固定值）：App 重启后 UploadViewModel 凭此找出全部上传批次（见其 init） */
+        /**
+         * 查询 tag（固定值）：App 重启后 UploadViewModel 凭此找出全部上传批次（见其 init）
+         *
+         * 注：日志 TAG 已迁至 UploadTrace.TAG；时间线上限见 UploadTrace.MAX_LINES。
+         */
         const val TAG_UPLOAD_SESSION = "cloudbox_upload_session"
 
         /** 会话分组 tag 前缀：每次 enqueue 一个新 uuid，防止多会话批次互相混淆

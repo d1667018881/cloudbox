@@ -55,6 +55,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val uploadTimeline by viewModel.uploadTimeline.collectAsState()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     // 真实文件自检：选完文件直接跑一遍上传链路
@@ -206,6 +207,16 @@ fun SettingsScreen(
             state.probeResult?.let {
                 com.cloudbox.app.feature.upload.UploadProbeDialog(it, onDismiss = viewModel::dismissProbe)
             }
+            HorizontalDivider()
+
+            // ==================== 上传日志（持久入口） ====================
+            // 为什么放这里：上传失败时网盘页只弹一个 Snackbar，错过就没了
+            // （用户实测"点看详情看不到"）。同一份时间线由 UploadTrace 单例
+            // 持有，这里挂一个永久入口，任何时候都能回来翻、能复制。
+            UploadTimelineSection(
+                lines = uploadTimeline,
+                onClear = viewModel::clearUploadTimeline
+            )
             HorizontalDivider()
 
             // ==================== 账号中心设置（task=7/8/10/15，对齐原版 account.lua） ====================
@@ -421,5 +432,86 @@ private fun SettingRow(title: String, subtitle: String, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         Icon(Icons.Filled.Language, null, Modifier.height(16.dp))
+    }
+}
+
+/**
+ * 上传日志（持久入口）。
+ *
+ * 时间线由 UploadTrace 单例持有，**跨页面、跨 Worker**：
+ * ViewModel 建任务、WorkManager 调度、Worker 执行、回写结果，四段全在同一份
+ * 时间线里，按时间戳顺序排好。上传失败但没来得及看 Snackbar 时，来这里翻。
+ *
+ * 判读要点（页面上也写了一份，免得每次都要翻代码）：
+ * - 有「已拷贝…准备入队」→ SAF 读取这一段是通的；
+ * - 有「Worker 启动」→ Worker 真的跑起来了（Hilt 注入 OK）；
+ * - `ENQUEUED → FAILED` 且**没有**「Worker 启动」→ Worker 没被构造。
+ */
+@Composable
+private fun UploadTimelineSection(lines: List<String>, onClear: () -> Unit) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+
+    SectionTitle("上传日志（失败原因在这里看）")
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (lines.isEmpty()) "暂无记录" else "共 ${lines.size} 条（最新 ${lines.last().take(19)}）",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                "上传链路的时间线：拷贝 → 入队 → 调度 → Worker → 服务端回包。" +
+                    "「ENQUEUED 后直接 FAILED 且没有 Worker 启动」= Worker 没被构造。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "查看") }
+    }
+
+    if (expanded) {
+        if (lines.isEmpty()) {
+            Text(
+                "还没有上传过，或日志已被清空。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        } else {
+            // 时间线可能上百行，用一个高度受限的可滚动区域，避免把设置页撑爆
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .height(240.dp)
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                lines.forEach { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(vertical = 1.dp)
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+            Button(
+                onClick = {
+                    val text = if (lines.isEmpty()) "（上传日志为空）"
+                    else lines.joinToString("\n")
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("上传日志", text))
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("复制全部") }
+            Spacer(Modifier.padding(start = 8.dp))
+            Button(onClick = onClear, modifier = Modifier.weight(1f)) { Text("清空") }
+        }
     }
 }

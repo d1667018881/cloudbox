@@ -87,9 +87,11 @@ fun FileListScreen(
     var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
     var descTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
-    // 上传失败详情弹窗开关。必须声明在 LaunchedEffect 之前——Snackbar 动作
-    // 要置位它，而 Compose 的 remember 在同一作用域内需先声明后使用。
+    // 上传失败详情弹窗开关，以及**详情内容的快照**。
+    // 必须声明在 LaunchedEffect 之前——Snackbar 动作要置位它们，
+    // 而 Compose 的 remember 在同一作用域内需先声明后使用。
     var showFailureDetail by remember { mutableStateOf(false) }
+    var failureDetailText by remember { mutableStateOf("") }
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     // 在 @Composable 作用域取 context：上传失败点"网页上传"时要用它启动 Activity
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -144,7 +146,22 @@ fun FileListScreen(
                 else
                     androidx.compose.material3.SnackbarDuration.Short
             )
+            // ⚠️ 必须先把详情内容**快照**下来，再清 message。
+            //
+            //    旧写法是 `showFailureDetail = true` 后立刻 dismissMessage()，
+            //    而弹窗渲染条件里带着 `uploadState.message != null` ——
+            //    message 在同一帧被清空，条件永远不成立，于是**点了"看详情"什么都不弹**
+            //    （用户实测反馈）。改为把当时的 message/失败名单复制进本地 state，
+            //    弹窗只依赖这份快照，与 ViewModel 的清理时机彻底解耦。
             if (res == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                failureDetailText = buildString {
+                    append(msg).append("\n")
+                    if (uploadState.failedFiles.isNotEmpty()) {
+                        append("\n失败文件：\n")
+                        uploadState.failedFiles.take(20)
+                            .forEach { append("  · ").append(it).append("\n") }
+                    }
+                }
                 showFailureDetail = true
             }
             uploadViewModel.dismissMessage()
@@ -423,22 +440,25 @@ fun FileListScreen(
 
     // 上传失败时：用同一个弹窗把"时间线 + 失败名单"摊开。
     // 用户看到"上传失败"时最需要知道的是"到底哪一步断了"，而不是再猜一次。
-    if (uploadState.hasFailure && uploadState.message != null && showFailureDetail) {
+    //
+    // 条件只依赖本地的 showFailureDetail + failureDetailText 快照，
+    // 不再检查 uploadState.message —— 那正是上一版"点看详情没反应"的原因
+    // （Snackbar 回调里紧接着 dismissMessage()，两者在同一帧生效，
+    //   message 已为 null，条件不成立，弹窗不渲染）。
+    if (showFailureDetail && failureDetailText.isNotBlank()) {
         val detail = com.cloudbox.app.core.domain.repository.UploadProbeResult(
             httpCode = -2,
             requestUrl = "上传失败明细（非探针）",
-            rawBody = buildString {
-                append(uploadState.message).append("\n")
-                if (uploadState.failedFiles.isNotEmpty()) {
-                    append("\n失败文件：\n")
-                    uploadState.failedFiles.take(20).forEach { append("  · ").append(it).append("\n") }
-                }
-            },
+            rawBody = failureDetailText,
             hasCredential = true
         )
         com.cloudbox.app.feature.upload.UploadProbeDialog(
             result = detail,
-            onDismiss = { showFailureDetail = false },
+            onDismiss = {
+                showFailureDetail = false
+                // 连快照一起清，避免下次进来先闪一下上次的旧内容
+                failureDetailText = ""
+            },
             timeline = uploadTimeline
         )
     }

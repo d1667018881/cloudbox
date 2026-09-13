@@ -43,7 +43,8 @@ import javax.inject.Inject
 class UploadViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val uploadRepository: UploadRepository,
-    private val workManager: WorkManager
+    private val workManager: WorkManager,
+    private val uploadTrace: com.cloudbox.app.common.UploadTrace
 ) : ViewModel() {
 
     /** 上传进度横幅状态 */
@@ -74,24 +75,14 @@ class UploadViewModel @Inject constructor(
     val uploadFinished: SharedFlow<Unit> = _uploadFinished.asSharedFlow()
 
     /**
-     * 上传过程的**结构化时间线**，专供排障。
+     * 上传时间线（**全局单例**，见 [UploadTrace]）。
      *
-     * 为什么要留这个：上传链路是"ViewModel 建任务 → WorkManager 调度 → Worker 执行
-     * → 回写 outputData → ViewModel 汇总"五段式的，出问题时空口无凭，只能靠猜。
-     * 把每段的关键事实按顺序记下来，出问题时导出一次就能定位到具体哪一段断了，
-     * 而不是反复改代码试。
-     *
-     * 只保留最近 [TIMELINE_MAX] 条，避免长会话占内存。
+     * 为什么抽成单例而不放在本类：Worker 侧也要写日志、设置页也要读日志，
+     * 而它们都拿不到这个 ViewModel 实例（不同的 UI 作用域）。
      */
-    private val _timeline = MutableStateFlow<List<String>>(emptyList())
-    val timeline: StateFlow<List<String>> = _timeline.asStateFlow()
+    val timeline: StateFlow<List<String>> = uploadTrace.lines
 
-    private fun trace(line: String) {
-        val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
-            .format(java.util.Date())
-        Log.i(TAG, line)
-        _timeline.update { (it + "$stamp  $line").takeLast(TIMELINE_MAX) }
-    }
+    private fun trace(line: String) = uploadTrace.log(line)
 
     private var currentWorkIds: List<UUID> = emptyList()
     private val workStates = mutableMapOf<UUID, WorkInfo.State>()
@@ -595,19 +586,16 @@ class UploadViewModel @Inject constructor(
         name.substringAfterLast('/').replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
     companion object {
-        /** logcat 过滤：adb logcat -s CloudBoxUpload */
-        private const val TAG = "CloudBoxUpload"
-
         /**
          * 每个 Worker 处理的文件数上限。
          *
          * 上限来自 WorkManager 的 10 分钟硬限制：批量越大越容易撞线，
          * 越小则 Worker 数量越多、链式时序越复杂。5 是两者的平衡点
          * （详见 enqueueUpload 内的注释）。
+         *
+         * 注：时间线相关常量（TAG / TIMELINE_MAX）已迁至 UploadTrace 单例，
+         * 此处不再保留副本，避免两处定义漂移。
          */
         private const val BATCH_SIZE = 5
-
-        /** 时间线最多保留条数 */
-        private const val TIMELINE_MAX = 120
     }
 }

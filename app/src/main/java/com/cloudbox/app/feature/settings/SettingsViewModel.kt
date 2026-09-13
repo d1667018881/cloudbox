@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.common.AppConstants
+import com.cloudbox.app.common.UploadTrace
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.model.AccountInfo
 import com.cloudbox.app.core.domain.repository.AuthRepository
@@ -45,11 +46,24 @@ class SettingsViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
     private val profileRepository: ProfileRepository,
-    private val uploadRepository: UploadRepository
+    private val uploadRepository: UploadRepository,
+    private val uploadTrace: UploadTrace
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+
+    /**
+     * 上传链路时间线（全局单例，跨页面/跨 Worker）。
+     *
+     * 为什么要有这个持久入口：上传失败时网盘页只弹一个 Snackbar，
+     * 一旦被划掉或错过就再也看不到原因（"点看详情看不到"）。
+     * 这里把同一份时间线挂到设置页，任何时候都能回来翻。
+     */
+    val uploadTimeline: StateFlow<List<String>> = uploadTrace.lines
+
+    /** 清空时间线（排查前先清一次，时间线更干净） */
+    fun clearUploadTimeline() = uploadTrace.clear()
 
     init {
         viewModelScope.launch {
