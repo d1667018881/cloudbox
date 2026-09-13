@@ -60,6 +60,13 @@ hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 hilt-work = { group = "androidx.hilt", name = "hilt-work", version = "1.2.0" }
+# ⚠️ hilt-work 的注解处理器，**必须**显式引入，不能用 com.google.dagger:hilt-compiler 代替：
+# 前者处理 @HiltWorker/@AssistedInject 并生成 UploadWorker 的工厂绑定，
+# 后者只管 @HiltAndroidApp/@Inject。缺了它，HiltWorkerFactory 在运行期找不到
+# UploadWorker，一切 Worker 任务都会**瞬间 FAILED（runAttemptCount=0，
+# outputData 为空），且不产生任何可读错误**。
+# 版本需与 hilt-work 保持一致。
+hilt-androidx-compiler = { group = "androidx.hilt", name = "hilt-compiler", version = "1.2.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

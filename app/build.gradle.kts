@@ -123,6 +123,9 @@ dependencies {
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // 处理 @HiltWorker / @AssistedInject，生成 UploadWorker 的工厂绑定。
+    // 缺这一行会让所有 Worker 任务瞬间 FAILED 且无任何可读错误（详见 toml 注释）。
+    ksp(libs.hilt.androidx.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.hilt.work)
 }
