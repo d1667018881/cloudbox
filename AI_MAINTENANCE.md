@@ -1734,3 +1734,211 @@ getter 每次读取都重新求值，任何一次过早的读取都会踩雷。
 > **"秒失败"和"秒成功"一样，都是"请求没真正走到目的地"的信号。**
 > 这次一个 334ms 的真回包（带中文错误）立刻澄清了性质 ——
 > 有服务端返回内容 = 链路通；只有 WorkManager 状态 = 卡在本地。
+
+---
+
+## 27. V20 + V21：Worker 瞬间 FAILED 的真根因，与「看详情看不到」（2026-09-13）
+
+这一节记录一个**极其隐蔽、代价极大**的坑，以及一次 UI 层面的状态竞态。
+两者叠在一起，让"上传失败"这件事在用户侧表现为"说不清哪里错"。
+
+### 27.1 V20：缺少 `androidx.hilt:hilt-compiler` —— Worker 根本没被构造
+
+**现象**（用户实测，一次不差）：
+
+```
+21:10:40.062  批次 68269d5e → WorkInfo{ state=ENQUEUED }
+21:10:40.068  批次 68269d5e → WorkInfo{ state=FAILED, outputData=Data {},
+                       runAttemptCount=0, nextScheduleTimeMillis=9223372036854775807 }
+21:10:40.068  裁决 total=1 失败=0 中断=1 状态=68269d5e=FAILED
+```
+
+全过程 **6 毫秒**，`ENQUEUED` 直接跳 `FAILED`，中间**没有 `RUNNING`**。
+
+**这些特征的含义**：
+
+| 字段 | 含义 |
+|---|---|
+| `runAttemptCount=0` | 一次尝试都没发生过 |
+| `outputData=Data {}` | Worker 没往结果里写任何东西 |
+| `nextScheduleTimeMillis=Long.MAX_VALUE` | 不会重试 |
+| `stopReason=-256` | WorkManager 内部"未执行即终止" |
+| **无 RUNNING** | **Worker 实例压根没被构造出来** |
+
+**根因**：`app/build.gradle.kts` 里只写了
+
+```kotlin
+ksp(libs.hilt.compiler)   // = com.google.dagger:hilt-android-compiler
+```
+
+`com.google.dagger:hilt-android-compiler` 只处理 `@HiltAndroidApp` / `@Inject` /
+`@HiltViewModel` 这类 Dagger Hilt 注解。**它不处理 `@HiltWorker`。**
+`@HiltWorker` 的工厂绑定（让 `HiltWorkerFactory` 能找到 `UploadWorker` 并完成
+`@AssistedInject` 构造）由**另一个**注解处理器生成：
+
+```toml
+# gradle/libs.versions.toml
+hilt-androidx-compiler = { group = "androidx.hilt", name = "hilt-compiler", version = "1.2.0" }
+```
+
+```kotlin
+// app/build.gradle.kts
+ksp(libs.hilt.compiler)            // Dagger Hilt：@HiltAndroidApp / @Inject
+ksp(libs.hilt.androidx.compiler)   // AndroidX Hilt：@HiltWorker / @AssistedInject
+implementation(libs.hilt.work)
+```
+
+缺了第二个 → 编译期不生成工厂绑定 → 运行期 `HiltWorkerFactory` 找不到
+`UploadWorker` 的构造方式 → WorkManager 建不出 Worker 实例 → **瞬间 FAILED，
+且不产生任何可读错误**。
+
+**为什么这个坑这么难查**：
+
+它**编译期完全无感**，CI 一路绿。`@HiltWorker` 注解本身合法，
+`UploadWorker` 类也编译正常，只是"绑定没生成"。所有报错都发生在运行期，
+而且被 WorkManager 吞成了一个状态位。
+
+**排查路径**（值得记住的推理链）：
+
+1. V18 先做了**全量可观测化**（时间线 + 状态变化日志）——
+   这是能看见"6 毫秒 ENQUEUED→FAILED"的前提。**没有观测就没有定位。**
+2. 看到 `runAttemptCount=0` 排除了"代码抛异常"（抛异常会有 attempt 计数）。
+3. 排除 V19 的假设（WorkerFactory 初始化时机）——
+   加 `by lazy` + `onCreate` 主动初始化后现象**完全不变**，
+   说明不是时机问题，是"根本没有这个东西"。
+4. 转向依赖配置，发现两个 hilt-compiler 的区别。
+
+> **教训**：`@HiltWorker` 需要 `androidx.hilt:hilt-compiler`，
+> 它和 `com.google.dagger:hilt-android-compiler` 是**两个不同的处理器**，
+> 缺一不可。这个依赖必须显式声明。
+>
+> 更普遍地说：**"瞬间失败且无错误信息"通常意味着失败发生在"构造阶段"
+> 而不是"执行阶段"**——对象根本没建出来，自然没有东西能报错。
+
+### 27.2 V21：Snackbar 里清状态，把刚打开的弹窗一起关了
+
+**现象**（用户原话）：
+
+> "上传显示失败，**但点看详情看不到**。"
+
+**根因**：Snackbar 回调里
+
+```kotlin
+if (res == SnackbarResult.ActionPerformed) {
+    showFailureDetail = true      // ① 想打开弹窗
+}
+viewModel.dismissMessage()        // ② 立刻把 uploadState.message 清空
+```
+
+而弹窗显示条件里挂着 `uploadState.message != null`：
+
+```kotlin
+if (showFailureDetail && uploadState.message != null) { ... }
+```
+
+①② 在**同一帧**执行 → 条件瞬间不成立 → 弹窗从未渲染。
+用户看到的是"点了没反应"。
+
+**修复**：把弹窗条件和易变的 `message` **解耦**，用本地快照：
+
+```kotlin
+var failureDetailText by remember { mutableStateOf("") }
+
+// 回调里：先快照内容，再清 message
+if (res == SnackbarResult.ActionPerformed) {
+    failureDetailText = buildString { /* 失败详情 + 失败文件清单 */ }
+    showFailureDetail = true
+}
+viewModel.dismissMessage()   // 此时清 message 已不影响弹窗
+
+// 弹窗只依赖本地快照
+if (showFailureDetail && failureDetailText.isNotBlank()) { ... }
+```
+
+**更重要的架构修复**：日志抽成全局单例 `common/UploadTrace.kt`。
+
+上传链路是五段式的：
+
+```
+ViewModel 建任务 → WorkManager 调度 → Worker 执行 → 回写 outputData → ViewModel 汇总
+```
+
+日志挂在 `UploadViewModel` 上有三个硬伤：
+
+- Worker 没有 UI 作用域，写不进去；
+- 设置页拿到的是**另一个** ViewModel 实例，读不到；
+- ViewModel 随页面销毁重建，日志会丢。
+
+改成 Hilt `@Singleton` 后：谁都能写、谁都能读，生命周期跟随进程。
+并且在**设置页**加了持久入口（可展开 / 复制 / 清空）——
+Snackbar 划掉了也不怕，随时能回去翻。
+
+> **教训**：**任何"一闪而过"的 UI 提示（Snackbar / Toast）都不能作为
+> 诊断信息的唯一载体。** 诊断信息要有持久、可回溯、可复制的落点。
+> 另外，凡是用 `StateFlow` 做 UI 状态，**要注意"打开某 UI"和"清空某状态"
+> 是否在同一帧发生** —— 这类竞态在 Compose 里非常常见。
+
+### 27.3 顺带记录：沙箱 HTTPS 通道的 TLS 干扰（环境问题，非 App 问题）
+
+本次推送时遇到 GitHub 推送失败，排查结论值得记下：
+
+| 观察 | 结论 |
+|---|---|
+| TCP 443 全通（多个 IP） | 不是端口封禁 |
+| TLS 握手 **0.5s** 完成 | 不是 SNI 阻断 |
+| 完整请求 **45s+** | **数据传输阶段被干扰/限速** |
+| 小 payload（首页）能过、git push 必挂 | 大数据量必超时 |
+| `gnutls_handshake() failed` / `SSL connection timeout` | 干扰表现为 TLS 层报错 |
+
+**解法：改用 SSH over 443**。
+
+```bash
+# 1) ssh.github.com 同样被 DNS 劫持，必须写 hosts
+echo "140.82.112.35 ssh.github.com" >> /etc/hosts
+echo "140.82.112.35 ssh.github.com" >> ~/.user_hosts
+
+# 2) SSH 走 443
+cat > ~/.ssh/config <<'CONF'
+Host github.com
+  HostName ssh.github.com
+  Port 443
+  User git
+  IdentityFile ~/.ssh/id_ed25519
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  ServerAliveInterval 30
+  ServerAliveCountMax 6
+CONF
+
+# 3) remote 换成 SSH
+git remote set-url origin git@github.com:d1667018881/cloudbox.git
+```
+
+验证：`ssh -T git@github.com` → `Hi d1667018881! You've successfully authenticated`
+
+公钥可用 PAT 调 API 添加（无需网页操作）：
+
+```bash
+curl --resolve api.github.com:443:140.82.121.5 \
+  -X POST https://api.github.com/user/keys \
+  -H "Authorization: token <PAT>" \
+  -d "{\"title\":\"sandbox\",\"key\":\"$(cat ~/.ssh/id_ed25519.pub)\"}"
+```
+
+一键脚本：`/workspace/gh_ssh_setup.sh`
+
+> **附加收益**：remote 用 SSH 形式**结构上就带不了 token**，
+> 从根上避免了 PAT 被写进 `.git/config` 的风险。
+
+### 27.4 本版结论
+
+- `v0.1.124`（V20）：补 `androidx.hilt:hilt-compiler`
+- `v0.1.125`（V21）：修弹窗竞态 + 日志单例 + 设置页持久入口
+- CI Run `34760849646`（commit `4f7a1fe`）**success**
+
+**待用户实测确认的两件事**：
+
+1. 上传失败时点「看详情」**能否弹出内容**；
+2. 时间线里**是否终于出现 `RUNNING` 行** ——
+   这一行是 V20 是否根治"Worker 瞬间 FAILED"的唯一判据。
+   若仍无 `RUNNING`，说明还有别的构造期问题，需继续排查。
