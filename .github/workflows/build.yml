@@ -23,11 +23,35 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      # ⚠️ 不再使用 android-actions/setup-android@v3（2026-09-15）。
+      #
+      # 原因：它是第三方 action，GitHub Runner 拉取它偶发失败，
+      # 失败时**日志目录还没建立**（tee 还没开始），只留下
+      # "Run android-actions/setup-android@v3 -> failure"，完全看不出原因，
+      # 排查成本极高（本次连挂两次）。
+      #
+      # ubuntu-latest runner 自身已预装 Android SDK，只需要把路径与环境
+      # 变量显式设好即可，省掉一个外部依赖。
+      - name: Setup Android SDK (built-in)
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          # sdkmanager 位于 cmdline-tools 下，逐层找（不同 runner 镜像路径略有差异）
+          CMDLINE=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)
+          if [ -z "$CMDLINE" ]; then
+            CMDLINE=$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -1)
+          fi
+          echo "sdkmanager 位置：$CMDLINE"
+          echo "已安装的平台："; ls "$SDK/platforms" 2>/dev/null || true
+          if [ -n "$CMDLINE" ]; then
+            echo "$(dirname "$CMDLINE")" >> "$GITHUB_PATH"
+          fi
 
       - name: Install SDK
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          # runner 预装的版本通常已满足；缺失才装，装不上不阻断（gradle 会自己下）
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" || true
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       - uses: gradle/actions/setup-gradle@v3
