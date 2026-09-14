@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -22,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.cloudbox.app.common.ClipboardLinkWatcher
+import com.cloudbox.app.common.ShareIntentHandler
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.feature.download.DownloadScreen
 import com.cloudbox.app.feature.favorites.FavoritesScreen
@@ -37,6 +39,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import javax.inject.Inject
 
 /** 导航路由常量 */
@@ -60,6 +63,15 @@ class MainActivity : ComponentActivity() {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * 待处理的外部分享内容（文件 / 链接）。
+     *
+     * 为什么用 StateFlow 而不是直接回调：分享进来的时机可能早于
+     * Compose 侧挂载（如冷启动），用一个"可被后续读取"的容器把它暂存，
+     * UI 侧一挂载就能消费掉，不会丢。
+     */
+    private val _pendingShare = MutableStateFlow<ShareIntentHandler.SharedContent?>(null)
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* 用户拒绝仅影响下载通知显示，不阻塞主流程 */ }
@@ -70,6 +82,8 @@ class MainActivity : ComponentActivity() {
         clipboardWatcher.start(appScope)
         // #17：外部链接唤起（intent-filter 已限 lanzou 系 host），转交剪贴板弹窗机制
         intent?.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
+        // 从其他 App 分享文件/链接进来（ACTION_SEND / ACTION_SEND_MULTIPLE）
+        handleShareIntent(intent)
         // Android 13+ 动态请求通知权限（下载完成/上传进度通知需要）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             when {
@@ -83,6 +97,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             // 深色模式设置（设置页可切换：跟随系统/浅色/深色）
             val darkMode by settingsStore.darkMode.collectAsState(initial = "system")
+            // 外部分享进来的内容（文件优先）；主界面挂载后会消费并触发上传
+            val pendingShare by _pendingShare.collectAsState()
             CloudBoxTheme(darkMode = darkMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val navController = rememberNavController()
@@ -115,7 +131,10 @@ class MainActivity : ComponentActivity() {
                                     navController.navigate(Routes.LOGIN) {
                                         popUpTo(Routes.MAIN) { inclusive = true }
                                     }
-                                }
+                                },
+                                // 外部分享进来的文件/链接：交给主界面消费（触发上传或跳解析）
+                                pendingShare = pendingShare,
+                                onShareConsumed = { _pendingShare.value = null }
                             )
                         }
                         composable(Routes.DOMAIN_CONFIG) {
@@ -158,10 +177,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 处理「从其他 App 分享进来」的 intent（文件或文本链接）。
+     *
+     * 两件事必须在这里做：
+     * 1. **对 content:// URI 申请持久读权限** —— 上传是在 WorkManager 里
+     *    后台跑的，Activity 的临时授权那时可能已失效，不申请就会
+     *    SecurityException（表现为"上传失败但看不出原因"）。
+     * 2. 文本形态若无文件，交给剪贴板机制走链接解析（复用既有弹窗）。
+     */
+    private fun handleShareIntent(intent: Intent?) {
+        val content = ShareIntentHandler.parse(intent)
+        if (content.isEmpty) return
+
+        if (content.hasFiles) {
+            // 持久授权：takePersistableUriPermission 可能因 provider 不支持而抛异常，
+            // 抛了也不致命（临时授权在同进程/短时间内仍有效），所以只记日志不中断。
+            var granted = 0
+            ShareIntentHandler.urisNeedingPersistablePermission(content.fileUris).forEach { uri ->
+                runCatching {
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                    granted++
+                }.onFailure {
+                    Log.w("CloudBoxUpload", "持久读权限申请失败（不致命）：$uri —— ${it.javaClass.simpleName}")
+                }
+            }
+            Log.i("CloudBoxUpload", "分享文件已接收：${content.fileUris.size} 个，持久授权成功 $granted 个")
+            _pendingShare.value = content
+        } else {
+            // 纯文本分享 → 按链接处理，复用剪贴板弹窗机制（会自动识别并提示打开）
+            content.text?.let { clipboardWatcher.notifyLink(it) }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // singleTask 模式复用 Activity：外部链接二次唤起走这里
         intent.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
+        // App 已在前台时再从别的 App 分享文件过来（不会重建 Activity，只走这里）
+        handleShareIntent(intent)
     }
 
     override fun onResume() {

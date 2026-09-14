@@ -68,6 +68,28 @@
                 <data android:scheme="https" android:host="lanzouu.com" />
                 <data android:scheme="https" android:host="*.lanzouu.com" />
             </intent-filter>
+
+            <!-- 从其他 App「分享」单个文件到云匣。
+                 典型场景：文件管理器/相册/微信 选中文件 → 分享 → 云匣。
+                 收到后进主界面并自动走上传流程（目标目录默认当前目录，可在界面改）。
+
+                 注意 mimeType 用 */*：用户分享的文件类型是无穷的，
+                 这里不做类型限制，接收后一律当普通文件上传。
+                 （原版 App 在 home.lua 的 intent操作 里处理 ACTION_SEND，
+                   把 ClipData 各项并入"批量上传数据"，与此处行为一致。） -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+
+            <!-- 从其他 App「分享」多个文件到云匣（长按多选 → 分享）。
+                 与上面成对出现，缺少它会导致多选分享时云匣不出现在候选列表里。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
         </activity>
 
         <!-- 官方网页上传通道（兜底）：用已登录 Cookie 打开蓝奏云官方上传页。

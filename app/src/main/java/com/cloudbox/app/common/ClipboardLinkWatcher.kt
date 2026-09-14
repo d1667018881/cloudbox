@@ -80,9 +80,9 @@ class ClipboardLinkWatcher @Inject constructor(
 
     /** 外部主动通知（intent 链接 / 页面 onResume 触发） */
     fun notifyLink(url: String) {
-        if (DomainUtils.isShareUrl(url)) {
-            _pendingLink.value = url
-        }
+        // 走 extractShareUrl 而非 isShareUrl：intent 里带的可能是整段分享文本
+        // （部分 App 把文案一起塞进 EXTRA_TEXT），先抠出 URL 再判。
+        DomainUtils.extractShareUrl(url)?.let { _pendingLink.value = it }
     }
 
     /** #16 修复：前台 onResume 时主动检查一次剪贴板——
@@ -102,9 +102,11 @@ class ClipboardLinkWatcher @Inject constructor(
         }.getOrNull() ?: return
         // 去重：同一内容不重复提示
         if (text == lastDetected) return
-        if (DomainUtils.isShareUrl(text)) {
-            lastDetected = text
-            _pendingLink.value = text
-        }
+        // ⚠️ 剪贴板里几乎总是"整段分享文案"（"蓝奏云盘 https://xxx 提取码：abcd"），
+        //    必须先把 URL 抠出来。旧实现直接把整段文本喂 isShareUrl →
+        //    java.net.URI 遇中文抛异常 → 永远不提示。
+        val url = DomainUtils.extractShareUrl(text) ?: return
+        lastDetected = text
+        _pendingLink.value = url
     }
 }

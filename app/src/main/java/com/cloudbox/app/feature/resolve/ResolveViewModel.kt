@@ -55,21 +55,38 @@ class ResolveViewModel @Inject constructor(
     /**
      * 解析输入框中的链接（支持多行批量；自动识别 lanzou 系列域名）。
      *
+     * 输入**不要求是干净 URL** —— 微信/QQ/抖音分享出来的整段文本
+     * （"蓝奏云盘 https://xxx 提取码：abcd"）可以直接粘贴：
+     * 这里会先把 URL 抠出来，再顺手把提取码填进密码框。
+     *
      * 文件夹链接（/bXXXX）会自动展开为目录内全部文件的直链；
      * URL 形态看不出来但页面判定为文件夹时（[ERR_FOLDER_LINK]）同样自动改走目录流程。
      */
     fun resolve() {
         val s = _uiState.value
-        val urls = s.input.lines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .filter { com.cloudbox.app.common.DomainUtils.isShareUrl(it) }
+        // ⚠️ 这里必须走 extractShareUrls 而不是 isShareUrl 直接过滤：
+        //    旧实现拿整段文本喂 java.net.URI，只要带中文/空格就抛异常被判为
+        //    "不是分享链接"，导致粘贴分享文案时永远报"未识别到蓝奏云分享链接"。
+        val urls = com.cloudbox.app.common.DomainUtils.extractShareUrls(s.input)
         if (urls.isEmpty()) {
             _uiState.update { it.copy(message = "未识别到蓝奏云分享链接") }
             return
         }
+        // 分享文案里带的提取码自动填进密码框（用户没自己填过才填，不覆盖手输值）
+        val autoPwd = if (s.password.isBlank()) {
+            com.cloudbox.app.common.DomainUtils.extractPassword(s.input)
+        } else null
+        val pwd = autoPwd ?: s.password
         if (s.resolving) return
-        _uiState.update { it.copy(resolving = true, results = emptyList(), progress = "开始解析…") }
+        _uiState.update {
+            it.copy(
+                resolving = true,
+                results = emptyList(),
+                progress = "开始解析…",
+                password = pwd,
+                input = urls.joinToString("\n")
+            )
+        }
         viewModelScope.launch {
             val out = mutableListOf<ResolveItem>()
             urls.forEachIndexed { index, url ->
@@ -78,13 +95,13 @@ class ResolveViewModel @Inject constructor(
                 }
                 if (isFolderShareUrl(url)) {
                     // URL 形态已表明是文件夹：先按目录展开，一条都没拿到再退回单文件流程
-                    val expanded = expandFolder(url, s.password)
+                    val expanded = expandFolder(url, pwd)
                     if (expanded.any { it.link != null }) out.addAll(expanded)
-                    else out.addAll(resolveSingle(url, s.password))
+                    else out.addAll(resolveSingle(url, pwd))
                 } else {
-                    val single = resolveSingle(url, s.password)
+                    val single = resolveSingle(url, pwd)
                     // 单文件流程报"页面判定为文件夹" → 自动改走目录展开
-                    if (lastWasFolderLink) out.addAll(expandFolder(url, s.password))
+                    if (lastWasFolderLink) out.addAll(expandFolder(url, pwd))
                     else out.addAll(single)
                 }
             }

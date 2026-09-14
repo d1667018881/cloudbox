@@ -88,6 +88,35 @@ object AppConstants {
     /** 从 URL 中提取分享 ID（最后一层路径段，如 lanzou.com/i5g8y1a 的 i5g8y1a） */
     val SHARE_ID_REGEX = Regex("""/([a-zA-Z0-9]+)/?$""")
 
+    /**
+     * 从**任意文本**里捞出 URL 候选（用于整段分享文本的场景）。
+     *
+     * 为什么要单独一条：`java.net.URI` 遇到中文/空格必抛 URISyntaxException，
+     * 不能拿整段文本喂给它。先用这条正则把 URL 子串抠出来，再逐条校验域名。
+     * 见 [com.cloudbox.app.common.DomainUtils.extractShareUrl]。
+     *
+     * 字符集说明：
+     * - 允许 `%`（URL 编码）、`&`/`=`/`?`/`#`（查询串与锚点）
+     * - 允许 `+`（部分分享链查询串用加号）
+     * - **不允许**中文/空格，正则遇到即停 —— 这正是我们要的截断效果
+     */
+    val URL_CANDIDATE_REGEX = Regex("""https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+""")
+
+    /**
+     * 分享文本里的访问码 / 提取码。
+     *
+     * 覆盖的常见写法（微信/QQ/抖音/盘友分享文案实测形态）：
+     * - `提取码：abcd`  `提取码:abcd`
+     * - `密码：abcd`    `访问码：abcd`
+     * - `（访问码：abcd）` `(提取码 abcd)`
+     *
+     * 捕获组 1 是码本身。注意用非贪婪 + 限定长度（2~16 位字母数字），
+     * 避免把后面的中文说明也吞进来。
+     */
+    val SHARE_PWD_REGEX = Regex(
+        """(?:提取码|访问码|密码|提取密码|分享密码)\s*[:：]?\s*([A-Za-z0-9]{2,16})"""
+    )
+
     /** 超时（毫秒）：需求规格要求 30s */
     const val TIMEOUT_CONNECT_MS = 30_000L
     const val TIMEOUT_READ_MS = 30_000L

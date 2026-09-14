@@ -74,6 +74,12 @@ import com.cloudbox.app.feature.filelist.dialog.SimpleInputDialog
 fun FileListScreen(
     onOpenSearch: () -> Unit,
     onOpenRecycle: () -> Unit,
+    /** 从其他 App 分享进来的文件/链接（未消费时非空） */
+    pendingShare: com.cloudbox.app.common.ShareIntentHandler.SharedContent? = null,
+    /** 分享内容已被消费，通知上层清空，避免旋转屏幕/重组时重复触发 */
+    onShareConsumed: () -> Unit = {},
+    /** 分享进来的链接交由此回调处理（跳到解析页） */
+    onOpenSharedLink: (String) -> Unit = {},
     viewModel: FileListViewModel = hiltViewModel(),
     uploadViewModel: com.cloudbox.app.feature.upload.UploadViewModel = hiltViewModel()
 ) {
@@ -87,6 +93,10 @@ fun FileListScreen(
     var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
     var descTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
+    // "上传到指定目录"：先选目录，选完再拉起文件选择器
+    var showUploadFolderPicker by remember { mutableStateOf(false) }
+    // 上一轮"上传到指定目录"选中的目录（null = 用当前浏览目录）
+    var pendingUploadFolderId by remember { mutableStateOf<Long?>(null) }
     // 上传失败详情弹窗开关，以及**详情内容的快照**。
     // 必须声明在 LaunchedEffect 之前——Snackbar 动作要置位它们，
     // 而 Compose 的 remember 在同一作用域内需先声明后使用。
@@ -101,8 +111,11 @@ fun FileListScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            // 目标 = 当前浏览目录（栈顶），传完自动刷新列表
-            uploadViewModel.enqueueUpload(uris, state.folderStack.last().first)
+            // 目标 = pendingUploadFolderId（"上传到指定目录"选的）?? 当前浏览目录（栈顶）
+            // 用完后清空，避免下一次普通上传还传去上次选的那个目录
+            val target = pendingUploadFolderId ?: state.folderStack.last().first
+            pendingUploadFolderId = null
+            uploadViewModel.enqueueUpload(uris, target)
         }
     }
 
@@ -128,6 +141,29 @@ fun FileListScreen(
     // 上传会话结束（含部分失败）→ 刷新当前目录（V5：修复"上传成功但列表不更新"）
     LaunchedEffect(Unit) {
         uploadViewModel.uploadFinished.collect { viewModel.refresh() }
+    }
+
+    // ==================== 接收「从其他 App 分享进来」的内容 ====================
+    //
+    // 两种形态分开处理：
+    // - 文件：直接入队上传到**当前浏览目录**（分享过来时用户已经在某目录里，
+    //   默认传到这里最符合直觉；想换目录可以退出到目标目录再分享一次）。
+    // - 链接：跳到解析页（复用既有解析逻辑，含提取码自动填充）。
+    //
+    // 消费完立刻 onShareConsumed() 清空，否则 Compose 重组/旋转屏幕会把
+    // 同一份内容重复上传 —— 这是分享接收最常见的坑。
+    LaunchedEffect(pendingShare) {
+        val share = pendingShare ?: return@LaunchedEffect
+        if (share.isEmpty) {
+            onShareConsumed()
+            return@LaunchedEffect
+        }
+        if (share.hasFiles) {
+            uploadViewModel.enqueueUpload(share.fileUris, state.folderStack.last().first)
+        } else {
+            share.text?.let { onOpenSharedLink(it) }
+        }
+        onShareConsumed()
     }
 
     // 上传结果提示（消费即清，防止 Tab 切换重建 composition 时重放同一条）。
@@ -264,6 +300,17 @@ fun FileListScreen(
                                 filePicker.launch(arrayOf("*/*"))
                             }
                         )
+                        // 传去**别的**目录：先选目标目录，再选文件。
+                        // 补的是"分享进来默认传当前目录、但我想传去别处"这个缺口
+                        // —— 分享接收是外部发起的，用户来不及先切目录。
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("上传到指定目录…") },
+                            leadingIcon = { Icon(Icons.Filled.Folder, null) },
+                            onClick = {
+                                showFabMenu = false
+                                showUploadFolderPicker = true
+                            }
+                        )
                         // 官方网页上传页：仅作**手动备用入口**（传超大文件、或哪天
                         // 原生通道被风控挡住时用）。它不是默认路径。
                         // 诊断：拿**真实文件**在**当前目录**跑一遍上传链路，
@@ -391,6 +438,23 @@ fun FileListScreen(
         MoveFolderDialog(
             onDismiss = { moveTarget = false },
             onConfirm = { folderId, _ -> viewModel.moveSelected(folderId); moveTarget = false }
+        )
+    }
+
+    // "上传到指定目录"：选完目录后立刻拉起文件选择器。
+    //
+    // ⚠️ 目标目录必须用 remember 暂存：目录对话框关闭 → 系统文件选择器接管，
+    //    期间 Compose 可能重组，局部变量会丢。存成受 remember 保护的状态才不会丢。
+    if (showUploadFolderPicker) {
+        MoveFolderDialog(
+            title = "上传到",
+            rootLabel = "根目录（我的文件）",
+            onDismiss = { showUploadFolderPicker = false },
+            onConfirm = { folderId, _ ->
+                showUploadFolderPicker = false
+                pendingUploadFolderId = folderId
+                filePicker.launch(arrayOf("*/*"))
+            }
         )
     }
     passwdTarget?.let { file ->

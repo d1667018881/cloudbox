@@ -47,11 +47,12 @@ import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
 import com.cloudbox.app.feature.resolve.ResolveScreen
 import com.cloudbox.app.feature.search.SearchViewModel
-import com.cloudbox.app.feature.upload.UploadScreen
 
 /**
- * 主界面：底部导航容器（网盘 / 解析 / 上传 / 我的）。
+ * 主界面：底部导航容器（网盘 / 解析 / 我的）。
  * 同时承载剪贴板链接识别弹窗（需求规格 9 节）。
+ *
+ * 上传入口已合并进网盘页 FAB（见 FileListScreen），不再单列 tab。
  */
 @Composable
 fun MainScreen(
@@ -62,6 +63,10 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onOpenResolve: (String?) -> Unit,
     onLogout: () -> Unit,
+    /** 从其他 App 分享进来的文件/链接（未消费时非空），透传给网盘页消费 */
+    pendingShare: com.cloudbox.app.common.ShareIntentHandler.SharedContent? = null,
+    /** 分享内容已消费，通知上层清空（防重组重复触发） */
+    onShareConsumed: () -> Unit = {},
     clipboardWatcher: ClipboardLinkWatcher = hiltViewModel<MainViewModel>().clipboardWatcher,
     authRepository: AuthRepository = hiltViewModel<MainViewModel>().authRepository,
     searchViewModel: SearchViewModel = hiltViewModel()
@@ -132,15 +137,14 @@ fun MainScreen(
                     icon = { Icon(Icons.Filled.Link, null) },
                     label = { Text("解析") }
                 )
+                // ⚠️ 原「上传」tab 已移除（2026-09-15）。
+                //    理由：网盘页 FAB 已经能"传到当前目录"，独立上传页只是多一个
+                //    选目录的步骤，属于重复入口。文件分享进来的场景现在由
+                //    ACTION_SEND 直接进网盘页上传，也不再需要这个页面。
+                //    UploadScreen.kt 文件保留未删，需要时可随时恢复入口。
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.Download, null) },
-                    label = { Text("上传") }
-                )
-                NavigationBarItem(
-                    selected = tab == 3,
-                    onClick = { tab = 3 },
                     icon = { Icon(Icons.Filled.Person, null) },
                     label = { Text("我的") }
                 )
@@ -151,11 +155,14 @@ fun MainScreen(
             when (tab) {
                 0 -> FileListScreen(
                     onOpenSearch = onOpenSearch,
-                    onOpenRecycle = onOpenRecycle
+                    onOpenRecycle = onOpenRecycle,
+                    // 外部分享进来的文件/链接：由网盘页消费（文件直接传当前目录）
+                    pendingShare = pendingShare,
+                    onShareConsumed = onShareConsumed,
+                    onOpenSharedLink = { link -> onOpenResolve(link) }
                 )
                 1 -> ResolveScreen(onBack = {})
-                2 -> UploadScreen(onBack = {})
-                3 -> MeTab(
+                2 -> MeTab(
                     accountName = account?.uid ?: "未登录",
                     onOpenDownload = onOpenDownload,
                     onOpenFavorites = onOpenFavorites,

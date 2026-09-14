@@ -33,13 +33,23 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.cloudbox.app.feature.filelist.FileListViewModel
 
 /**
- * 移动目标选择对话框。
+ * 目录选择对话框（通用）。
+ *
+ * 两个使用场景共用：
+ * - 文件移动（原用途："移动到"）
+ * - **上传目标目录选择**（"上传到"）—— 分享文件进来、或想传去非当前目录时用
+ *
  * 目标列表来自 task=19（全部文件夹平铺）；只支持文件移动（文件夹移动官方无接口）。
+ *
+ * @param title 对话框标题。默认"移动到"；上传场景传"上传到"。
+ * @param rootLabel 根目录那一行的显示名。上传场景可传"根目录（我的文件）"。
  */
 @Composable
 fun MoveFolderDialog(
     onDismiss: () -> Unit,
     onConfirm: (Long, String) -> Unit,
+    title: String = "移动到",
+    rootLabel: String = "根目录",
     viewModel: FileListViewModel = hiltViewModel()
 ) {
     var folders by remember { mutableStateOf<List<Pair<Long, String>>?>(null) }
@@ -50,7 +60,7 @@ fun MoveFolderDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("移动到") },
+        title = { Text(title) },
         text = {
             val list = folders
             if (list == null) {
@@ -60,11 +70,11 @@ fun MoveFolderDialog(
             } else {
                 Column(Modifier.fillMaxWidth()) {
                     Text(
-                        "根目录",
+                        rootLabel,
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onConfirm(-1, "根目录") }
+                            .clickable { onConfirm(-1, rootLabel) }
                             .padding(vertical = 8.dp)
                     )
                     HorizontalDivider()
