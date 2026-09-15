@@ -4,8 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.core.domain.model.CloudFile
 import com.cloudbox.app.core.domain.model.ShareInfo
+import com.cloudbox.app.core.domain.repository.DirectLinkRepository
+import com.cloudbox.app.core.domain.repository.DownloadRepository
 import com.cloudbox.app.core.domain.repository.FileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,15 +28,61 @@ data class FileListUiState(
     val selectionMode: Boolean = false,
     val selected: Set<Long> = emptySet(),
     val shareResult: ShareInfo? = null,
+    /** 批量操作的进度提示（串行执行，可能十几秒；为空表示没有批量任务在跑） */
+    val batchProgress: String? = null,
+    /** 排序方式（客户端排序，后端返回顺序不可依赖） */
+    val sortMode: SortMode = SortMode.DEFAULT,
     val message: String? = null
 ) {
     val currentFolderId: Long get() = folderStack.last().first
     val currentFolderName: String get() = folderStack.last().second
+
+    /**
+     * 展示用的列表 = 原始列表按 [sortMode] 排序后的结果。
+     *
+     * 排序放这里（而不是改 [files]）的原因：排序是**纯展示层**的事，
+     * 不该污染数据本身 —— 否则刷新、分页追加时都要重算，容易漏。
+     */
+    val displayFiles: List<CloudFile> get() = sortMode.apply(files)
+}
+
+/**
+ * 列表排序方式。对齐原版的三种排序卡片（时间 / 名称正序 / 名称倒序）。
+ *
+ * 原版还支持"按中文名拼音排序"（Transliterator + `[一-龥]` 正则），
+ * 且对低版本系统有守卫（`29 <= Build.VERSION.SDK_INT`）。这里用
+ * [java.text.Collator] 实现，它是 java 标准库、全版本可用，效果等价且更简单。
+ */
+enum class SortMode(val label: String) {
+    /** 默认：保持服务端返回顺序（原版相当于"按时间"，因为服务端按 folder_id 倒序下发） */
+    DEFAULT("默认顺序"),
+    /** 名称 A→Z（中文按拼音，与原版一致） */
+    NAME_ASC("名称 A→Z"),
+    /** 名称 Z→A */
+    NAME_DESC("名称 Z→A");
+
+    /** 应用排序：永远文件夹在前、文件在后（网盘通用约定，原版也是如此） */
+    fun apply(list: List<CloudFile>): List<CloudFile> {
+        if (this == DEFAULT) return list
+        val collator = java.text.Collator.getInstance(java.util.Locale.CHINA).apply {
+            // 让中文按拼音、数字按数值比较，避免"第10个"排在"第2个"前面
+            strength = java.text.Collator.SECONDARY
+        }
+        val cmp = Comparator<CloudFile> { a, b ->
+            // 先按"是否文件夹"分组
+            if (a.isFolder != b.isFolder) return@Comparator if (a.isFolder) -1 else 1
+            val c = collator.compare(a.name, b.name)
+            if (this == NAME_DESC) -c else c
+        }
+        return list.sortedWith(cmp)
+    }
 }
 
 @HiltViewModel
 class FileListViewModel @Inject constructor(
-    val fileRepository: FileRepository
+    val fileRepository: FileRepository,
+    private val directLinkRepository: DirectLinkRepository,
+    private val downloadRepository: DownloadRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FileListUiState())
@@ -49,6 +98,9 @@ class FileListViewModel @Inject constructor(
         page = 1
         loadPage(append = false)
     }
+
+    /** 切换排序方式（纯客户端，不需要重新请求） */
+    fun setSortMode(mode: SortMode) = _uiState.update { it.copy(sortMode = mode) }
 
     fun loadMore() {
         val s = _uiState.value
@@ -224,6 +276,193 @@ class FileListViewModel @Inject constructor(
     }
 
     fun dismissShare() = _uiState.update { it.copy(shareResult = null) }
+
+    /**
+     * 批量分享：把**全部选中项**的分享链接取回来，拼接为一段文本一次性复制。
+     *
+     * ─────────────────────────────────────────────────────────────
+     * 修的是什么（2026-09-15）
+     * ─────────────────────────────────────────────────────────────
+     * 旧实现的「分享」按钮写的是：
+     *
+     * ```kotlin
+     * state.files.firstOrNull { it.id == state.selected.firstOrNull() }?.let { getShare(it) }
+     * ```
+     *
+     * `selected.firstOrNull()` —— 选中 N 项也只处理第 1 项。用户看到按钮叫
+     * 「分享」、以为多选生效了，实际上只弹了一条链接。**这是名不副实的假功能，
+     * 比直接不做还糟**（用户会以为操作成功）。
+     *
+     * 原版行为（`home_file.lua` 批量分享）：逐项取链接 → 拼接
+     * （文件用 `is_newd + "/" + f_id`，文件夹用 `new_url`，有密码时追加密码行）
+     * → 「共 %s 项内容」提示 + 一次性复制。
+     *
+     * ─────────────────────────────────────────────────────────────
+     * 为什么串行 + 延时
+     * ─────────────────────────────────────────────────────────────
+     * 每取一条链接都要打一次服务端（task=22 / task=18）。并发打过去必被风控
+     * ——原版的原话是「频繁操作可能触发服务器限流导致失败」，并在批量操作时
+     * 固定加了间隔。这里沿用同样的保守策略：串行 + 每项之间随机延时。
+     *
+     * @param onDone 回传拼好的文本，由 UI 层负责写剪贴板并提示
+     */
+    fun shareSelected(onDone: (String) -> Unit) {
+        val s = _uiState.value
+        val targets = s.files.filter { it.id in s.selected }
+        if (targets.isEmpty()) {
+            _uiState.update { it.copy(message = "未选择任何内容") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(batchProgress = "正在获取分享链接 0/${targets.size}…") }
+            val lines = mutableListOf<String>()
+            var failed = 0
+            targets.forEachIndexed { index, file ->
+                if (index > 0) delay(java.util.concurrent.ThreadLocalRandom.current().nextLong(300, 801))
+                val r = if (file.isFolder) {
+                    fileRepository.getDirShare(file.id)
+                } else {
+                    fileRepository.getFileShare(file.id)
+                }
+                r.onSuccess { share ->
+                    lines += buildString {
+                        append(file.name)
+                        append('\n')
+                        append(share.shareUrl)
+                        // ⚠️ 只在 onof=="1"（确实设了提取码）时才带密码。
+                        //    onof=0 时服务端给的是一个无效随机值，带上会误导对方。
+                        if (share.onof == "1" && share.pwd.isNotBlank()) {
+                            append('\n')
+                            append("密码：").append(share.pwd)
+                        }
+                    }
+                }.onFailure { failed++ }
+                _uiState.update {
+                    it.copy(batchProgress = "正在获取分享链接 ${index + 1}/${targets.size}…")
+                }
+            }
+            _uiState.update { it.copy(batchProgress = null) }
+            if (lines.isEmpty()) {
+                _uiState.update { it.copy(message = "批量分享失败：${targets.size} 项都没取到链接（可能触发限流，稍后重试）") }
+                return@launch
+            }
+            // 拼接格式：各项之间空一行，便于直接读
+            val text = lines.joinToString("\n\n")
+            onDone(text)
+            val tip = if (failed > 0) "已复制 ${lines.size} 项分享链接（${failed} 项失败）" else "已复制全部 ${lines.size} 项分享链接"
+            _uiState.update { it.copy(message = tip) }
+            exitSelection()
+        }
+    }
+
+    /** 全选当前页 */
+    fun selectAll() = _uiState.update { st ->
+        st.copy(selected = st.files.map { it.id }.toSet())
+    }
+
+    /** 取消全选 */
+    fun clearSelection() = _uiState.update { st -> st.copy(selected = emptySet()) }
+
+    /**
+     * 批量设置提取码。串行 + 延时，理由同 [shareSelected]。
+     * 文件夹没有提取码接口（官方只对文件开放 task=23），会被跳过并如实告知。
+     */
+    fun setPasswdSelected(pwd: String) {
+        val s = _uiState.value
+        val files = s.files.filter { it.id in s.selected && !it.isFolder }
+        val skipped = s.files.count { it.id in s.selected && it.isFolder }
+        if (files.isEmpty()) {
+            _uiState.update { it.copy(message = "选中的都是文件夹，文件夹不支持设置提取码") }
+            return
+        }
+        viewModelScope.launch {
+            var ok = 0
+            var fail = 0
+            files.forEachIndexed { index, file ->
+                if (index > 0) delay(java.util.concurrent.ThreadLocalRandom.current().nextLong(300, 801))
+                _uiState.update { it.copy(batchProgress = "设置提取码 ${index + 1}/${files.size}…") }
+                fileRepository.setFilePasswd(file.id, pwd)
+                    .onSuccess { ok++ }.onFailure { fail++ }
+            }
+            _uiState.update { it.copy(batchProgress = null) }
+            val skipTip = if (skipped > 0) "，跳过 $skipped 个文件夹" else ""
+            _uiState.update {
+                it.copy(message = if (fail == 0) "已为 $ok 个文件设置提取码$skipTip" else "设置完成：成功 $ok，失败 $fail$skipTip")
+            }
+            exitSelection()
+            refresh()
+        }
+    }
+
+    /** 批量修改描述（简介）。串行 + 延时，理由同 [shareSelected]。 */
+    fun setDescSelected(desc: String) {
+        val s = _uiState.value
+        val files = s.files.filter { it.id in s.selected && !it.isFolder }
+        if (files.isEmpty()) {
+            _uiState.update { it.copy(message = "选中的都是文件夹，批量修改资料仅支持文件") }
+            return
+        }
+        viewModelScope.launch {
+            var ok = 0
+            var fail = 0
+            files.forEachIndexed { index, file ->
+                if (index > 0) delay(java.util.concurrent.ThreadLocalRandom.current().nextLong(300, 801))
+                _uiState.update { it.copy(batchProgress = "修改资料 ${index + 1}/${files.size}…") }
+                fileRepository.setFileDesc(file.id, desc)
+                    .onSuccess { ok++ }.onFailure { fail++ }
+            }
+            _uiState.update { it.copy(batchProgress = null) }
+            _uiState.update {
+                it.copy(message = if (fail == 0) "已修改 $ok 个文件的资料" else "修改完成：成功 $ok，失败 $fail")
+            }
+            exitSelection()
+            refresh()
+        }
+    }
+
+    /**
+     * 批量下载：逐条解析直链后交给下载管理器。
+     *
+     * 未配置直链解析服务时直接拒绝并沿用原版文案 —— 批量下载没有直链就是不可用，
+     * 硬跑只会得到一堆失败，不如提前说清楚。
+     */
+    fun downloadSelected() {
+        val s = _uiState.value
+        val files = s.files.filter { it.id in s.selected && !it.isFolder }
+        if (files.isEmpty()) {
+            _uiState.update { it.copy(message = "选中的都是文件夹，批量下载仅支持文件") }
+            return
+        }
+        viewModelScope.launch {
+            var ok = 0
+            var fail = 0
+            files.forEachIndexed { index, file ->
+                if (index > 0) delay(java.util.concurrent.ThreadLocalRandom.current().nextLong(300, 801))
+                _uiState.update { it.copy(batchProgress = "加入下载队列 ${index + 1}/${files.size}…") }
+                fileRepository.getFileShare(file.id).onSuccess { share ->
+                    // 分享链接 → 直链 → 下载队列；任一环失败都算这一项失败。
+                    // 密码只在 onof=="1" 时有效（否则是无效随机值，带上会被判密码错误）。
+                    val pwd = if (share.onof == "1") share.pwd else ""
+                    directLinkRepository.resolve(share.shareUrl, pwd)
+                        .onSuccess { link ->
+                            downloadRepository.enqueue(
+                                url = link.url,
+                                fileName = link.fileName.ifBlank { file.name },
+                                referer = link.referer,
+                                mimeType = null,
+                                accountUid = fileRepository.currentUid() ?: ""
+                            )
+                            ok++
+                        }.onFailure { fail++ }
+                }.onFailure { fail++ }
+            }
+            _uiState.update { it.copy(batchProgress = null) }
+            _uiState.update {
+                it.copy(message = if (fail == 0) "已加入下载队列：$ok 个文件" else "批量下载：成功 $ok，失败 $fail")
+            }
+            exitSelection()
+        }
+    }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 }

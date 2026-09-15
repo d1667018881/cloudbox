@@ -21,16 +21,20 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
@@ -97,6 +101,11 @@ fun FileListScreen(
     var showUploadFolderPicker by remember { mutableStateOf(false) }
     // 上一轮"上传到指定目录"选中的目录（null = 用当前浏览目录）
     var pendingUploadFolderId by remember { mutableStateOf<Long?>(null) }
+    // 批量操作对话框：设置提取码 / 修改资料
+    var showBatchPwd by remember { mutableStateOf(false) }
+    var showBatchDesc by remember { mutableStateOf(false) }
+    // 排序菜单
+    var showSortMenu by remember { mutableStateOf(false) }
     // 上传失败详情弹窗开关，以及**详情内容的快照**。
     // 必须声明在 LaunchedEffect 之前——Snackbar 动作要置位它们，
     // 而 Compose 的 remember 在同一作用域内需先声明后使用。
@@ -248,6 +257,31 @@ fun FileListScreen(
                     actions = {
                         if (!state.selectionMode) {
                             IconButton(onClick = onOpenSearch) { Icon(Icons.Filled.Search, "搜索") }
+                            // 排序：当前目录内客户端排序（不动服务端数据）
+                            Box {
+                                IconButton(onClick = { showSortMenu = true }) {
+                                    Icon(Icons.AutoMirrored.Filled.Sort, "排序：${state.sortMode.label}")
+                                }
+                                androidx.compose.material3.DropdownMenu(
+                                    expanded = showSortMenu,
+                                    onDismissRequest = { showSortMenu = false }
+                                ) {
+                                    com.cloudbox.app.feature.filelist.SortMode.entries.forEach { mode ->
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text(mode.label) },
+                                            onClick = {
+                                                showSortMenu = false
+                                                viewModel.setSortMode(mode)
+                                            },
+                                            trailingIcon = {
+                                                if (state.sortMode == mode) {
+                                                    Icon(Icons.Filled.Check, null, Modifier.size(16.dp))
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                             IconButton(onClick = viewModel::toggleGrid) {
                                 Icon(if (state.gridMode) Icons.Filled.ViewList else Icons.Filled.GridView, "切换视图")
                             }
@@ -260,10 +294,41 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
+                        // 批量操作栏（两行，避免窄屏挤成一条滚动条）
+                        //
+                        // ⚠️ 这些按钮全部作用于**整个选中集合**。曾经这里有个
+                        //    "分享"按钮写的是 selected.firstOrNull()，多选时只处理
+                        //    第一条 —— 名不副实的假功能，已改为真正的批量分享。
+                        ActionChip("全选", Icons.Filled.Check) { viewModel.selectAll() }
+                        ActionChip("取消全选", Icons.Filled.Close) { viewModel.clearSelection() }
                         ActionChip("删除", Icons.Filled.Delete) { viewModel.deleteSelected() }
                         ActionChip("移动", Icons.Filled.DriveFileMove) { moveTarget = true }
                         ActionChip("分享", Icons.Filled.Share) {
-                            state.files.firstOrNull { it.id == state.selected.firstOrNull() }?.let { viewModel.getShare(it) }
+                            // 逐个取链接后拼接，一次性复制到剪贴板
+                            viewModel.shareSelected { text ->
+                                val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                        as android.content.ClipboardManager
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("分享链接", text))
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        ActionChip("批量下载", Icons.Filled.Download) { viewModel.downloadSelected() }
+                        ActionChip("设提取码", Icons.Filled.Lock) { showBatchPwd = true }
+                        ActionChip("改资料", Icons.Filled.Edit) { showBatchDesc = true }
+                    }
+                    // 批量任务进度（串行执行，可能十几秒；不显示进度用户会以为卡死）
+                    state.batchProgress?.let { p ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(Modifier.size(14.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(p, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     HorizontalDivider()
@@ -361,7 +426,7 @@ fun FileListScreen(
                         columns = GridCells.Adaptive(minSize = 110.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(state.files, key = { "${it.isFolder}_${it.id}" }) { file ->
+                        items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
                             GridItem(file, state, viewModel)
                         }
                         if (state.hasMore) {
@@ -370,7 +435,7 @@ fun FileListScreen(
                     }
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(state.files, key = { "${it.isFolder}_${it.id}" }) { file ->
+                        items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
                             ListItem(file, state, viewModel)
                             HorizontalDivider()
                         }
@@ -455,6 +520,22 @@ fun FileListScreen(
                 pendingUploadFolderId = folderId
                 filePicker.launch(arrayOf("*/*"))
             }
+        )
+    }
+    if (showBatchPwd) {
+        SimpleInputDialog(
+            title = "批量设置提取码（留空关闭）",
+            placeholder = "2-6 位密码；文件夹会被跳过",
+            onDismiss = { showBatchPwd = false },
+            onConfirm = { pwd -> viewModel.setPasswdSelected(pwd); showBatchPwd = false }
+        )
+    }
+    if (showBatchDesc) {
+        SimpleInputDialog(
+            title = "批量修改资料（⚠️ 设置后不能清空）",
+            placeholder = "描述内容；文件夹会被跳过",
+            onDismiss = { showBatchDesc = false },
+            onConfirm = { desc -> viewModel.setDescSelected(desc); showBatchDesc = false }
         )
     }
     passwdTarget?.let { file ->
