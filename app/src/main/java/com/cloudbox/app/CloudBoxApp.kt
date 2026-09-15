@@ -12,7 +12,6 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -100,15 +99,14 @@ class CloudBoxApp : Application(), Configuration.Provider {
             authRepository.ensureSession()
             // 启动时拉取远程域名配置（未配置远程 URL 时 refreshRemote 直接返回失败，静默忽略）
             domainRepository.refreshRemote()
-            // V30：对齐已保存的收藏夹自动检查设置。
-            // 周期任务本身会持久化，但卸装重装 / 清数据 / 系统清理都会让它消失
-            // 而设置仍在，所以启动时幂等地同步一次。
+            // V30：收藏夹自动检查（忠实复刻原版 home.lua:443 的启动判定）。
+            // 满足「距上次检查 >= 设定天数」才发起一次后台检查，
+            // 时间戳在入队前写入 —— 与原版一致，避免失败后每次启动重试。
             runCatching {
-                val days = settingsStore.autoCheckFavoritesDays.first()
                 com.cloudbox.app.feature.favorites.FavoriteUpdateCheckScheduler
-                    .syncFromSettings(this@CloudBoxApp, days)
+                    .maybeScheduleOnStartup(this@CloudBoxApp, settingsStore)
             }.onFailure {
-                Log.w("CloudBoxFavCheck", "自动检查调度同步失败：${it.message}")
+                Log.w("CloudBoxFavCheck", "自动检查判定失败：${it.message}")
             }
         }
         // 自检日志：确认 Hilt 工厂已注入、且配置能被读取。

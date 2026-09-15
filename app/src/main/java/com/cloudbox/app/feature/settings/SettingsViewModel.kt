@@ -232,10 +232,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val safe = days.coerceAtLeast(0)
             settingsStore.setAutoCheckFavoritesDays(safe)
-            // 设置落盘后立刻同步调度状态：开启/关闭/改间隔都走同一个入口，
-            // 避免出现"改了间隔但旧任务还在按旧间隔跑"的分叉状态。
-            com.cloudbox.app.feature.favorites.FavoriteUpdateCheckScheduler
-                .sync(context.applicationContext, safe)
+            // 关闭时立刻取消排队中的检查（对齐原版把开关关掉的即时效果）。
+            // 开启时**不**立即发起检查 —— 原版也是"等下次满足间隔条件"才跑，
+            // 否则用户一开开关就被抓一次全部收藏夹，与他预期不符。
+            if (safe <= 0) {
+                com.cloudbox.app.feature.favorites.FavoriteUpdateCheckScheduler
+                    .cancel(context.applicationContext)
+            }
             _uiState.update {
                 it.copy(
                     autoCheckFavoritesDays = safe,

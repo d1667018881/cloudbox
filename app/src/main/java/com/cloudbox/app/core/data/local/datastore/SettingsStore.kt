@@ -36,6 +36,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private val keyShowAccountButton = booleanPreferencesKey("show_account_button")
     /** 收藏夹自动检查间隔（天，0=关闭）。用 String 存 Int，见字段注释 */
     private val keyAutoCheckDays = stringPreferencesKey("auto_check_favorites_time")
+    /** 上次自动检查时间（epoch millis）。用 String 存 Long，保持与其他数值项一致 */
+    private val keyLastAutoCheckTime = stringPreferencesKey("last_auto_check_time")
 
     /** 当前 UA：未自定义时返回默认桌面 UA（伪装关键） */
     val userAgent: Flow<String> = context.settingsDataStore.data.map {
@@ -122,6 +124,21 @@ class SettingsStore @Inject constructor(private val context: Context) {
         it[keyAutoCheckDays]?.toIntOrNull() ?: 0
     }
 
+    /**
+     * 上次自动检查收藏夹的时间（epoch millis）。0 = 从未检查过。
+     *
+     * 对齐原版 `last_auto_check_time`（home.lua:443 用它做间隔判断，
+     * home_func.lua:6758 在检查完成后写入）。
+     *
+     * ⚠️ 原版有两个时间字段：`last_auto_check_time`（实际使用）和
+     * `last_auto_check_favorites_time`（ty_core.lua 里初始化为 `false`，
+     * 全程没有任何读写 —— 是个废弃字段）。这里只实现真正生效的那个，
+     * 不把原版的死代码一起搬过来。
+     */
+    val lastAutoCheckTime: Flow<Long> = context.settingsDataStore.data.map {
+        it[keyLastAutoCheckTime]?.toLongOrNull() ?: 0L
+    }
+
     suspend fun setShowFileTypeLabel(enabled: Boolean) =
         edit { p -> p[keyShowFileTypeLabel] = enabled }
 
@@ -130,6 +147,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setAutoCheckFavoritesDays(days: Int) =
         edit { p -> p[keyAutoCheckDays] = days.coerceIn(0, 30).toString() }
+
+    suspend fun setLastAutoCheckTime(millis: Long) =
+        edit { p -> p[keyLastAutoCheckTime] = millis.toString() }
 
     // 注：曾经有过 preferWebUpload（上传通道开关），2026-09-09 移除。
     // 上传一律走 App 原生直传——原版 App 就是这么做的，设置页的「上传通道自检」
