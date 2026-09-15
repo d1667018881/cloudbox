@@ -30,6 +30,10 @@ data class SettingsUiState(
     val suffixSpoof: Boolean = true,
     val thirdPartyResolver: String = "",
     val darkMode: String = "system",
+    /** 应用内语言：system / zh / en */
+    val appLanguage: String = "system",
+    /** 移动网络下载前提醒（默认开） */
+    val warnMobileNetwork: Boolean = true,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
     val cookieExported: String? = null,
@@ -71,10 +75,13 @@ class SettingsViewModel @Inject constructor(
             val spoof = settingsStore.suffixSpoofEnabled.first()
             val resolver = settingsStore.thirdPartyResolverUrl.first()
             val dark = settingsStore.darkMode.first()
+            val lang = settingsStore.appLanguage.first()
+            val warnMobile = settingsStore.warnMobileNetwork.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
-                    thirdPartyResolver = resolver, darkMode = dark
+                    thirdPartyResolver = resolver, darkMode = dark,
+                    appLanguage = lang, warnMobileNetwork = warnMobile
                 )
             }
         }
@@ -118,6 +125,32 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setDarkMode(mode)
             _uiState.update { it.copy(darkMode = mode) }
+        }
+    }
+
+    /**
+     * 保存应用内语言。
+     *
+     * ⚠️ 提示用户"需要重启"而不是自动重建 Activity：
+     * 自动 `recreate()` 在语言变更时会走一次完整的销毁-重建，
+     * 而此时可能正好有后台任务（上传 Worker 的进度回调绑在 ViewModel 上），
+     * 重建会打断回调。让用户自己决定何时重启更稳妥，
+     * 且设置已经写盘，重启后必然生效。
+     */
+    fun saveAppLanguage(lang: String) {
+        viewModelScope.launch {
+            settingsStore.setAppLanguage(lang)
+            _uiState.update {
+                it.copy(appLanguage = lang, message = "语言已保存，重启 App 后生效")
+            }
+        }
+    }
+
+    /** 移动网络下载提醒开关 */
+    fun saveWarnMobileNetwork(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setWarnMobileNetwork(enabled)
+            _uiState.update { it.copy(warnMobileNetwork = enabled) }
         }
     }
 

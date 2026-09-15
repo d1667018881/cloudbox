@@ -238,6 +238,47 @@ fun SettingsScreen(
             }
             HorizontalDivider()
 
+            // ==================== 语言 ====================
+            // 原版 ty_core.lua 的 语言() 反编译出来是恒等函数（多语言是空壳），
+            // 所以这里不照搬那套，直接用 Android 标准的 per-app locale。
+            SectionTitle("语言")
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                com.cloudbox.app.common.LocaleUtil.LANGUAGES.forEach { (code, label) ->
+                    Row(
+                        Modifier.clickable { viewModel.saveAppLanguage(code) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = state.appLanguage == code,
+                            onClick = { viewModel.saveAppLanguage(code) }
+                        )
+                        Text(label)
+                    }
+                }
+            }
+            HorizontalDivider()
+
+            // ==================== 下载行为 ====================
+            SectionTitle("下载行为")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("移动网络下载前提醒", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "在流量下点下载时先问一句，避免误触消耗流量",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.warnMobileNetwork,
+                    onCheckedChange = viewModel::saveWarnMobileNetwork
+                )
+            }
+            HorizontalDivider()
+
             Spacer(Modifier.height(24.dp))
             Text("云匣 v0.1.0 · 仅供个人学习使用",
                 style = MaterialTheme.typography.bodySmall,

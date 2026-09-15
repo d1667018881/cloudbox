@@ -42,7 +42,9 @@ class ResolveViewModel @Inject constructor(
     private val directLinkRepository: DirectLinkRepository,
     private val downloadRepository: DownloadRepository,
     private val fileRepository: FileRepository,
-    private val shareRepository: ShareRepository
+    private val shareRepository: ShareRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
+    private val settingsStore: com.cloudbox.app.core.data.local.datastore.SettingsStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ResolveUiState())
@@ -174,6 +176,14 @@ class ResolveViewModel @Inject constructor(
     fun download(item: ResolveItem) {
         val link = item.link ?: return
         viewModelScope.launch {
+            // 移动网络提醒：流量是用户的钱，默认先问一句（设置页可关）
+            if (settingsStore.warnMobileNetwork.first() &&
+                com.cloudbox.app.common.NetworkUtil.isOnMobileData(context)
+            ) {
+                _uiState.update {
+                    it.copy(message = "当前是移动网络，已开始下载（可在设置页关闭此提醒）")
+                }
+            }
             val uid = fileRepository.currentUid() ?: ""
             downloadRepository.enqueue(
                 url = link.url,

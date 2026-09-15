@@ -53,6 +53,7 @@ object Routes {
     const val FAVORITES = "favorites"
     const val RECYCLE = "recycle"
     const val SETTINGS = "settings"
+    const val ABOUT = "about"
 }
 
 @AndroidEntryPoint
@@ -97,8 +98,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             // 深色模式设置（设置页可切换：跟随系统/浅色/深色）
             val darkMode by settingsStore.darkMode.collectAsState(initial = "system")
+            // 应用内语言（设置页可切换：跟随系统/中文/English）。
+            // 用 wrap() 套一层带 Locale 的 Context，让本 Activity 重启后按新语言渲染。
+            val appLanguage by settingsStore.appLanguage.collectAsState(initial = "system")
+            val localizedContext = androidx.compose.runtime.remember(appLanguage) {
+                com.cloudbox.app.common.LocaleUtil.wrap(this@MainActivity, appLanguage)
+            }
             // 外部分享进来的内容（文件优先）；主界面挂载后会消费并触发上传
             val pendingShare by _pendingShare.collectAsState()
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalContext provides localizedContext
+            ) {
             CloudBoxTheme(darkMode = darkMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val navController = rememberNavController()
@@ -123,6 +133,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenDownload = { navController.navigate(Routes.DOWNLOAD) },
                                 onOpenFavorites = { navController.navigate(Routes.FAVORITES) },
                                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                                onOpenAbout = { navController.navigate(Routes.ABOUT) },
                                 onOpenResolve = { link ->
                                     // 路由参数必须 URL 编码（分享链接含 : / 等特殊字符）
                                     navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link ?: "")))
@@ -171,9 +182,22 @@ class MainActivity : ComponentActivity() {
                                 onOpenDomainConfig = { navController.navigate(Routes.DOMAIN_CONFIG) }
                             )
                         }
+                        composable(Routes.ABOUT) {
+                            com.cloudbox.app.feature.about.AboutScreen(
+                                onBack = { navController.popBackStack() },
+                                onOpenUrl = { url ->
+                                    // 用系统浏览器打开项目地址（App 内不内嵌 WebView，
+                                    // 避免为一个跳转引入一个 WebView 容器与其安全问题）
+                                    runCatching {
+                                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }
+            } // 结束 CompositionLocalProvider（应用内语言）
         }
     }
 

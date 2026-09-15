@@ -61,6 +61,7 @@ fun MainScreen(
     onOpenDownload: () -> Unit,
     onOpenFavorites: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenAbout: () -> Unit,
     onOpenResolve: (String?) -> Unit,
     onLogout: () -> Unit,
     /** 从其他 App 分享进来的文件/链接（未消费时非空），透传给网盘页消费 */
@@ -168,6 +169,7 @@ fun MainScreen(
                     onOpenFavorites = onOpenFavorites,
                     onOpenRecycle = onOpenRecycle,
                     onOpenSettings = onOpenSettings,
+                    onOpenAbout = onOpenAbout,
                     onLogout = onLogout
                 )
             }
@@ -182,6 +184,7 @@ private fun MeTab(
     onOpenFavorites: () -> Unit,
     onOpenRecycle: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenAbout: () -> Unit,
     onLogout: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -191,6 +194,8 @@ private fun MeTab(
         MeEntry("收藏夹", onOpenFavorites)
         MeEntry("回收站", onOpenRecycle)
         MeEntry("设置", onOpenSettings)
+        // 关于页（对齐原版 about.lua）：版本号 / 检查更新 / 更新日志
+        MeEntry("关于", onOpenAbout)
         Spacer(Modifier.height(24.dp))
         TextButton(onClick = onLogout) { Text("退出登录", color = MaterialTheme.colorScheme.error) }
     }
