@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -46,6 +47,8 @@ fun ShareDialog(
     val context = LocalContext.current
     var qr by remember { mutableStateOf<Bitmap?>(null) }
     var favorited by remember { mutableStateOf(false) }
+    /** 保存二维码后的提示（成功/失败原因） */
+    var savedTip by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(share.shareUrl) {
         qr = QrCodeUtil.generate(share.shareUrl)
@@ -76,6 +79,16 @@ fun ShareDialog(
                         share.shareUrl + if (share.onof == "1") "\n提取码：${share.pwd}" else "")) }) {
                         Icon(Icons.Filled.ContentCopy, "复制")
                     }
+                    // 保存二维码图片：原版分享页的二维码是可存下来的。
+                    // 光能看不能存，等于只能让对面"对着屏幕拍"。
+                    qr?.let { bmp ->
+                        IconButton(onClick = {
+                            savedTip = com.cloudbox.app.common.QrCodeUtil
+                                .saveToGallery(context, bmp)
+                        }) {
+                            Icon(Icons.Filled.SaveAlt, "保存二维码")
+                        }
+                    }
                     IconButton(onClick = { favorited = true; onFavorite(share) }) {
                         Icon(Icons.Filled.Star, "收藏", tint = if (favorited) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -83,6 +96,10 @@ fun ShareDialog(
                 }
                 if (favorited) {
                     Text("已收藏", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                savedTip?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary)
                 }
             }

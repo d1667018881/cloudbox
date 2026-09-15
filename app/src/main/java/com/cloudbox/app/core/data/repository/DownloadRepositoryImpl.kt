@@ -89,6 +89,25 @@ class DownloadRepositoryImpl @Inject constructor(
         db.downloadRecordDao().updateDownloadId(downloadId, newId)
     }
 
+    /**
+     * 清空全部下载记录。
+     *
+     * ⚠️ 这里**只移除 DownloadManager 任务与数据库记录，不删除本地已完成的文件**。
+     * 原因：原版「清空列表」就是这个语义（用户清的是列表，不是已下载的文件）；
+     * 相比之下 [cancel] 是"删除这一条 + 连带删掉已下载的文件"，
+     * 两者语义不同，不能混用同一个实现。
+     *
+     * 实现上先取全部记录，逐条 `downloadManager.remove`（正在下载的任务会被取消），
+     * 再一次性清表，避免逐条 delete 打 N 次数据库。
+     */
+    override suspend fun clearAll() = withContext(Dispatchers.IO) {
+        val records = db.downloadRecordDao().observeAllOnce()
+        records.forEach { record ->
+            runCatching { downloadManager.remove(record.downloadId) }
+        }
+        db.downloadRecordDao().clearAll()
+    }
+
     /** 文件名消毒：移除路径分隔符、控制字符、连续点号，防止路径穿越与 IllegalArgumentException */
     private fun sanitizeFileName(name: String): String {
         if (name.isBlank()) return "download_${System.currentTimeMillis()}"
@@ -134,14 +153,14 @@ class DownloadRepositoryImpl @Inject constructor(
                     if (status == DownloadManager.STATUS_SUCCESSFUL) {
                         syncRealFileName(record, cursor)
                     }
-                    DownloadTask(record.downloadId, record.fileName, record.mimeType, status, total, downloaded, record.referer, record.url, record.paused)
+                    DownloadTask(record.downloadId, record.fileName, record.mimeType, status, total, downloaded, record.referer, record.url, record.paused, record.createdAt)
                 } else {
                     // 记录还在但 DownloadManager 查不到：已移除（或用户暂停后任务被清理）
-                    DownloadTask(record.downloadId, record.fileName, record.mimeType, -1, 0, 0, record.referer, record.url, record.paused)
+                    DownloadTask(record.downloadId, record.fileName, record.mimeType, -1, 0, 0, record.referer, record.url, record.paused, record.createdAt)
                 }
             }
         }.getOrDefault(
-            DownloadTask(record.downloadId, record.fileName, record.mimeType, -1, 0, 0, record.referer, record.url, record.paused)
+            DownloadTask(record.downloadId, record.fileName, record.mimeType, -1, 0, 0, record.referer, record.url, record.paused, record.createdAt)
         )
     }
 

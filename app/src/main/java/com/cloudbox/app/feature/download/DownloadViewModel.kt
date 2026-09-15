@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.common.DownloadHelper
+import com.cloudbox.app.core.domain.model.DownloadSortMode
 import com.cloudbox.app.core.domain.model.DownloadTask
 import com.cloudbox.app.core.domain.repository.DownloadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,14 +24,36 @@ class DownloadViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _records = MutableStateFlow<List<DownloadTask>>(emptyList())
+
+    /** 原始记录（服务端/Room 顺序） */
     val records: StateFlow<List<DownloadTask>> = _records.asStateFlow()
+
+    private val _sortMode = MutableStateFlow(DownloadSortMode.TIME_DESC)
+
+    /** 排序方式；持久到内存即可（页面重进回到默认，和原版一致） */
+    val sortMode: StateFlow<DownloadSortMode> = _sortMode.asStateFlow()
+
+    /**
+     * 展示用列表 = 原始队列按当前排序方式排列。
+     *
+     * 排序放在这里而不是 Repository：排序是纯展示层关注点，
+     * 与文件列表（[com.cloudbox.app.feature.filelist.FileListViewModel]）保持同一套做法。
+     */
+    private val _displayRecords = MutableStateFlow<List<DownloadTask>>(emptyList())
+    val displayRecords: StateFlow<List<DownloadTask>> = _displayRecords.asStateFlow()
 
     init {
         viewModelScope.launch {
             downloadRepository.observeRecords().collect { list ->
                 _records.value = list
+                _displayRecords.value = _sortMode.value.apply(list)
             }
         }
+    }
+
+    fun setSortMode(mode: DownloadSortMode) {
+        _sortMode.value = mode
+        _displayRecords.value = mode.apply(_records.value)
     }
 
     fun cancel(downloadId: Long) {
@@ -43,6 +66,11 @@ class DownloadViewModel @Inject constructor(
 
     fun resume(downloadId: Long) {
         viewModelScope.launch { downloadRepository.resume(downloadId) }
+    }
+
+    /** 清空全部下载记录（不删除已下载到本地的文件，语义见 Repository 注释） */
+    fun clearAll() {
+        viewModelScope.launch { downloadRepository.clearAll() }
     }
 
     fun openTask(task: DownloadTask) {

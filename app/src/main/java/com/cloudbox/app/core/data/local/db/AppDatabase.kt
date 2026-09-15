@@ -19,7 +19,7 @@ import androidx.room.RoomDatabase
         DirectLinkEntity::class,
         FavoriteShareEntity::class
     ],
-    version = 4, // v4：search_index_fts 增加 isFolder 字段（文件夹也入搜索索引）
+    version = 5, // v5：favorite_shares 增加 pinned（置顶）字段
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

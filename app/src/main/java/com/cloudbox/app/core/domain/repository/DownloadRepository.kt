@@ -20,4 +20,12 @@ interface DownloadRepository {
 
     /** 继续已暂停的下载（重新入队，新 downloadId） */
     suspend fun resume(downloadId: Long)
+
+    /**
+     * 清空全部下载记录（含 DownloadManager 任务与已下载的本地文件）。
+     *
+     * 对齐原版 `download.lua` 的「清空列表」：原版是**只清记录不删已下载文件**，
+     * 因为用户可能还想留着文件。这里保持一致——只移除系统任务与数据库记录。
+     */
+    suspend fun clearAll()
 }

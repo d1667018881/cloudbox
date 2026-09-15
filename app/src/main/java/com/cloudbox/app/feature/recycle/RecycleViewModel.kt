@@ -17,7 +17,18 @@ import javax.inject.Inject
 data class RecycleUiState(
     val items: RecycleItems = RecycleItems(emptyList(), emptyList()),
     val loading: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    /** 正在查看的回收站文件夹弹窗（null = 未打开） */
+    val folderDialog: FolderDialogState? = null
+)
+
+/** 回收站文件夹内容弹窗状态 */
+data class FolderDialogState(
+    val folderId: Long,
+    val folderName: String,
+    val loading: Boolean = true,
+    val files: List<CloudFile> = emptyList(),
+    val error: String? = null
 )
 
 @HiltViewModel
@@ -80,4 +91,39 @@ class RecycleViewModel @Inject constructor(
     }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
+
+    // ==================== 查看文件夹内容（只读） ====================
+
+    /**
+     * 打开"查看文件夹内容"弹窗。
+     *
+     * 回收站里的文件夹是个黑盒 —— 用户要决定"恢复还是彻底删"，
+     * 得先知道里面装了什么。原版 recycle.lua 就有这个弹窗。
+     */
+    fun openFolderDialog(folder: CloudFile) {
+        _uiState.update {
+            it.copy(
+                folderDialog = FolderDialogState(
+                    folderId = folder.id,
+                    folderName = folder.name,
+                    loading = true
+                )
+            )
+        }
+        viewModelScope.launch {
+            fileRepository.getRecycleFolderItems(folder.id)
+                .onSuccess { files ->
+                    _uiState.update { st ->
+                        st.copy(folderDialog = st.folderDialog?.copy(loading = false, files = files, error = null))
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { st ->
+                        st.copy(folderDialog = st.folderDialog?.copy(loading = false, error = e.message ?: "加载失败"))
+                    }
+                }
+        }
+    }
+
+    fun closeFolderDialog() = _uiState.update { it.copy(folderDialog = null) }
 }

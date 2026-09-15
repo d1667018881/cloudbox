@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -90,6 +92,69 @@ fun RecycleScreen(
             }
         }
     }
+
+    // 查看回收站文件夹内容（只读）：对齐原版 recycle.lua 的「查看文件夹弹窗」
+    state.folderDialog?.let { dialog ->
+        AlertDialog(
+            onDismissRequest = { viewModel.closeFolderDialog() },
+            title = { Text(dialog.folderName, maxLines = 1) },
+            text = {
+                Box(Modifier.fillMaxWidth().height(320.dp)) {
+                    when {
+                        dialog.loading -> {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                        dialog.error != null -> {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(dialog.error, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        dialog.files.isEmpty() -> {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("此文件夹内没有文件", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        else -> {
+                            Column {
+                                Text(
+                                    "此文件夹内有 ${dialog.files.size} 个文件",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                LazyColumn {
+                                    items(dialog.files, key = { it.id }) { f ->
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.InsertDriveFile, null,
+                                                Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.size(8.dp))
+                                            Text(f.name, Modifier.weight(1f), maxLines = 1,
+                                                style = MaterialTheme.typography.bodySmall)
+                                            f.size?.let {
+                                                Text(it, style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.closeFolderDialog() }) { Text("关闭") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -105,6 +170,13 @@ private fun RecycleItemRow(file: CloudFile, viewModel: RecycleViewModel) {
         )
         Spacer(Modifier.size(12.dp))
         Text(file.name, Modifier.weight(1f), maxLines = 1)
+        // 文件夹：多一个「查看」入口（回收站里的文件夹是个黑盒）
+        if (file.isFolder) {
+            IconButton(onClick = { viewModel.openFolderDialog(file) }) {
+                Icon(Icons.Filled.Visibility, "查看文件夹内容",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         IconButton(onClick = { viewModel.restore(file) }) {
             Icon(Icons.Filled.Restore, "恢复", tint = MaterialTheme.colorScheme.primary)
         }

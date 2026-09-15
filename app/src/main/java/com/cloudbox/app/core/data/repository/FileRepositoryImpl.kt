@@ -61,6 +61,19 @@ class FileRepositoryImpl @Inject constructor(
     /** 文件夹条目名：<img … />&nbsp;文件夹名</a> */
     private val RE_RECYCLE_FOLDER_NAME = Regex("""/>&nbsp;([^<]+)</a>""")
 
+    /**
+     * 回收站「查看文件夹内文件」条目名。
+     *
+     * 正则来自原版 `recycle.lua` 的 `查看文件夹弹窗`：
+     * 原版用 `a2:gmatch("/>&nbsp;(.-) <font color=")` —— 注意分隔符是
+     * `<font color=`（后面紧跟大小信息），而不是回收站首页那个 `</a>`。
+     * 两个页面 HTML 结构不同，正则不能混用。
+     */
+    private val RE_RECYCLE_FOLDER_ITEM_NAME = Regex("""/>&nbsp;(.+?)\s*<font color=""")
+
+    /** 条目大小：`#CCCCCC">(大小)<`（原版 recycle.lua:556 同款） */
+    private val RE_RECYCLE_FOLDER_ITEM_SIZE = Regex("""#CCCCCC">\(([^)]*)\)<""")
+
     /** 构造走统一拦截器的绝对 URL */
     private fun url(pathAndQuery: String) = "https://${AppConstants.PLACEHOLDER_HOST}/$pathAndQuery"
 
@@ -253,8 +266,50 @@ class FileRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun restoreItems(fileIds: List<Long>, folderIds: List<Long>): Result<Unit> =
-        recycleAction(
+    /**
+     * 查看回收站内某文件夹下的文件（只读，不改动任何东西）。
+     *
+     * 页面：`mydisk.php?item=recycle&action=show_files&folder_id=<id>`
+     * 解析正则来自原版 recycle.lua（见 [RE_RECYCLE_FOLDER_ITEM_NAME] 注释）。
+     *
+     * 名字与大小分别成表再按下标配对：两段正则各自匹配的数量可能不等
+     * （名字一定每个条目都有，大小在文件夹里可能没有），
+     * 按下标配对 + 缺失兜底，好过整块失败。
+     */
+    override suspend fun getRecycleFolderItems(folderId: Long): Result<List<CloudFile>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val html = okHttp.newCall(
+                    Request.Builder()
+                        .url(url("mydisk.php?item=recycle&action=show_files&folder_id=$folderId"))
+                        .header("Referer", recycleReferer())
+                        .build()
+                ).execute().body?.string().orEmpty()
+
+                val names = RE_RECYCLE_FOLDER_ITEM_NAME.findAll(html)
+                    .map { it.groupValues[1].trim() }
+                    .filter { it.isNotBlank() }
+                    .toList()
+                val sizes = RE_RECYCLE_FOLDER_ITEM_SIZE.findAll(html)
+                    .map { it.groupValues[1].trim() }
+                    .toList()
+
+                names.mapIndexed { i, name ->
+                    CloudFile(
+                        id = -(i + 1).toLong(), // 只读展示，不做操作，id 无实际用途
+                        name = name,
+                        isFolder = false,
+                        size = sizes.getOrNull(i),
+                        time = null,
+                        onof = null,
+                        isDes = null,
+                        parentId = folderId
+                    )
+                }
+            }
+        }
+
+    override suspend fun restoreItems(fileIds: List<Long>, folderIds: List<Long>): Result<Unit> =        recycleAction(
             actionOf = { id, isFolder ->
                 if (isFolder) "folder_restore" to "folder_id=$id" else "file_restore" to "file_id=$id"
             },

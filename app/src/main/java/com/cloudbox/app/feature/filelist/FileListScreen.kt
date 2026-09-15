@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
@@ -104,6 +105,14 @@ fun FileListScreen(
     // 批量操作对话框：设置提取码 / 修改资料
     var showBatchPwd by remember { mutableStateOf(false) }
     var showBatchDesc by remember { mutableStateOf(false) }
+    // 删除二次确认（删除进回收站，但仍是破坏性操作，必须先确认）
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    /** 点击文件后弹出的操作菜单目标（null = 未打开） */
+    var menuFile by remember { mutableStateOf<CloudFile?>(null) }
+    /** 单文件删除确认目标 */
+    var deleteTarget by remember { mutableStateOf<CloudFile?>(null) }
+    /** 单文件移动到目标目录（true = 打开目录选择框） */
+    var moveSingleTarget by remember { mutableStateOf<CloudFile?>(null) }
     // 排序菜单
     var showSortMenu by remember { mutableStateOf(false) }
     // 上传失败详情弹窗开关，以及**详情内容的快照**。
@@ -301,7 +310,7 @@ fun FileListScreen(
                         //    第一条 —— 名不副实的假功能，已改为真正的批量分享。
                         ActionChip("全选", Icons.Filled.Check) { viewModel.selectAll() }
                         ActionChip("取消全选", Icons.Filled.Close) { viewModel.clearSelection() }
-                        ActionChip("删除", Icons.Filled.Delete) { viewModel.deleteSelected() }
+                        ActionChip("删除", Icons.Filled.Delete) { showDeleteConfirm = true }
                         ActionChip("移动", Icons.Filled.DriveFileMove) { moveTarget = true }
                         ActionChip("分享", Icons.Filled.Share) {
                             // 逐个取链接后拼接，一次性复制到剪贴板
@@ -427,7 +436,7 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            GridItem(file, state, viewModel)
+                            GridItem(file, state, viewModel) { menuFile = it }
                         }
                         if (state.hasMore) {
                             item { LoadMoreButton(viewModel) }
@@ -436,7 +445,7 @@ fun FileListScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            ListItem(file, state, viewModel)
+                            ListItem(file, state, viewModel) { menuFile = it }
                             HorizontalDivider()
                         }
                         if (state.hasMore) {
@@ -519,6 +528,122 @@ fun FileListScreen(
                 showUploadFolderPicker = false
                 pendingUploadFolderId = folderId
                 filePicker.launch(arrayOf("*/*"))
+            }
+        )
+    }
+    // ==================== 单文件操作菜单 ====================
+    //
+    // 点文件不再直接弹分享框，而是先给菜单 —— 对齐原版行为。
+    // 菜单项：详情/分享/下载/重命名/设提取码/改资料/移动/删除。
+    menuFile?.let { file ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { menuFile = null },
+            title = { Text(file.name, maxLines = 2) },
+            text = {
+                Column {
+                    MenuAction("查看分享链接与提取码") {
+                        menuFile = null
+                        viewModel.getShare(file)
+                    }
+                    MenuAction("下载到本地") {
+                        menuFile = null
+                        viewModel.downloadSingle(file)
+                    }
+                    MenuAction("重命名") {
+                        menuFile = null
+                        renameTarget = file
+                    }
+                    MenuAction("设置提取码") {
+                        menuFile = null
+                        passwdTarget = file
+                    }
+                    MenuAction("修改资料（描述）") {
+                        menuFile = null
+                        descTarget = file
+                    }
+                    MenuAction("移动到…") {
+                        menuFile = null
+                        moveSingleTarget = file
+                    }
+                    MenuAction("复制文件名") {
+                        menuFile = null
+                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("文件名", file.name))
+                        viewModel.showMessage("已复制文件名")
+                    }
+                    MenuAction("删除", danger = true) {
+                        menuFile = null
+                        deleteTarget = file
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { menuFile = null }) { Text("关闭") }
+            }
+        )
+    }
+
+    // 单文件删除确认
+    deleteTarget?.let { file ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("确认删除") },
+            text = { Text("将删除「${file.name}」。删除的内容会进入回收站，可在回收站恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSingle(file)
+                    deleteTarget = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // 单文件移动：选目标目录
+    moveSingleTarget?.let { file ->
+        MoveFolderDialog(
+            title = "移动「${file.name}」到",
+            onDismiss = { moveSingleTarget = null },
+            onConfirm = { folderId, _ ->
+                viewModel.moveSingle(file, folderId)
+                moveSingleTarget = null
+            }
+        )
+    }
+
+    if (showDeleteConfirm) {
+        // 统计选中项构成，把"要删什么"说清楚 —— 原版删除前也会提示条目数。
+        val selectedFiles = state.files.filter { it.id in state.selected }
+        val folderCount = selectedFiles.count { it.isFolder }
+        val fileCount = selectedFiles.size - folderCount
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("确认删除") },
+            text = {
+                Text(
+                    buildString {
+                        append("将删除 ")
+                        if (folderCount > 0) append("$folderCount 个文件夹")
+                        if (folderCount > 0 && fileCount > 0) append("、")
+                        if (fileCount > 0) append("$fileCount 个文件")
+                        if (selectedFiles.isEmpty()) append("0 项")
+                        append("。\n\n删除的内容会进入回收站，可在回收站恢复。")
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    viewModel.deleteSelected()
+                }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
             }
         )
     }
@@ -618,6 +743,28 @@ private fun ActionChip(label: String, icon: androidx.compose.ui.graphics.vector.
     }
 }
 
+/**
+ * 操作菜单里的一行。
+ *
+ * 用整行可点区域而不是 AlertDialog 的 buttons —— AlertDialog 的
+ * confirmButton/dismissButton 只放得下 1~2 个，8 个操作塞不进去，
+ * 硬塞会被挤成两行、还会出现按钮文字换行。
+ */
+@Composable
+private fun MenuAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            label,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
 @Composable
 private fun LoadMoreButton(viewModel: FileListViewModel) {
     Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
@@ -628,16 +775,28 @@ private fun LoadMoreButton(viewModel: FileListViewModel) {
 /** 列表模式条目 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ListItem(file: CloudFile, state: FileListUiState, viewModel: FileListViewModel) {
+private fun ListItem(
+    file: CloudFile,
+    state: FileListUiState,
+    viewModel: FileListViewModel,
+    onOpenMenu: (CloudFile) -> Unit
+) {
     val selected = file.id in state.selected
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = {
-                    if (state.selectionMode) viewModel.toggleSelect(file.id)
-                    else if (file.isFolder) viewModel.enterFolder(file.id, file.name)
-                    else viewModel.getShare(file)
+                    when {
+                        // 多选态：轻点 = 勾选/取消
+                        state.selectionMode -> viewModel.toggleSelect(file.id)
+                        // 文件夹：直接进入（这是最自然的预期动作）
+                        file.isFolder -> viewModel.enterFolder(file.id, file.name)
+                        // 文件：弹操作菜单，而不是直接取分享。
+                        // 原版就是这样（点文件出菜单：详情/分享/下载/重命名/删除…），
+                        // 一上来只给分享框等于替用户决定了"你要干嘛"。
+                        else -> onOpenMenu(file)
+                    }
                 },
                 onLongClick = { viewModel.enterSelection(file) }
             )
@@ -660,6 +819,11 @@ private fun ListItem(file: CloudFile, state: FileListUiState, viewModel: FileLis
         }
         if (selected) {
             Icon(Icons.Filled.Check, "已选", tint = MaterialTheme.colorScheme.primary)
+        } else if (!file.isFolder) {
+            // 右侧"⋯"：同一点击行为，给不想猜"点一下会发生什么"的用户一个显式入口
+            IconButton(onClick = { onOpenMenu(file) }) {
+                Icon(Icons.Filled.MoreVert, "更多操作", Modifier.size(18.dp))
+            }
         }
     }
 }
@@ -667,16 +831,23 @@ private fun ListItem(file: CloudFile, state: FileListUiState, viewModel: FileLis
 /** 网格模式条目 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GridItem(file: CloudFile, state: FileListUiState, viewModel: FileListViewModel) {
+private fun GridItem(
+    file: CloudFile,
+    state: FileListUiState,
+    viewModel: FileListViewModel,
+    onOpenMenu: (CloudFile) -> Unit
+) {
     val selected = file.id in state.selected
     Column(
         modifier = Modifier
             .padding(6.dp)
             .combinedClickable(
                 onClick = {
-                    if (state.selectionMode) viewModel.toggleSelect(file.id)
-                    else if (file.isFolder) viewModel.enterFolder(file.id, file.name)
-                    else viewModel.getShare(file)
+                    when {
+                        state.selectionMode -> viewModel.toggleSelect(file.id)
+                        file.isFolder -> viewModel.enterFolder(file.id, file.name)
+                        else -> onOpenMenu(file)
+                    }
                 },
                 onLongClick = { viewModel.enterSelection(file) }
             )

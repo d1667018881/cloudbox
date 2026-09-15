@@ -32,4 +32,12 @@ interface DownloadRecordDao {
 
     @Query("UPDATE download_records SET fileName=:fileName WHERE downloadId=:downloadId")
     suspend fun updateFileName(downloadId: Long, fileName: String)
+
+    /** 一次性取全部记录（清空列表用，不需要 Flow 订阅） */
+    @Query("SELECT * FROM download_records")
+    suspend fun observeAllOnce(): List<DownloadRecordEntity>
+
+    /** 清空全部下载记录 */
+    @Query("DELETE FROM download_records")
+    suspend fun clearAll()
 }

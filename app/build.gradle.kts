@@ -120,6 +120,13 @@ dependencies {
     implementation(libs.zxing)
     implementation(libs.zip4j)
 
+    // 二维码扫描：CameraX + MLKit（离线识别，不依赖 Google Play 服务）
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode)
+
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

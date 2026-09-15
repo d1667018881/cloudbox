@@ -465,4 +465,73 @@ class FileListViewModel @Inject constructor(
     }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
+
+    /** 由 UI 层触发一条一次性提示（如"已复制文件名"） */
+    fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
+
+    // ==================== 单文件操作 ====================
+
+    /**
+     * 删除单个条目（不走多选流程）。
+     *
+     * 供「点击文件 → 操作菜单 → 删除」使用。原版点击文件就是弹菜单
+     * （详情/分享/下载/重命名/删除/移动），而不是直接取分享链接 ——
+     * 当前仓库此前点一下文件就弹分享框，把"看内容"和"分享"绑死了，
+     * 用户想重命名还得先长按进多选，路径太长。
+     */
+    fun deleteSingle(file: CloudFile) {
+        viewModelScope.launch {
+            val r = if (file.isFolder) {
+                fileRepository.delete(emptyList(), listOf(file.id))
+            } else {
+                fileRepository.delete(listOf(file.id), emptyList())
+            }
+            r.onSuccess { refresh() }
+                .onFailure { e -> _uiState.update { it.copy(message = "删除失败：${e.message}") } }
+        }
+    }
+
+    /** 移动单个文件到目标目录（文件夹不支持移动，见 [moveSelected] 注释） */
+    fun moveSingle(file: CloudFile, targetFolderId: Long) {
+        if (file.isFolder) {
+            _uiState.update { it.copy(message = "文件夹暂不支持移动（官方无接口）") }
+            return
+        }
+        viewModelScope.launch {
+            fileRepository.moveFiles(listOf(file.id), targetFolderId)
+                .onSuccess { refresh() }
+                .onFailure { e -> _uiState.update { it.copy(message = "移动失败：${e.message}") } }
+        }
+    }
+
+    /**
+     * 下载单个文件：分享链接 → 直链 → 下载队列。
+     * 与 [downloadSelected] 同一条链路，只是目标只有一个。
+     */
+    fun downloadSingle(file: CloudFile) {
+        if (file.isFolder) {
+            _uiState.update { it.copy(message = "文件夹不支持直接下载，请进入后选择文件") }
+            return
+        }
+        viewModelScope.launch {
+            fileRepository.getFileShare(file.id).onSuccess { share ->
+                val pwd = if (share.onof == "1") share.pwd else ""
+                directLinkRepository.resolve(share.shareUrl, pwd)
+                    .onSuccess { link ->
+                        downloadRepository.enqueue(
+                            url = link.url,
+                            fileName = link.fileName.ifBlank { file.name },
+                            referer = link.referer,
+                            mimeType = null,
+                            accountUid = fileRepository.currentUid() ?: ""
+                        )
+                        _uiState.update { it.copy(message = "已加入下载队列") }
+                    }.onFailure { e ->
+                        _uiState.update { it.copy(message = "解析失败：${e.message}") }
+                    }
+            }.onFailure { e ->
+                _uiState.update { it.copy(message = "获取分享链接失败：${e.message}") }
+            }
+        }
+    }
 }

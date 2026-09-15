@@ -26,5 +26,35 @@ data class DownloadTask(
     val bytesDownloaded: Long,
     val referer: String?,
     val url: String,
-    val paused: Boolean = false // 用户主动暂停（DownloadManager 无此状态）
+    val paused: Boolean = false, // 用户主动暂停（DownloadManager 无此状态）
+    val createdAt: Long = 0L     // 入队时间（来自 Room 记录，用于排序）
 )
+
+/**
+ * 下载列表排序方式。对齐原版 `download.lua` 的排序菜单。
+ *
+ * 原版下载页提供「时间 / 名称 / 大小」三种排序，这里保持一致。
+ * 全部为**客户端排序**——记录本来就是本地 Room 表，没必要回服务端。
+ */
+enum class DownloadSortMode(val label: String) {
+    /** 按加入时间倒序（最新在最上，默认） */
+    TIME_DESC("时间（最新优先）"),
+    /** 按加入时间正序 */
+    TIME_ASC("时间（最早优先）"),
+    /** 按文件名（中文按拼音） */
+    NAME_ASC("名称 A→Z"),
+    /** 按文件大小倒序（大文件在前） */
+    SIZE_DESC("大小（大→小）");
+
+    fun apply(list: List<DownloadTask>): List<DownloadTask> = when (this) {
+        TIME_DESC -> list.sortedByDescending { it.createdAt }
+        TIME_ASC -> list.sortedBy { it.createdAt }
+        NAME_ASC -> {
+            val collator = java.text.Collator.getInstance(java.util.Locale.CHINA).apply {
+                strength = java.text.Collator.SECONDARY
+            }
+            list.sortedWith(Comparator { a, b -> collator.compare(a.fileName, b.fileName) })
+        }
+        SIZE_DESC -> list.sortedByDescending { it.bytesTotal }
+    }
+}

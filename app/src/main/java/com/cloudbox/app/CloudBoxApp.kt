@@ -65,6 +65,11 @@ class CloudBoxApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
 
+        // 全局崩溃兜底（对齐原版 error_page.lua）：
+        // 崩溃信息落到错误页 + 持久化，而不是直接闪退无迹可循。
+        // 放在最前面 —— 越早安装，能捕获到的启动期崩溃越多。
+        com.cloudbox.app.common.CrashHandler.install(this)
+
         // ⚠️ 必须在这里**主动**初始化 WorkManager（而不是等第一次 getInstance）。
         //
         // 这是本轮"上传秒失败"的根治点：

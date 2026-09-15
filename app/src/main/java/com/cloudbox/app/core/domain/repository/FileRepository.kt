@@ -60,6 +60,15 @@ interface FileRepository {
 
     /** 清空回收站 */
     suspend fun clearRecycle(): Result<Unit>
+
+    /**
+     * 查看回收站里某个文件夹的内容（不恢复、不删除，只是看一眼）。
+     *
+     * 对齐原版 recycle.lua 的「查看文件夹弹窗」：回收站里的文件夹是个黑盒，
+     * 用户删除前想确认"这里面装着什么"再决定恢复还是彻底删。
+     * 走 `mydisk.php?item=recycle&action=show_files&folder_id=<id>` 取 HTML 再解析。
+     */
+    suspend fun getRecycleFolderItems(folderId: Long): Result<List<CloudFile>>
 }
 
 /** 回收站内容（HTML 解析结果） */

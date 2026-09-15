@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +54,24 @@ fun ResolveScreen(
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // 扫码结果：扫到后直接塞进输入框并立刻解析（对齐原版 qr.lua 的使用路径）
+    val scanLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val text = result.data?.getStringExtra(
+                com.cloudbox.app.feature.scan.ScanActivity.EXTRA_RESULT
+            )
+            if (!text.isNullOrBlank()) {
+                viewModel.onInputChange(text)
+                viewModel.resolve()
+            } else {
+                viewModel.showMessage("二维码里没有可识别的内容")
+            }
+        }
+    }
 
     LaunchedEffect(initialLink) {
         initialLink?.let {
@@ -74,6 +93,20 @@ fun ResolveScreen(
                 title = { Text("链接解析") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+                },
+                actions = {
+                    // 扫码：把别人发来的二维码（截图/纸面/另一块屏幕）变成链接。
+                    // 对齐原版 qr.lua —— 生成与扫描是同一能力的两个方向。
+                    IconButton(onClick = {
+                        scanLauncher.launch(
+                            android.content.Intent(
+                                context,
+                                com.cloudbox.app.feature.scan.ScanActivity::class.java
+                            )
+                        )
+                    }) {
+                        Icon(Icons.Filled.QrCodeScanner, "扫描二维码")
+                    }
                 }
             )
         }

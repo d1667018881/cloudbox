@@ -24,6 +24,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- 二维码扫描（对齐原版 qr.lua）。声明为非必需，没相机的设备也能装 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
     <application
         android:name=".CloudBoxApp"
         android:allowBackup="true"
@@ -101,6 +106,24 @@
             android:exported="false"
             android:label="网页上传"
             android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.CloudBox" />
+
+        <!-- 程序错误页（对齐原版 error_page.lua）：崩溃时展示错误信息并允许复制。
+             独立 Activity + 独立任务栈：崩溃发生在导航途中时，主 Activity 状态可能
+             已不一致，在里面改 UI 极易二次崩溃。不导出，仅内部拉起。 -->
+        <activity
+            android:name=".common.ErrorActivity"
+            android:exported="false"
+            android:label="程序错误"
+            android:theme="@style/Theme.CloudBox" />
+
+        <!-- 二维码扫描（对齐原版 qr.lua）：CameraX 预览 + MLKit 离线识别。
+             结果通过 setResult 回传，只有一个调用方（解析页）。不导出。 -->
+        <activity
+            android:name=".feature.scan.ScanActivity"
+            android:exported="false"
+            android:label="扫描二维码"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.CloudBox" />
 
         <!-- WorkManager 使用 Hilt 自定义 WorkerFactory（CloudBoxApp 实现 Configuration.Provider），

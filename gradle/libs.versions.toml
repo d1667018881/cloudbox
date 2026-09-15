@@ -22,6 +22,11 @@ coroutines = "1.8.1"
 workmanager = "2.9.1"
 zxing = "3.5.3"
 zip4j = "2.11.5"
+# 二维码扫描：CameraX（相机预览/取帧）+ MLKit barcode-scanning（识别）
+# 用 MLKit 而不是 ZXing 的扫描端：MLKit 是**离线模型**、无需 Google Play 服务，
+# 且自带相机预览集成样例少踩坑；识别能力对模糊/倾斜二维码也更强。
+camerax = "1.3.4"
+mlkitBarcode = "17.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -55,6 +60,12 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 workmanager = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workmanager" }
 zxing = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 zip4j = { group = "net.lingala.zip4j", name = "zip4j", version.ref = "zip4j" }
+
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+mlkit-barcode = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }

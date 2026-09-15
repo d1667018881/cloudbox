@@ -196,6 +196,9 @@ class ResolveViewModel @Inject constructor(
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 
+    /** 由 UI 层触发一条一次性提示 */
+    fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
+
     companion object {
         /**
          * 文件夹分享链接判定：路径最后一段以 b 开头（实测 /b01tpeg7i、/b0auv0qf）。
