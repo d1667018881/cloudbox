@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.Request
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -187,11 +188,88 @@ class FileRepositoryImpl @Inject constructor(
             }
         }
 
+    /**
+     * 设置文件夹提取码（task=16）。
+     *
+     * 与文件走不同 task（文件是 23）。失败时优先透传服务端 info 文案 ——
+     * 非会员会收到"此功能仅会員使用（个人中心 - 会员个性化）"，
+     * 这句比笼统的"设置失败"有用得多。
+     */
+    override suspend fun setDirPasswd(folderId: Long, pwd: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val resp = api.setDirPasswd(
+                    folderId = folderId,
+                    shows = if (pwd.isBlank()) 0 else 1,
+                    shownames = pwd
+                )
+                // zt 可空（非会员返回 zt:null），用 isOk 判定；失败时透传服务端文案
+                if (!resp.isOk) {
+                    throw ApiError.Business(
+                        resp.zt ?: -1,
+                        resp.infoText ?: "设置文件夹提取码失败"
+                    )
+                }
+            }
+        }
+
+    /**
+     * 设置文件夹描述（task=4）。
+     *
+     * ⚠️ task=4 是整体覆盖：不传 folder_name 会把文件夹名清空，所以必须把原 name 带上。
+     * 官网 `fol_desgo` 正是把 name 与 des 一起提交的。
+     */
+    override suspend fun setDirDesc(folder: CloudFile, desc: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val resp = api.renameDir(
+                    folderId = folder.id,
+                    folderName = folder.name,   // 必须回填原名，否则会被清空
+                    folderDescription = desc
+                )
+                if (resp.zt != 1) throw ApiError.Business(resp.zt, "设置文件夹描述失败")
+            }
+        }
+
+    override suspend fun getDirDesc(folderId: Long): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                api.getDirShareInfo(folderId = folderId).info?.des ?: ""
+            }
+        }
+
     override suspend fun setFileDesc(fileId: Long, desc: String): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val resp = api.setFileDesc(fileId = fileId, desc = desc)
                 if (resp.zt != 1) throw ApiError.Business(resp.zt, "设置描述失败")
+            }
+        }
+
+    /**
+     * 读取文件描述（task=12）。
+     *
+     * 接口声明成 Response<ResponseBody>（原样返回），这里手动解析：
+     *   {"zt":1,"info":"描述内容","text":"无后缀文件名"}
+     * 从未设置过描述时 info 缺失或为 null，统一归 ""，让 UI 显示空输入框。
+     *
+     * 失败不抛异常而是返回 ""（runCatching + getOrDefault）：
+     * 读描述只是"打开弹窗时回填"，读失败不该阻断用户改描述，
+     * 给个空框让他能写就行 —— 比弹一句"读取失败"更有用。
+     */
+    override suspend fun getFileDesc(fileId: Long): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = api.getFileInfo(fileId = fileId).body?.string().orEmpty()
+                val json = JSONObject(body)
+                if (json.optInt("zt", 0) != 1) return@runCatching ""
+                val info = json.opt("info")
+                // info 可能是字符串、null，或（无描述时）数组/数字，统一转字符串
+                when (info) {
+                    null -> ""
+                    is String -> info
+                    else -> info.toString()
+                }
             }
         }
 

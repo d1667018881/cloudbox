@@ -32,6 +32,12 @@ data class FileListUiState(
     val batchProgress: String? = null,
     /** 排序方式（客户端排序，后端返回顺序不可依赖） */
     val sortMode: SortMode = SortMode.DEFAULT,
+    /** 描述编辑弹窗的目标文件（null = 未打开） */
+    val descTarget: CloudFile? = null,
+    /** 打开描述弹窗时读回的原描述（task=12），用于回填输入框 */
+    val descDraft: String = "",
+    /** 正在读取原描述（读取期间弹窗仍显示，输入框给个加载态） */
+    val descLoading: Boolean = false,
     val message: String? = null
 ) {
     val currentFolderId: Long get() = folderStack.last().first
@@ -226,9 +232,11 @@ class FileListViewModel @Inject constructor(
         val selectedFiles = s.files.filter { it.id in s.selected }
         val fileIds = selectedFiles.filter { !it.isFolder }.map { it.id }
         val folderCount = selectedFiles.count { it.isFolder }
-        // #19 修复：明确提示文件夹不支持移动（官方无接口），不再静默忽略
+        // #19 修复：明确提示文件夹不支持移动，不再静默忽略。
+        // 依据（2026-09 官网实测）：文件 ⋯ 菜单有「移动」，文件夹 ⋯ 菜单没有，
+        // 且服务端仅提供 task=20（file_id），无文件夹移动接口。
         if (folderCount > 0) {
-            _uiState.update { it.copy(message = "文件夹暂不支持移动（官方无接口），仅移动 ${fileIds.size} 个文件") }
+            _uiState.update { it.copy(message = "官网不支持移动文件夹，已跳过；仅移动 ${fileIds.size} 个文件") }
         }
         if (fileIds.isEmpty()) {
             exitSelection()
@@ -244,20 +252,72 @@ class FileListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 设置提取码 —— 按类型分流接口。
+     *
+     * 官网实测：文件走 task=23（`f_pwdgo`），文件夹走 task=16（`fol_pwdgo`），
+     * id 字段也分别是 file_id / folder_id，不能混用。
+     */
     fun setPasswd(file: CloudFile, pwd: String) {
         viewModelScope.launch {
-            fileRepository.setFilePasswd(file.id, pwd)
+            val result = if (file.isFolder) {
+                fileRepository.setDirPasswd(file.id, pwd)
+            } else {
+                fileRepository.setFilePasswd(file.id, pwd)
+            }
+            result
                 .onSuccess { _uiState.update { it.copy(message = "提取码已设置") } }
-                .onFailure { e -> _uiState.update { it.copy(message = "设置失败：${e.message}") } }
+                .onFailure { e -> _uiState.update { it.copy(message = "${e.message}") } }
         }
     }
 
     fun setDesc(file: CloudFile, desc: String) {
         viewModelScope.launch {
-            fileRepository.setFileDesc(file.id, desc)
+            // 文件夹走 task=4（folder_description），文件走 task=11（desc）——
+            // 官网两者是不同接口（fol_desgo / f_desgo）
+            val result = if (file.isFolder) {
+                fileRepository.setDirDesc(file, desc)
+            } else {
+                fileRepository.setFileDesc(file.id, desc)
+            }
+            result
                 .onSuccess { _uiState.update { it.copy(message = "描述已设置") } }
                 .onFailure { e -> _uiState.update { it.copy(message = "设置失败：${e.message}") } }
         }
+    }
+
+    /**
+     * 打开描述编辑弹窗前，先读回当前描述（task=12）。
+     *
+     * 对齐原版 `f_des()`：它打开弹窗前必调 task=12 把原描述填进输入框，
+     * 否则用户在空框里写，看不到原有内容，容易误覆盖。
+     *
+     * 读回的值走 [FileListUiState.descDraft] 传给弹窗；读失败按空串处理，
+     * 不阻断编辑（用户仍可正常写新描述）。
+     */
+    fun loadDescForEdit(file: CloudFile) {
+        _uiState.update { it.copy(descTarget = file, descDraft = "", descLoading = true) }
+        viewModelScope.launch {
+            // 文件用 task=12（info 为描述字符串），文件夹用 task=18（info.des）——
+            // 官网 f_des / fol_des 两条不同链路
+            val desc = if (file.isFolder) {
+                fileRepository.getDirDesc(file.id).getOrDefault("")
+            } else {
+                fileRepository.getFileDesc(file.id).getOrDefault("")
+            }
+            // 用户可能已取消（descTarget 被清空），此时丢弃结果，避免弹窗被"复活"
+            _uiState.update {
+                if (it.descTarget?.id == file.id) {
+                    it.copy(descDraft = desc, descLoading = false)
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
+    fun dismissDescEdit() = _uiState.update {
+        it.copy(descTarget = null, descDraft = "", descLoading = false)
     }
 
     fun getShare(file: CloudFile) {
@@ -369,51 +429,86 @@ class FileListViewModel @Inject constructor(
      */
     fun setPasswdSelected(pwd: String) {
         val s = _uiState.value
-        val files = s.files.filter { it.id in s.selected && !it.isFolder }
-        val skipped = s.files.count { it.id in s.selected && it.isFolder }
-        if (files.isEmpty()) {
-            _uiState.update { it.copy(message = "选中的都是文件夹，文件夹不支持设置提取码") }
+        // 文件夹也支持提取码（官网 task=16），不再跳过 —— 按类型分流到不同接口
+        val targets = s.files.filter { it.id in s.selected }
+        if (targets.isEmpty()) {
+            _uiState.update { it.copy(message = "请先选择要设置提取码的条目") }
             return
         }
         viewModelScope.launch {
             var ok = 0
             var fail = 0
-            files.forEachIndexed { index, file ->
+            var firstErr: String? = null
+            targets.forEachIndexed { index, file ->
                 if (index > 0) delay(java.util.concurrent.ThreadLocalRandom.current().nextLong(300, 801))
-                _uiState.update { it.copy(batchProgress = "设置提取码 ${index + 1}/${files.size}…") }
-                fileRepository.setFilePasswd(file.id, pwd)
-                    .onSuccess { ok++ }.onFailure { fail++ }
+                _uiState.update { it.copy(batchProgress = "设置提取码 ${index + 1}/${targets.size}…") }
+                val r = if (file.isFolder) {
+                    fileRepository.setDirPasswd(file.id, pwd)
+                } else {
+                    fileRepository.setFilePasswd(file.id, pwd)
+                }
+                r.onSuccess { ok++ }.onFailure { e ->
+                    fail++
+                    if (firstErr == null && e.message != null) firstErr = e.message
+                }
             }
             _uiState.update { it.copy(batchProgress = null) }
-            val skipTip = if (skipped > 0) "，跳过 $skipped 个文件夹" else ""
             _uiState.update {
-                it.copy(message = if (fail == 0) "已为 $ok 个文件设置提取码$skipTip" else "设置完成：成功 $ok，失败 $fail$skipTip")
+                it.copy(
+                    message = if (fail == 0) {
+                        "已为 $ok 个条目设置提取码"
+                    } else {
+                        // 把首个失败原因带出来：非会员会遇到"仅会员使用"，
+                        // 只说"失败 N 个"用户无从判断是网络还是权限
+                        val reason = firstErr?.let { r -> "（$r）" } ?: ""
+                        "设置完成：成功 $ok，失败 $fail$reason"
+                    }
+                )
             }
             exitSelection()
             refresh()
         }
     }
 
-    /** 批量修改描述（简介）。串行 + 延时，理由同 [shareSelected]。 */
+    /**
+     * 批量修改描述（简介）。串行 + 延时，理由同 [shareSelected]。
+     *
+     * 文件走 task=11、文件夹走 task=4，按类型分流（官网 f_desgo / fol_desgo 两条链路）。
+     */
     fun setDescSelected(desc: String) {
         val s = _uiState.value
-        val files = s.files.filter { it.id in s.selected && !it.isFolder }
-        if (files.isEmpty()) {
-            _uiState.update { it.copy(message = "选中的都是文件夹，批量修改资料仅支持文件") }
+        val targets = s.files.filter { it.id in s.selected }
+        if (targets.isEmpty()) {
+            _uiState.update { it.copy(message = "请先选择要修改资料的条目") }
             return
         }
         viewModelScope.launch {
             var ok = 0
             var fail = 0
-            files.forEachIndexed { index, file ->
+            var firstErr: String? = null
+            targets.forEachIndexed { index, file ->
                 if (index > 0) delay(java.util.concurrent.ThreadLocalRandom.current().nextLong(300, 801))
-                _uiState.update { it.copy(batchProgress = "修改资料 ${index + 1}/${files.size}…") }
-                fileRepository.setFileDesc(file.id, desc)
-                    .onSuccess { ok++ }.onFailure { fail++ }
+                _uiState.update { it.copy(batchProgress = "修改资料 ${index + 1}/${targets.size}…") }
+                val r = if (file.isFolder) {
+                    fileRepository.setDirDesc(file, desc)
+                } else {
+                    fileRepository.setFileDesc(file.id, desc)
+                }
+                r.onSuccess { ok++ }.onFailure { e ->
+                    fail++
+                    if (firstErr == null && e.message != null) firstErr = e.message
+                }
             }
             _uiState.update { it.copy(batchProgress = null) }
             _uiState.update {
-                it.copy(message = if (fail == 0) "已修改 $ok 个文件的资料" else "修改完成：成功 $ok，失败 $fail")
+                it.copy(
+                    message = if (fail == 0) {
+                        "已修改 $ok 个条目的资料"
+                    } else {
+                        val reason = firstErr?.let { r -> "（$r）" } ?: ""
+                        "修改完成：成功 $ok，失败 $fail$reason"
+                    }
+                )
             }
             exitSelection()
             refresh()
@@ -494,7 +589,7 @@ class FileListViewModel @Inject constructor(
     /** 移动单个文件到目标目录（文件夹不支持移动，见 [moveSelected] 注释） */
     fun moveSingle(file: CloudFile, targetFolderId: Long) {
         if (file.isFolder) {
-            _uiState.update { it.copy(message = "文件夹暂不支持移动（官方无接口）") }
+            _uiState.update { it.copy(message = "官网不支持移动文件夹（仅文件可移动）") }
             return
         }
         viewModelScope.launch {

@@ -1942,3 +1942,119 @@ curl --resolve api.github.com:443:140.82.121.5 \
 2. 时间线里**是否终于出现 `RUNNING` 行** ——
    这一行是 V20 是否根治"Worker 瞬间 FAILED"的唯一判据。
    若仍无 `RUNNING`，说明还有别的构造期问题，需继续排查。
+
+---
+
+## 28. V22~V27：功能补齐批次（2026-09-15）
+
+用户要求「**没有加的功能，全都给他加上吧**」。以下是逐项补齐的记录，
+每一项都注明**原版依据**（来自哪个 lua 模块/哪一行），不是凭感觉加的。
+
+### 28.1 功能补齐清单（按提交顺序）
+
+| 版本 | 功能 | 原版依据 | 关键实现点 |
+|---|---|---|---|
+| V22 | 分享链接解析修复 | `home_file.lua` | 根因：`java.net.URI` 遇中文/空格抛异常，整段文案被过滤 |
+| V22 | 接收系统分享上传 | `home.lua` 的 `intent操作` | ACTION_SEND / SEND_MULTIPLE，必须 `takePersistableUriPermission` |
+| V22 | 上传入口收敛 | — | 移除独立上传 tab，FAB 直传当前目录 |
+| V23 | 批量分享真修复 | `home_file.lua` 批量分享 | 旧实现 `selected.firstOrNull()` 只处理第一条（假功能） |
+| V23 | 文件列表排序 | `home_file.lua` 排序卡片 | 中文按拼音（Collator），文件夹恒在前 |
+| V23 | 多选工具栏补齐 | `home_file.lua` | 全选/批量下载/批量提取码/批量改资料 |
+| V24 | 下载列表排序+清空 | `download.lua` | 清空**不删本地文件**（与 cancel 语义不同，不可混用） |
+| V24 | 删除二次确认 | `home_file.lua` | 明确告知"几个文件夹/几个文件" |
+| V24 | 收藏夹置顶/编辑 | `favorites.lua` | Room v4→v5 显式迁移，**不能** fallback 重建（丢用户数据） |
+| V24 | 文件点击操作菜单 | `home_file.lua` | 点文件弹菜单而非直接弹分享框 |
+| V24 | 全局错误页 | `error_page.lua` | CrashHandler + 独立 ErrorActivity（崩在导航途中不会二次崩） |
+| V24 | 二维码扫描 | `qr.lua` | CameraX + MLKit（离线）；扫到即置 done，防重复回调 |
+| V24 | 回收站查看文件夹 | `recycle.lua` 查看文件夹弹窗 | 正则来自原版：`/>&nbsp;(.+?)\s*<font color=` |
+| V25 | 关于页 | `about.lua` + `update_log.lua` | 检查更新失败一律降级为中性文案 |
+| V25 | 应用内语言 | `ty_core.lua` 的 `语言()` | ⚠️ 原版该函数是**恒等函数**（空壳），故改用系统 per-app locale |
+| V25 | 移动网络提醒 | — | `isOnMobileData` = 有蜂窝且无 WiFi |
+| V26 | 下载单条操作 | `download.lua` 单条菜单 | 重命名只改本地副本，`COLUMN_LOCAL_FILENAME` 是只读的 |
+| V26 | 可自定义伪装后缀 | —（原版硬编码） | 蓝奏云限制会变，硬编码 = 每次改代码发版 |
+
+### 28.2 明确「不做」的功能（有依据，不是遗漏）
+
+| 功能 | 为什么不做 |
+|---|---|
+| **文件夹移动** | 原版**没有**这个接口。`home_func.lua` 的 `task=19` 是"全盘加载获取文件夹"（用于选目标目录弹窗），不是移动。当前 UI 如实提示"文件夹暂不支持移动"是**正确做法**，做假实现比不做更糟 |
+| **第三方解析 API 多字段配置** | 原版 `customize_settings.lua` 里根本没有第三方解析服务配置，那是本仓库自己加的设计。不需要照搬虚构的字段表 |
+| **原版更新日志文本** | `update_log.lua` 内容本身加密，解密后只有版本号 `1.3.4.8` 加乱码，无复用价值 |
+
+### 28.3 本批次踩到的三个真坑（值得记住）
+
+#### 坑 1：`java.net.URI` 对非 ASCII 直接抛异常
+
+```
+"https://wwt.lanzouj.com/iXXXXXXX"                → 正常
+"蓝奏云盘 https://wwt.lanzouj.com/iXXXXXXX"        → URISyntaxException
+"https://wwt.lanzouj.com/iXXXXXXX 提取码：abcd"    → URISyntaxException
+"https://wwt.lanzouj.com/iXXXXXXX "（仅尾部空格）  → URISyntaxException
+```
+
+**仅多一个尾部空格就废**。这是"粘贴整段分享文案解析不出"的根因。
+**正确做法**：先用正则从文本里抠出 URL 候选，再逐条校验域名。
+不要拿整段用户输入喂 `java.net.URI`。
+
+#### 坑 2：`HttpURLConnection` 不是 `Closeable`
+
+```kotlin
+conn.use { }   // ❌ Argument type mismatch: actual type is 'java.io.Closeable?'
+```
+
+Kotlin 的 `use { }` 要求 `Closeable`/`AutoCloseable`。
+`HttpURLConnection` 的释放方式是 `disconnect()`，必须 `try/finally`。
+（对比：OkHttp 的 `Response` 是 `Closeable`，`use` 没问题 —— 容易混。）
+
+#### 坑 3：Room 加字段时，别让 `fallbackToDestructiveMigration` 吃掉用户数据
+
+本项目 `DatabaseModule` 一直有 `fallbackToDestructiveMigration()`（自用项目图省事）。
+但收藏夹是**用户自己攒的数据**，加 `pinned` 字段时如果走重建表 = 收藏全丢。
+**做法**：为该版本单独写显式 `Migration`，`ALTER TABLE ADD COLUMN` 是无损的。
+
+```kotlin
+private val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE favorite_shares ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+    }
+}
+```
+
+### 28.4 静态检查 vs 真编译
+
+本批次 4 次 CI，其中 1 次失败（V25），暴露出**两个括号检查抓不到的语义错误**：
+
+- `HttpURLConnection.use`（类型系统错误）
+- 缺 `kotlinx.coroutines.flow.first` 的 import（符号解析错误）
+
+`brace_check.py` / `import_scan.py` 只能保证**结构完整**和**无冗余导入**，
+**不能替代编译**。CI 这条链路是必要的，不是摆设。
+
+### 28.5 提交链
+
+```
+bf1af9a fix(V27): 修两处编译错误（HttpURLConnection.use / 缺 first import）
+f19f565 feat(V26): 下载单条操作 + 可自定义伪装后缀
+32d7568 feat(V25): 关于页 + 应用内语言 + 移动网络提醒
+e0ed337 feat(V24): 六项缺失功能（下载清空排序/删除确认/收藏编辑置顶/
+                  文件操作菜单/错误页/扫码）
+3f61856 feat(V23): 批量分享真修复 + 文件列表排序 + 多选工具栏
+36c2f56 feat(V22): 分享链接解析修复 + 接收系统分享 + 上传入口收敛
+```
+
+### 28.6 待用户实测确认（V22~V27 累计）
+
+1. **分享链接**：粘贴整段文案（含中文、尾部空格）能否解析出结果
+2. **系统分享**：从文件管理器/相册分享文件到云匣，能否进入上传流程
+3. **点文件**：是否弹出操作菜单（而不是直接弹分享框）
+4. **下载页**：「⋯」菜单里的重命名/复制直链是否可用
+5. **关于页**：「我的 → 关于」检查更新是否返回结果（失败也是正常结果）
+6. **回收站**：文件夹行的「查看」按钮能否列出内部文件
+
+### 28.7 安全提醒（必须处理）
+
+- **吊销 PAT** `ghp_...`（曾在对话中明文出现，且已推送过）：
+  GitHub → Settings → Developer settings → Personal access tokens → Revoke
+- **修改蓝奏云密码**：`57188616` 与 GitHub 用户名复用，风险高
+- SSH 公钥 `cloudbox-sandbox-*`：可留可删（私钥已随沙箱消失），无安全风险；
+  上限 50 把/key

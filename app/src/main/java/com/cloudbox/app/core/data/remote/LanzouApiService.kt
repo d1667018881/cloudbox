@@ -5,6 +5,7 @@ import com.cloudbox.app.core.data.dto.CommonResponse
 import com.cloudbox.app.core.data.dto.DirListResponse
 import com.cloudbox.app.core.data.dto.FileListResponse
 import com.cloudbox.app.core.data.dto.FolderListResponse
+import com.cloudbox.app.core.data.dto.PermissiveResponse
 import com.cloudbox.app.core.data.dto.ShareFileListResponse
 import com.cloudbox.app.core.data.dto.ShareResponse
 import com.cloudbox.app.core.data.dto.UploadResponse
@@ -171,7 +172,7 @@ interface LanzouApiService {
         @Field("folder_id") folderId: Long,
         @Field("shows") shows: Int,
         @Field("shownames") shownames: String
-    ): CommonResponse
+    ): PermissiveResponse
 
     /** 设置文件描述 task=11（⚠️ 一旦设置后不能置空） */
     @FormUrlEncoded

@@ -126,6 +126,22 @@ data class CommonResponse(
     val infoText: String? get() = (info as? String)?.takeIf { it.isNotBlank() }
 }
 
+/**
+ * 权限受限接口的响应（文件夹提取码 task=16 等）。
+ *
+ * 与 [CommonResponse] 的唯一差别：`zt` 可空。
+ * 实测非会员调 task=16 返回 `{"zt":null,"info":"此功能仅会員使用…"}` ——
+ * 若复用 [CommonResponse]（zt 为 Int），Gson 把 null 塞进非空字段会抛异常，
+ * 把"没开会员"这种正常业务结果变成崩溃。这里单独声明，避免动到其余 12 个接口。
+ */
+data class PermissiveResponse(
+    @SerializedName("zt") val zt: Int? = null,
+    @SerializedName("info") val info: Any? = null
+) {
+    val isOk: Boolean get() = zt == 1
+    val infoText: String? get() = (info as? String)?.takeIf { it.isNotBlank() }
+}
+
 /** 分享信息响应（task=22 文件 / task=18 文件夹） */
 data class ShareResponse(
     @SerializedName("info") val info: ShareInfoDto? = null,
@@ -141,7 +157,9 @@ data class ShareInfoDto(
     // 公共
     @SerializedName("name") val name: String? = null,
     @SerializedName("pwd") val pwd: String? = null,
-    @SerializedName("onof") val onof: String? = null
+    @SerializedName("onof") val onof: String? = null,
+    // 文件夹资料（task=18 的 info.des，官网 fol_des 用它回填"修改资料"弹窗）
+    @SerializedName("des") val des: String? = null
 )
 
 /** 上传响应。

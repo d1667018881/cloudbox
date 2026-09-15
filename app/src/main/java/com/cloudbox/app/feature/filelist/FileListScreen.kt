@@ -96,7 +96,6 @@ fun FileListScreen(
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
     var moveTarget by remember { mutableStateOf(false) }
     var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
-    var descTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
     // "上传到指定目录"：先选目录，选完再拉起文件选择器
     var showUploadFolderPicker by remember { mutableStateOf(false) }
@@ -534,7 +533,12 @@ fun FileListScreen(
     // ==================== 单文件操作菜单 ====================
     //
     // 点文件不再直接弹分享框，而是先给菜单 —— 对齐原版行为。
-    // 菜单项：详情/分享/下载/重命名/设提取码/改资料/移动/删除。
+    // ==================== 单条操作菜单 ====================
+    //
+    // 按文件夹 / 文件分流，对齐官网菜单（2026-09 实测）：
+    // · 文件 ⋯ 菜单：外链分享 / 自定义外链 / 缩略图 / 重命名 / 移动 / 提取码 / 描述 / 短网址 / 直链
+    // · 文件夹 ⋯ 菜单：外链分享 / 自定义外链 / 提取码 / 修改资料 / 短网址
+    // 关键差异：文件夹**没有**「移动」和「重命名」，提取码走 task=16（不是 task=23）。
     menuFile?.let { file ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { menuFile = null },
@@ -545,25 +549,32 @@ fun FileListScreen(
                         menuFile = null
                         viewModel.getShare(file)
                     }
-                    MenuAction("下载到本地") {
-                        menuFile = null
-                        viewModel.downloadSingle(file)
+                    if (!file.isFolder) {
+                        MenuAction("下载到本地") {
+                            menuFile = null
+                            viewModel.downloadSingle(file)
+                        }
+                        // 官网文件夹菜单无「重命名」（fol_ename 未定义）
+                        MenuAction("重命名") {
+                            menuFile = null
+                            renameTarget = file
+                        }
                     }
-                    MenuAction("重命名") {
-                        menuFile = null
-                        renameTarget = file
-                    }
-                    MenuAction("设置提取码") {
+                    MenuAction(if (file.isFolder) "设置文件夹提取码" else "设置提取码") {
                         menuFile = null
                         passwdTarget = file
                     }
                     MenuAction("修改资料（描述）") {
                         menuFile = null
-                        descTarget = file
+                        // 先读回原描述再打开弹窗（对齐原版 f_des → task=12 → f_desgo）
+                        viewModel.loadDescForEdit(file)
                     }
-                    MenuAction("移动到…") {
-                        menuFile = null
-                        moveSingleTarget = file
+                    // 官网文件夹菜单无「移动」（已实测确认）
+                    if (!file.isFolder) {
+                        MenuAction("移动到…") {
+                            menuFile = null
+                            moveSingleTarget = file
+                        }
                     }
                     MenuAction("复制文件名") {
                         menuFile = null
@@ -650,15 +661,17 @@ fun FileListScreen(
     if (showBatchPwd) {
         SimpleInputDialog(
             title = "批量设置提取码（留空关闭）",
-            placeholder = "2-6 位密码；文件夹会被跳过",
+            // 文件夹也支持提取码（官网 task=16），不再是"会被跳过"
+            placeholder = "2-6 位密码；文件和文件夹均生效",
             onDismiss = { showBatchPwd = false },
             onConfirm = { pwd -> viewModel.setPasswdSelected(pwd); showBatchPwd = false }
         )
     }
     if (showBatchDesc) {
         SimpleInputDialog(
-            title = "批量修改资料（⚠️ 设置后不能清空）",
-            placeholder = "描述内容；文件夹会被跳过",
+            title = "批量修改资料",
+            // 文件夹也能改资料（官网 fol_desgo → task=4），提示语不再说"会被跳过"
+            placeholder = "描述内容；文件和文件夹均生效",
             onDismiss = { showBatchDesc = false },
             onConfirm = { desc -> viewModel.setDescSelected(desc); showBatchDesc = false }
         )
@@ -671,12 +684,23 @@ fun FileListScreen(
             onConfirm = { pwd -> viewModel.setPasswd(file, pwd); passwdTarget = null }
         )
     }
-    descTarget?.let { file ->
+    state.descTarget?.let { file ->
         SimpleInputDialog(
-            title = "设置描述（⚠️ 设置后不能清空）",
+            title = when {
+                state.descLoading -> "修改资料（读取中…）"
+                // 文件夹的描述可随时改（task=4 整体覆盖），没有"不能清空"的限制
+                file.isFolder -> "修改文件夹资料（话说）"
+                else -> "修改资料（⚠️ 设置后不能清空）"
+            },
             placeholder = "描述内容",
-            onDismiss = { descTarget = null },
-            onConfirm = { desc -> viewModel.setDesc(file, desc); descTarget = null }
+            initialValue = state.descDraft,
+            singleLine = false,
+            enabled = !state.descLoading,
+            onDismiss = viewModel::dismissDescEdit,
+            onConfirm = { desc ->
+                viewModel.setDesc(file, desc)
+                viewModel.dismissDescEdit()
+            }
         )
     }
     state.shareResult?.let { share ->
