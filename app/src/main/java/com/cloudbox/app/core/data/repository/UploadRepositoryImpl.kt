@@ -506,9 +506,19 @@ class UploadRepositoryImpl @Inject constructor(
                 .items.any { it.nameAll == uploadName }
         }.getOrDefault(false)
 
-    /** 需要伪装后缀的格式：exe/apk 等蓝奏云限制上传的格式 */
-    private fun needsSpoof(file: File): Boolean {
+    /**
+     * 需要伪装后缀的格式：exe/apk 等蓝奏云限制上传的格式。
+     *
+     * 2026-09-15：列表改为**可配置**（设置页 → 上传后缀伪装 → 自定义后缀）。
+     * 起因是蓝奏云的格式限制会变 —— 今天是 exe/apk 被拦，明天可能是别的；
+     * 硬编码一份列表意味着每次都得改代码 + 重新发版。
+     * 默认仍是原版那套（见 [com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_SUFFIXES]）。
+     */
+    private suspend fun needsSpoof(file: File): Boolean {
         val ext = file.extension.lowercase()
-        return ext in setOf("exe", "apk", "msi", "bat", "sh", "dll", "jar")
+        if (ext.isBlank()) return false
+        val custom = com.cloudbox.app.common.SpoofSuffixUtil
+            .parse(settingsStore.spoofSuffixList.first())
+        return ext in custom
     }
 }

@@ -24,6 +24,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     private val keyUserAgent = stringPreferencesKey("user_agent")
     private val keySuffixSpoof = booleanPreferencesKey("suffix_spoof_enabled")
+    /** 需要伪装的上传后缀（逗号分隔），见 SpoofSuffixUtil */
+    private val keySpoofSuffixList = stringPreferencesKey("spoof_suffix_list")
     private val keyThirdPartyResolver = stringPreferencesKey("third_party_resolver_url")
     private val keyDarkMode = stringPreferencesKey("dark_mode") // system / light / dark
     private val keyLanguage = stringPreferencesKey("app_language") // system / zh / en
@@ -36,6 +38,15 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     val suffixSpoofEnabled: Flow<Boolean> = context.settingsDataStore.data.map {
         it[keySuffixSpoof] ?: true // 默认开启：不支持格式伪装为 .zip 上传
+    }
+
+    /**
+     * 需要伪装的上传后缀（逗号分隔串）。空则用默认列表。
+     * 见 [com.cloudbox.app.common.SpoofSuffixUtil]：蓝奏云的限制格式会变，
+     * 硬编码列表每次都要改代码发版。
+     */
+    val spoofSuffixList: Flow<String> = context.settingsDataStore.data.map {
+        it[keySpoofSuffixList] ?: com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_RAW
     }
 
     val thirdPartyResolverUrl: Flow<String> = context.settingsDataStore.data.map {
@@ -74,6 +85,10 @@ class SettingsStore @Inject constructor(private val context: Context) {
     suspend fun setUserAgent(ua: String) = edit { p -> p[keyUserAgent] = ua }
 
     suspend fun setSuffixSpoof(enabled: Boolean) = edit { p -> p[keySuffixSpoof] = enabled }
+
+    suspend fun setSpoofSuffixList(raw: String) = edit { p ->
+        p[keySpoofSuffixList] = com.cloudbox.app.common.SpoofSuffixUtil.normalize(raw)
+    }
 
     suspend fun setThirdPartyResolver(url: String) = edit { p -> p[keyThirdPartyResolver] = url }
 

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -26,11 +27,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.cloudbox.app.core.domain.model.DownloadSortMode
@@ -57,8 +63,71 @@ fun DownloadScreen(
 ) {
     val records by viewModel.displayRecords.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
+    val message by viewModel.message.collectAsState()
+    val snackbar = remember { SnackbarHostState() }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    /** 单条操作菜单的目标 */
+    var menuTask by remember { mutableStateOf<DownloadTask?>(null) }
+    /** 重命名对话框的目标 */
+    var renameTask by remember { mutableStateOf<DownloadTask?>(null) }
+    /** 单条删除确认目标 */
+    var deleteTask by remember { mutableStateOf<DownloadTask?>(null) }
+
+    LaunchedEffect(message) {
+        message?.let {
+            snackbar.showSnackbar(it)
+            viewModel.dismissMessage()
+        }
+    }
+
+    // 重命名（本地副本名，不动云端）
+    renameTask?.let { task ->
+        var input by remember(task.downloadId) { mutableStateOf(task.fileName) }
+        AlertDialog(
+            onDismissRequest = { renameTask = null },
+            title = { Text("重命名本地文件") },
+            text = {
+                Column {
+                    Text(
+                        "只改手机里的这份副本，不影响云端文件名。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.renameLocal(task.downloadId, input)
+                    renameTask = null
+                }, enabled = input.isNotBlank()) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { renameTask = null }) { Text("取消") } }
+        )
+    }
+
+    // 单条删除确认
+    deleteTask?.let { task ->
+        AlertDialog(
+            onDismissRequest = { deleteTask = null },
+            title = { Text("删除下载") },
+            text = { Text("将删除「${task.fileName}」的下载记录，并删除已下载到本地的文件。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.cancel(task.downloadId)
+                    deleteTask = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteTask = null }) { Text("取消") } }
+        )
+    }
 
     if (confirmClear) {
         AlertDialog(
@@ -78,6 +147,7 @@ fun DownloadScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = { Text("下载管理") },
@@ -128,15 +198,78 @@ fun DownloadScreen(
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 items(records, key = { it.downloadId }) { task ->
-                    DownloadItem(task, viewModel)
+                    DownloadItem(task, viewModel) { menuTask = it }
                 }
             }
         }
     }
+
+    // 单条操作菜单
+    menuTask?.let { task ->
+        val context = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { menuTask = null },
+            title = { Text(task.fileName, maxLines = 2) },
+            text = {
+                Column {
+                    DownloadMenuAction("复制直链") {
+                        menuTask = null
+                        viewModel.copyUrl(task, context)
+                    }
+                    DownloadMenuAction("重命名本地文件") {
+                        menuTask = null
+                        renameTask = task
+                    }
+                    if (task.status == DownloadManager.STATUS_RUNNING) {
+                        DownloadMenuAction("暂停") {
+                            menuTask = null
+                            viewModel.pause(task.downloadId)
+                        }
+                    }
+                    if (task.paused || task.status == DownloadManager.STATUS_PAUSED) {
+                        DownloadMenuAction("继续下载") {
+                            menuTask = null
+                            viewModel.resume(task.downloadId)
+                        }
+                    }
+                    if (task.status == DownloadManager.STATUS_SUCCESSFUL) {
+                        DownloadMenuAction("打开文件") {
+                            menuTask = null
+                            viewModel.openTask(task)
+                        }
+                    }
+                    DownloadMenuAction("删除（含本地文件）", danger = true) {
+                        menuTask = null
+                        deleteTask = task
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { menuTask = null }) { Text("关闭") }
+            }
+        )
+    }
+}
+
+/** 下载条目菜单的一行（与文件列表的 MenuAction 同构，但作用域不同故各自实现） */
+@Composable
+private fun DownloadMenuAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            label,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
 }
 
 @Composable
-private fun DownloadItem(task: DownloadTask, viewModel: DownloadViewModel) {
+private fun DownloadItem(
+    task: DownloadTask,
+    viewModel: DownloadViewModel,
+    onOpenMenu: (DownloadTask) -> Unit
+) {
     val progress = if (task.bytesTotal > 0) {
         task.bytesDownloaded.toFloat() / task.bytesTotal
     } else 0f
@@ -175,6 +308,10 @@ private fun DownloadItem(task: DownloadTask, viewModel: DownloadViewModel) {
             }
             IconButton(onClick = { viewModel.cancel(task.downloadId) }) {
                 Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp))
+            }
+            // 更多操作：复制直链 / 重命名 / 暂停继续 / 打开 / 删除
+            IconButton(onClick = { onOpenMenu(task) }) {
+                Icon(Icons.Filled.MoreVert, "更多操作", Modifier.size(18.dp))
             }
         }
         if (!finished) {

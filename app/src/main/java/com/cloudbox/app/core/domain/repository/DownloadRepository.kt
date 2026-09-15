@@ -28,4 +28,16 @@ interface DownloadRepository {
      * 因为用户可能还想留着文件。这里保持一致——只移除系统任务与数据库记录。
      */
     suspend fun clearAll()
+
+    /**
+     * 重命名本地下载记录与文件（仅限已完成的任务）。
+     *
+     * 对齐原版 `download.lua` 的单条重命名：下载下来的文件名经常是
+     * `upload_1789223795017` 或带一串随机码，用户想改名只能去文件管理器，
+     * 而 App 里明明就有这条记录却改不了。
+     *
+     * ⚠️ 只改**本地文件名**，不回写云端 —— 云端文件名由文件管理页的重命名负责，
+     * 两者是不同的东西（一个是你手机里的副本，一个是云上的原件）。
+     */
+    suspend fun renameLocal(downloadId: Long, newName: String): Result<Unit>
 }

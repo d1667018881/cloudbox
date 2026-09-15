@@ -28,6 +28,8 @@ import javax.inject.Inject
 data class SettingsUiState(
     val userAgent: String = AppConstants.DESKTOP_UA,
     val suffixSpoof: Boolean = true,
+    /** 需要伪装的上传后缀（逗号分隔） */
+    val spoofSuffixList: String = com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_RAW,
     val thirdPartyResolver: String = "",
     val darkMode: String = "system",
     /** 应用内语言：system / zh / en */
@@ -73,6 +75,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val ua = settingsStore.userAgent.first()
             val spoof = settingsStore.suffixSpoofEnabled.first()
+            val spoofList = settingsStore.spoofSuffixList.first()
             val resolver = settingsStore.thirdPartyResolverUrl.first()
             val dark = settingsStore.darkMode.first()
             val lang = settingsStore.appLanguage.first()
@@ -80,6 +83,7 @@ class SettingsViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
+                    spoofSuffixList = spoofList,
                     thirdPartyResolver = resolver, darkMode = dark,
                     appLanguage = lang, warnMobileNetwork = warnMobile
                 )
@@ -111,6 +115,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setSuffixSpoof(enabled)
             _uiState.update { it.copy(suffixSpoof = enabled) }
+        }
+    }
+
+    /** 保存自定义伪装后缀（写入前会规范化：去点号、去重、统一小写） */
+    fun saveSpoofSuffixList(raw: String) {
+        viewModelScope.launch {
+            settingsStore.setSpoofSuffixList(raw)
+            val normalized = com.cloudbox.app.common.SpoofSuffixUtil.normalize(raw)
+            _uiState.update {
+                it.copy(spoofSuffixList = normalized, message = "后缀列表已保存")
+            }
         }
     }
 

@@ -64,6 +64,9 @@ fun SettingsScreen(
     ) { uri -> uri?.let { viewModel.runUploadProbeWith(it) } }
     var uaDialog by remember { mutableStateOf(false) }
     var resolverDialog by remember { mutableStateOf(false) }
+    // 自定义伪装后缀列表
+    var spoofDialog by remember { mutableStateOf(false) }
+    var spoofInput by remember { mutableStateOf("") }
     var uaInput by remember { mutableStateOf(state.userAgent) }
     var resolverInput by remember { mutableStateOf(state.thirdPartyResolver) }
     // 账号中心设置（task=7/8/10/15）
@@ -85,6 +88,11 @@ fun SettingsScreen(
             snackbar.showSnackbar(it)
             viewModel.dismissMessage()
         }
+    }
+
+    // 打开伪装后缀对话框时，把当前配置填进输入框（只填一次，不覆盖用户正在编辑的内容）
+    LaunchedEffect(spoofDialog) {
+        if (spoofDialog && spoofInput.isBlank()) spoofInput = state.spoofSuffixList
     }
 
     Scaffold(
@@ -141,10 +149,16 @@ fun SettingsScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(
+                    Modifier.weight(1f).clickable { spoofDialog = true }
+                ) {
                     Text("上传后缀伪装", style = MaterialTheme.typography.bodyLarge)
-                    Text("exe/apk 等自动改名为 .zip 上传，下载时还原", style = MaterialTheme.typography.bodySmall,
+                    Text("以下格式自动改名为 .zip 上传，下载时还原（点击编辑列表）",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("当前：${state.spoofSuffixList}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
                 }
                 Switch(checked = state.suffixSpoof, onCheckedChange = viewModel::saveSuffixSpoof)
             }
@@ -287,6 +301,44 @@ fun SettingsScreen(
         }
     }
 
+    if (spoofDialog) {
+        AlertDialog(
+            onDismissRequest = { spoofDialog = false },
+            title = { Text("自定义伪装后缀") },
+            text = {
+                Column {
+                    Text(
+                        "这些格式上传前会被改名为 .zip（蓝奏云按扩展名拦截），下载时自动还原。\n" +
+                            "用逗号或空格分隔，不用写点号。清空则恢复默认。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = spoofInput,
+                        onValueChange = { spoofInput = it },
+                        minLines = 2,
+                        placeholder = { Text(com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_RAW) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.saveSpoofSuffixList(spoofInput)
+                    spoofDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        spoofInput = com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_RAW
+                    }) { Text("恢复默认") }
+                    TextButton(onClick = { spoofDialog = false }) { Text("取消") }
+                }
+            }
+        )
+    }
     if (uaDialog) {
         AlertDialog(
             onDismissRequest = { uaDialog = false },

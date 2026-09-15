@@ -73,6 +73,27 @@ class DownloadViewModel @Inject constructor(
         viewModelScope.launch { downloadRepository.clearAll() }
     }
 
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
+    fun dismissMessage() { _message.value = null }
+
+    /** 重命名本地下载（只改本地副本名，不动云端） */
+    fun renameLocal(downloadId: Long, newName: String) {
+        viewModelScope.launch {
+            downloadRepository.renameLocal(downloadId, newName)
+                .onSuccess { _message.value = "已重命名" }
+                .onFailure { e -> _message.value = "重命名失败：${e.message}" }
+        }
+    }
+
+    /** 复制下载直链（直链有效期有限，复制后要尽快用） */
+    fun copyUrl(task: DownloadTask, context: Context) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("直链", task.url))
+        _message.value = "已复制直链（有效期有限，请尽快使用）"
+    }
+
     fun openTask(task: DownloadTask) {
         val uri = DownloadHelper.getCompletedFileUri(context, task.downloadId)
         DownloadHelper.openFile(context, uri, task.mimeType)

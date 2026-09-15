@@ -108,6 +108,49 @@ class DownloadRepositoryImpl @Inject constructor(
         db.downloadRecordDao().clearAll()
     }
 
+    /**
+     * 重命名本地下载。
+     *
+     * ⚠️ 走的是「改数据库记录的展示名」+「尽力重命名磁盘文件」两步，而不是
+     * 直接改 DownloadManager 的记录 —— 后者的 `COLUMN_LOCAL_FILENAME` 是只读的
+     * （系统维护，App 改不了）。所以：
+     * 1. 数据库里的 fileName 改成新名（这是 UI 展示来源）；
+     * 2. 若文件已下载完成，尝试把磁盘上的文件也改名；
+     *    失败不致命（可能被占用 / 无权限），只记日志 —— 用户至少在 App 里看到的是新名字。
+     */
+    override suspend fun renameLocal(downloadId: Long, newName: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val record = db.downloadRecordDao().getByDownloadId(downloadId)
+                    ?: error("下载记录不存在")
+                val safe = sanitizeFileName(newName)
+                if (safe.isBlank()) error("文件名不能为空")
+
+                // 1) 先尝试改磁盘文件（拿到旧路径）
+                runCatching {
+                    val query = DownloadManager.Query().setFilterById(downloadId)
+                    downloadManager.query(query).use { cursor ->
+                        if (!cursor.moveToFirst()) return@use
+                        val idx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                        if (idx < 0) return@use
+                        val uriStr = cursor.getString(idx) ?: return@use
+                        val old = File(Uri.parse(uriStr).path ?: return@use)
+                        if (old.exists()) {
+                            val target = File(old.parentFile, safe)
+                            if (target.absolutePath != old.absolutePath) {
+                                old.renameTo(target)
+                            }
+                        }
+                    }
+                }.onFailure {
+                    // 文件占用/权限问题：不影响记录改名
+                }
+
+                // 2) 改记录展示名
+                db.downloadRecordDao().updateFileName(downloadId, safe)
+            }
+        }
+
     /** 文件名消毒：移除路径分隔符、控制字符、连续点号，防止路径穿越与 IllegalArgumentException */
     private fun sanitizeFileName(name: String): String {
         if (name.isBlank()) return "download_${System.currentTimeMillis()}"
