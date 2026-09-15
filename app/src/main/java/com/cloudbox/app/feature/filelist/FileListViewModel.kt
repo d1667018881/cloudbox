@@ -199,7 +199,10 @@ class FileListViewModel @Inject constructor(
     fun createFolder(name: String) {
         viewModelScope.launch {
             fileRepository.createFolder(_uiState.value.currentFolderId, name)
-                .onSuccess { refresh() }
+                .onSuccess {
+                    refresh()
+                    _uiState.update { it.copy(message = "已新建文件夹「$name」") }
+                }
                 .onFailure { e -> _uiState.update { it.copy(message = "新建失败：${e.message}") } }
         }
     }
@@ -207,7 +210,10 @@ class FileListViewModel @Inject constructor(
     fun rename(file: CloudFile, newName: String) {
         viewModelScope.launch {
             fileRepository.rename(file, newName)
-                .onSuccess { refresh() }
+                .onSuccess {
+                    refresh()
+                    _uiState.update { it.copy(message = "已重命名为「$newName」") }
+                }
                 .onFailure { e -> _uiState.update { it.copy(message = "重命名失败：${e.message}") } }
         }
     }
@@ -218,10 +224,12 @@ class FileListViewModel @Inject constructor(
         val fileIds = files.filter { !it.isFolder }.map { it.id }
         val folderIds = files.filter { it.isFolder }.map { it.id }
         viewModelScope.launch {
+            val total = fileIds.size + folderIds.size
             fileRepository.delete(fileIds, folderIds)
                 .onSuccess {
                     exitSelection()
                     refresh()
+                    _uiState.update { it.copy(message = "已删除 $total 项，可在回收站恢复") }
                 }
                 .onFailure { e -> _uiState.update { it.copy(message = "删除失败：${e.message}") } }
         }
@@ -247,6 +255,9 @@ class FileListViewModel @Inject constructor(
                 .onSuccess {
                     exitSelection()
                     refresh()
+                    // 对齐官网 f_midfgo 成功后的 w_info("移动成功")——原实现静默刷新，
+                    // 用户移动完看不到任何反馈，无法确认是否生效
+                    _uiState.update { it.copy(message = "已移动 ${fileIds.size} 个文件") }
                 }
                 .onFailure { e -> _uiState.update { it.copy(message = "移动失败：${e.message}") } }
         }
@@ -581,8 +592,10 @@ class FileListViewModel @Inject constructor(
             } else {
                 fileRepository.delete(listOf(file.id), emptyList())
             }
-            r.onSuccess { refresh() }
-                .onFailure { e -> _uiState.update { it.copy(message = "删除失败：${e.message}") } }
+            r.onSuccess {
+                refresh()
+                _uiState.update { it.copy(message = "已删除「${file.name}」，可在回收站恢复") }
+            }.onFailure { e -> _uiState.update { it.copy(message = "删除失败：${e.message}") } }
         }
     }
 
@@ -594,7 +607,10 @@ class FileListViewModel @Inject constructor(
         }
         viewModelScope.launch {
             fileRepository.moveFiles(listOf(file.id), targetFolderId)
-                .onSuccess { refresh() }
+                .onSuccess {
+                    refresh()
+                    _uiState.update { it.copy(message = "已移动「${file.name}」") }
+                }
                 .onFailure { e -> _uiState.update { it.copy(message = "移动失败：${e.message}") } }
         }
     }
