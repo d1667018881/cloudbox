@@ -2058,3 +2058,181 @@ e0ed337 feat(V24): 六项缺失功能（下载清空排序/删除确认/收藏�
 - **修改蓝奏云密码**：`57188616` 与 GitHub 用户名复用，风险高
 - SSH 公钥 `cloudbox-sandbox-*`：可留可删（私钥已随沙箱消失），无安全风险；
   上限 50 把/key
+
+---
+
+## 29. V28/V29 —— 网页版官网实测比对（2026-09-15）
+
+### 29.1 这一轮的由来
+
+用户提出一个关键质疑：「有些功能不登录它不显示出来」「官网上是不是支持移动文件夹」。
+我上一轮**仅凭原版 APK 的反编译源码**得出「原版没有移动功能」，
+但用户要求直接登录**网页版官网**看真实界面 —— 这个要求是对的，
+证明**反编译源码 ≠ 服务端能力**：原版 APK 没做，不代表官网没有。
+
+**结论修正**：官网**有「移动」**，但**只能移动文件、不能移动文件夹**。
+
+### 29.2 实测方法（可复现）
+
+```python
+# Playwright + storage_state 复用登录态
+# 登录：https://up.woozooo.com/account.php?action=login
+#   → 重定向到 accounts.woozooo.com（新版登录域）
+#   → 字段 #username / #password，提交 #s3
+# 关键：真正的文件列表在 iframe[name="mainframe"] 里，
+#       页面上层 < 3KB，所有 JS 函数都在 iframe 上下文
+# 取函数源码：frame.evaluate("()=>f_view.toString()")
+```
+
+三个必须知道的坑：
+1. **登录域已换**：`up.woozooo.com/account.php` 会 302 到 `accounts.woozooo.com`，
+   表单字段是 `#username` / `#password`，不是旧版的 uid/pwd。
+2. **内容在 iframe**：主文档只有 3KB 空壳，`mainframe` 才是文件列表。
+   直接 `pg.content()` 拿不到任何操作函数。
+3. **函数定义在 iframe 内联脚本**：`f_view` 等不存在于任何 .js 文件，
+   只能通过 `frame.evaluate` 在运行时取 `toString()`。
+
+### 29.3 官网菜单源码（决定性证据）
+
+```javascript
+// 文件 ⋯ 菜单 —— 9 项，第 5 项是「移动」
+function f_view(fid){
+  $('#fs'+fid).html('<div class=f_view>'+
+    '<div onclick="f_sha(fid)"  class=f_viewtop>外链分享地址</div>'+
+    '<div onclick="f_diy(fid,1)">自定义外链</div>'+
+    '<div onclick="f_ico(fid,1)">缩略图 图标</div>'+
+    '<div onclick="f_ename(fid)">重命名</div>'+
+    '<div onclick="f_midf(fid)">移动</div>'+        // ← ★
+    '<div onclick="f_pwd(fid)">设置访问密码</div>'+
+    '<div onclick="f_des(fid)">添加描述</div>'+
+    '<div onclick="f_surl(fid)">短网址</div>'+
+    '<div onclick="f_url(fid)" class=f_viewbot>文件直链</div>'+'</div>');
+}
+
+// 文件夹 ⋯ 菜单 —— 5 项，无「移动」、无「重命名」
+function fol_view(folid){
+  $('#fols'+folid).html('<div class=f_view>'+
+    '<div onclick="fol_sha(folid)" class=f_viewtop>外链分享地址</div>'+
+    '<div onclick="f_diy(folid,2)">自定义外链</div>'+
+    '<div onclick="fol_pwd(folid)">设置访问密码</div>'+
+    '<div onclick="fol_des(folid)" class=f_viewbot>修改资料(话说)</div>'+
+    '<div onclick="fol_surl(folid)">短网址</div>'+'</div>');
+}
+```
+
+### 29.4 移动协议（已实跑验证）
+
+```javascript
+f_midf(fid)          → POST /doupload.php { task:19, file_id:fid }
+                       返回全部文件夹（实测 23 个，全盘而非当前层级）
+f_midfgo(fol_id,fid) → POST /doupload.php { task:20, folder_id:fol_id, file_id:fid }
+                       返回 {"zt":1,"info":"移动成功"}；folder_id=-1 为根目录
+```
+
+**实跑记录**（唯一一次写操作，已还原）：
+```
+移动到 apk文件 → {"zt":1,"info":"移动成功"}
+移回根目录     → {"zt":1,"info":"移动成功"}
+```
+
+**task=19 vs task=47 的分工**（实测数据，务必别混）：
+| 接口 | 参数 | 返回 | 用途 |
+|---|---|---|---|
+| task=19 | `file_id` | 全盘 23 个文件夹 | 移动目标选择器 |
+| task=47 | `folder_id`+`pg` | 当前层级 3 个 | 文件列表里的子文件夹 |
+
+cloudbox 的分工本来就正确（`getAllFolders` / `getDirList`）。
+
+### 29.5 官网接口全表（从 iframe 运行时提取）
+
+| task | 功能 | 触发函数 | 关键字段 |
+|---:|---|---|---|
+| 2 | 新建文件夹 | `fol_crego` | parent_id, folder_name, folder_description |
+| 3 | 删除文件夹 | `fol_dec` | folder_id |
+| 4 | **改文件夹资料** | `fol_desgo` | folder_id, **folder_name, folder_description** |
+| 5 | 列文件（当前目录分页） | `more` | folder_id, pg |
+| 6 | 删除文件 | `f_dec` | file_id |
+| 11 | **写**文件描述 | `f_desgo` | file_id, desc |
+| 12 | **读**文件描述 | `f_des` | file_id → `info` 即描述 |
+| 16 | 文件夹提取码 | `fol_pwdgo` | folder_id, shows, shownames |
+| 18 | 文件夹信息 | `fol_pwd`/`fol_sha`/`fol_des`/`fol_surl` | folder_id → `info{name,des,pwd,onof,is_newd,new_url}` |
+| 19 | **全盘文件夹列表** | `f_midf` | file_id |
+| 20 | **移动文件** | `f_midfgo` | folder_id, file_id |
+| 22 | 文件分享信息 | `f_pwd`/`f_surl`/`f_sha` | file_id → `info{pwd,onof,f_id,is_newd,taoc}` |
+| 23 | 文件提取码 | `f_pwdgo` | file_id, shows, shownames |
+| 31 | 文件直链 | `f_url` | file_id |
+| 39/40 | 自定义外链（读/写） | `f_diy`/`f_diygo` | file_id, diy, type |
+| 41 | 缩略图 | `f_ico` | file_id |
+| 46 | 重命名文件 | `f_ename`(type=1 读)/`f_enamego`(type=2 写) | file_id, file_name |
+| 47 | 子文件夹列表（当前层级） | `folder` | folder_id, pg |
+
+### 29.6 本轮修的问题（V28/V29）
+
+1. **文件描述不回填**（真 bug）
+   `task=12` 早就定义成 `getFileInfo` 却**从未被调用** → 描述弹窗永远空白，
+   用户只能盲改。新增 `getFileDesc()` + `loadDescForEdit()`。
+   `SimpleInputDialog` 增加 `initialValue`/`singleLine`/`enabled`，描述改多行。
+
+2. **文件夹提取码走了错误接口**（真 bug）
+   官网文件 `task=23`、文件夹 `task=16`，id 字段分别是 file_id / folder_id。
+   原代码单条误用文件接口、批量直接跳过文件夹。新增 `setDirPasswd()` 按类型分流。
+
+3. **`zt:null` 会崩**（真隐患）
+   task=16 非会员返回 `{"zt":null,"info":"此功能仅会員使用…"}`。
+   `CommonResponse.zt` 是非空 `Int`，Gson 反射塞 null 会抛异常 ——
+   把"没开会员"这种正常结果变成崩溃。
+   **不动 `CommonResponse`**（12 个接口共用，改动面太大），
+   新增 `PermissiveResponse`（zt 可空）专供 task=16。
+
+4. **文件夹描述缺失**
+   官网 `fol_desgo → task=4` 把 name 和 description 一起提交。
+   新增 `setDirDesc()`/`getDirDesc()`；`ShareInfoDto` 补 `des` 字段。
+   ⚠️ **task=4 是整体覆盖，必须回填原 `folder_name`，否则文件夹名被清空。**
+
+5. **单条菜单按类型分流**（对齐 f_view / fol_view）
+   文件夹菜单去掉「下载」「重命名」「移动」—— 官网文件夹确实没有这三项。
+
+6. **静默操作补反馈**（V29）
+   移动/重命名/删除/新建原来成功后毫无提示，用户无法确认是否生效。
+
+### 29.7 已知未做（以及为什么）
+
+| 功能 | 状态 | 原因 |
+|---|---|---|
+| 移动文件夹 | ❌ 不做 | 官网文件夹菜单无此项，服务端无接口。LanZouCloud-API 用"新建+逐个移+删除"模拟，3 次写操作、中途失败会丢数据 |
+| task=31 文件直链 | ⏸ 已有替代 | cloudbox 走 `ajaxfile.php` 分享页解析链路，功能等价 |
+| task=39/40 自定义外链 | ❌ 未做 | **会员功能**，非会员不可用 |
+| task=41 缩略图 | ❌ 未做 | 会员功能，且要上传图片 |
+| 网页版账号管理页 | ❌ 未做 | 改密码/换手机号涉及明文传输，风险高（见 §28 的"不做"清单） |
+
+### 29.8 实测暴露的认知陷阱（重要教训）
+
+**反编译源码 ≠ 服务端能力。** 
+原版 APK 的 Lua 里没有移动功能，我据此断言"官方无此功能"，
+但官网实测证明服务端**有** `task=20`，只是原版 App 没接。
+**判断"某功能是否存在"时，必须以服务端实际接口为准，反编译只能证明"客户端用没用"。**
+
+同理，反编译失败的模块（`home.lua`/`webview.lua`）更不能用"没看到"推断"没有"。
+
+### 29.9 提交记录
+
+```
+097c669 feat(V29): 补齐操作成功提示 + 移动反馈
+d808096 fix(V28): 修正 Retrofit Response.body 调用（CI 抓到）
+9644280 feat(V28): 对齐官网实测 —— 描述回填、文件夹提取码/资料、菜单分流
+```
+
+### 29.10 一个只有 CI 能抓的错误（记下来）
+
+```kotlin
+// ❌ 编译失败：Cannot access 'field body: ResponseBody?': it is private in 'retrofit2/Response'
+api.getFileInfo(...).body?.string()
+
+// ✅ 正确
+api.getFileInfo(...).body()?.string()
+```
+
+原因：`retrofit2.Response.body` 是**方法** `body()`；
+而 `okhttp3.Response.body` 是**属性**。
+项目里 `.execute().body?.string()` 能过是因为 `execute()` 返回 okhttp3.Response。
+两个同名不同形，极易混 —— 本地无 SDK 无法编译，只能靠 CI 兜住。
