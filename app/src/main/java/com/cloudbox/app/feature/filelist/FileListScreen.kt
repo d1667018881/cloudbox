@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -48,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -89,6 +91,9 @@ fun FileListScreen(
     uploadViewModel: com.cloudbox.app.feature.upload.UploadViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    // V30：文件类型标签开关（对齐原版 show_file_type_label，默认开）
+    val showFileTypeLabel by viewModel.settingsStore.showFileTypeLabel
+        .collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadProbeResult by uploadViewModel.probeResult.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
@@ -435,7 +440,7 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            GridItem(file, state, viewModel) { menuFile = it }
+                            GridItem(file, state, viewModel, showFileTypeLabel) { menuFile = it }
                         }
                         if (state.hasMore) {
                             item { LoadMoreButton(viewModel) }
@@ -444,7 +449,7 @@ fun FileListScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            ListItem(file, state, viewModel) { menuFile = it }
+                            ListItem(file, state, viewModel, showFileTypeLabel) { menuFile = it }
                             HorizontalDivider()
                         }
                         if (state.hasMore) {
@@ -803,6 +808,8 @@ private fun ListItem(
     file: CloudFile,
     state: FileListUiState,
     viewModel: FileListViewModel,
+    /** V30：是否显示文件类型标签（对齐原版 show_file_type_label） */
+    showFileTypeLabel: Boolean = true,
     onOpenMenu: (CloudFile) -> Unit
 ) {
     val selected = file.id in state.selected
@@ -841,6 +848,10 @@ private fun ListItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        // V30：类型标签（原版渲染在 格式卡片 里，文件夹不显示）
+        if (showFileTypeLabel) {
+            file.fileType?.let { FileTypeBadge(it) }
+        }
         if (selected) {
             Icon(Icons.Filled.Check, "已选", tint = MaterialTheme.colorScheme.primary)
         } else if (!file.isFolder) {
@@ -852,6 +863,28 @@ private fun ListItem(
     }
 }
 
+/**
+ * 文件类型标签小徽章（V30）。
+ *
+ * 单独抽出来是因为列表项和网格项都要用，且样式要保持一致 ——
+ * 原版两处都用同一个 `格式文本` 控件。
+ */
+@Composable
+private fun FileTypeBadge(text: String) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.padding(horizontal = 6.dp)
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+        )
+    }
+}
+
 /** 网格模式条目 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -859,6 +892,8 @@ private fun GridItem(
     file: CloudFile,
     state: FileListUiState,
     viewModel: FileListViewModel,
+    /** V30：是否显示文件类型标签 */
+    showFileTypeLabel: Boolean = true,
     onOpenMenu: (CloudFile) -> Unit
 ) {
     val selected = file.id in state.selected
@@ -891,5 +926,9 @@ private fun GridItem(
             }
         }
         Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        // V30：类型标签（原版两处布局都用同一个 格式文本 控件）
+        if (showFileTypeLabel) {
+            file.fileType?.let { FileTypeBadge(it) }
+        }
     }
 }

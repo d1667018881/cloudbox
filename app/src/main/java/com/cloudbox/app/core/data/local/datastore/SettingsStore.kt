@@ -90,12 +90,12 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /**
      * 是否在文件图标处显示文件后缀标签。
      *
-     * 对齐原版 `show_file_type_label`（settings/customize_settings.lua
-     * 「格式开关」/「格式文本」）。默认关闭——原版也是让用户自己去开；
-     * 列表项本来就会显示完整文件名，后缀标签属于"更好看"而非"更必要"。
+     * 对齐原版 `show_file_type_label`（ty_core.lua:809 初始化为 **true**；
+     * settings/customize_settings.lua 的「格式开关」可关）。
+     * 默认**开启**——与账号按钮同理，原版是"默认给你看，不想要自己关"。
      */
     val showFileTypeLabel: Flow<Boolean> = context.settingsDataStore.data.map {
-        it[keyShowFileTypeLabel] ?: false
+        it[keyShowFileTypeLabel] ?: true
     }
 
     /**

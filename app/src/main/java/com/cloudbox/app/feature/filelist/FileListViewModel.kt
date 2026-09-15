@@ -2,6 +2,7 @@ package com.cloudbox.app.feature.filelist
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.model.CloudFile
 import com.cloudbox.app.core.domain.model.ShareInfo
 import com.cloudbox.app.core.domain.repository.DirectLinkRepository
@@ -87,6 +88,8 @@ enum class SortMode(val label: String) {
 @HiltViewModel
 class FileListViewModel @Inject constructor(
     val fileRepository: FileRepository,
+    /** V30：网盘页需要读取 show_file_type_label（是否显示类型标签） */
+    val settingsStore: SettingsStore,
     private val directLinkRepository: DirectLinkRepository,
     private val downloadRepository: DownloadRepository
 ) : ViewModel() {
