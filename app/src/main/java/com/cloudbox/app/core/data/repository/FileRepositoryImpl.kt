@@ -260,7 +260,8 @@ class FileRepositoryImpl @Inject constructor(
     override suspend fun getFileDesc(fileId: Long): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val body = api.getFileInfo(fileId = fileId).body?.string().orEmpty()
+                // Retrofit 的 body 是方法 body()，不是属性（项目其他处用 execute().body?.string()）
+                val body = api.getFileInfo(fileId = fileId).body()?.string().orEmpty()
                 val json = JSONObject(body)
                 if (json.optInt("zt", 0) != 1) return@runCatching ""
                 val info = json.opt("info")
