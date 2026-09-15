@@ -54,17 +54,26 @@ class AboutViewModel @Inject constructor() : ViewModel() {
 
     private fun fetchLatestTag(): String {
         val url = URL("https://api.github.com/repos/d1667018881/cloudbox/releases/latest")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 8_000
-            readTimeout = 8_000
-            setRequestProperty("Accept", "application/vnd.github+json")
+        // ⚠️ HttpURLConnection **不实现 Closeable**，所以不能用 `use { }`
+        //    （Kotlin 的 use 要求 Closeable/AutoCloseable，编译器会报
+        //    "Argument type mismatch: actual type is 'java.io.Closeable?'"）。
+        //    它自己的释放方式是 disconnect()，用 try/finally 保证调用。
+        val conn = runCatching {
+            (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+            }
+        }.getOrElse {
+            return "检查失败（网络不可达，不影响正常使用）"
         }
-        return runCatching {
-            conn.use { c ->
-                if (c.responseCode != 200) return@use "检查失败（HTTP ${c.responseCode}）"
-                val body = c.inputStream.bufferedReader().readText()
-                // 直接用 org.json 解析（Android 平台自带），避免为一个字段引入 Gson
+        return try {
+            if (conn.responseCode != 200) {
+                "检查失败（HTTP ${conn.responseCode}）"
+            } else {
+                val body = conn.inputStream.bufferedReader().readText()
+                // 直接用 org.json（Android 平台自带），避免为一个字段引入 Gson
                 val tag = org.json.JSONObject(body).optString("tag_name", "")
                 when {
                     tag.isBlank() -> "检查失败（没有可用的版本信息）"
@@ -72,8 +81,10 @@ class AboutViewModel @Inject constructor() : ViewModel() {
                     else -> "有新版本：$tag（当前 ${BuildConfig.VERSION_NAME}）"
                 }
             }
-        }.getOrElse {
+        } catch (e: Exception) {
             "检查失败（网络不可达，不影响正常使用）"
+        } finally {
+            runCatching { conn.disconnect() }
         }
     }
 
