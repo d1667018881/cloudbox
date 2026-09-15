@@ -2236,3 +2236,85 @@ api.getFileInfo(...).body()?.string()
 而 `okhttp3.Response.body` 是**属性**。
 项目里 `.execute().body?.string()` 能过是因为 `execute()` 返回 okhttp3.Response。
 两个同名不同形，极易混 —— 本地无 SDK 无法编译，只能靠 CI 兜住。
+
+---
+
+## 30. V30：v1.3.4.9 逆向 + 直链反爬修复 + 收藏夹更新检查
+
+### 30.1 版本链路
+
+```
+b545260 feat(V30):   直链 WebView 破反爬 + 收藏夹更新检查全链路 + 三项新设置
+8e4a6a9 fix(V30.1):  自动检查改回"启动判定 + 一次性任务"（对齐原版语义）
+484f6b7 feat(V30.2): 补文件类型标签渲染 + 修正默认值 true + 全量源码
+```
+
+CI：run 138 / 139 / 140 全部 **BUILD SUCCESSFUL**，产物发布为 **v0.1.138–140**。
+
+### 30.2 ⚠️ 直链域名新增混淆 JS 反爬（最重要的线上问题）
+
+从 v1.3.4.9 起，蓝奏云在**直链域名**上加了 `acw_sc__v2` 挑战页。
+cloudbox 原来的 `ensureDownloadable()` 只识别业务验证页（`down_r(`），
+遇到挑战页会**误判为真实文件** → 用户下载到一个 4KB 的 HTML。
+
+**实测证据**：同一会话连续请求直链 3 次，全部返回挑战页，
+`CookieJar` 始终拿不到 `acw_sc__v2`；换 UA、重试、加 Referer 均无效。
+
+**两种挑战页的区别**（容易混淆）：
+
+| | 分享页挑战 | 直链挑战（新） |
+|---|---|---|
+| 特征 | `var arg1='40位HEX'` + 固定 key XOR | `a0i`/`a0j` 字符串表 + 控制流平坦化 |
+| 能否静态解 | ✅ `AcwScV2.compute` 可算 | ❌ 自校验，**必须真跑 JS** |
+| 原版对策 | 直接算 | **WebView「带 header 重载」** |
+
+**修复**：新增 `DirectLinkWebViewBridge` —— 隐藏 WebView 加载挑战页，
+让系统 JS 引擎跑完脚本，从 `CookieManager` 取回 cookie 注入 OkHttp `CookieJar`。
+
+**两个已踩的坑（注释里都有）**：
+```kotlin
+// ❌ .also{} 作用在 suspendCancellableCoroutine 上会在 builder 返回后**同步**执行，
+//    等于在挑战脚本跑之前就 destroy 掉 WebView
+suspendCancellableCoroutine { ... }.also { it.destroy() }
+// ✅ 放进 finish()，在 resume 前销毁
+```
+```kotlin
+// ❌ probe.use{} 每个分支都是非局部 return → Kotlin 把整块推断成 Nothing
+//    与函数声明的 DirectLink 不符 → 编译失败
+// ✅ 每支显式 return@use <expr>
+```
+
+### 30.3 反编译器死锁（判断"慢"vs"卡死"的方法）
+
+v1.3.4.9 的 4 个大模块反编译时 5 个 worker 全部卡在 `futex_wait_queue`、
+CPU 0%、无输出文件 —— **不是慢，是 `walk` 的 `while pc < hi` 死循环自旋**。
+根因：`depth > 26` 的 FLAT 保险丝只在**递归**时增加 depth，
+`pc` 自旋不递归，保险丝永不触发。
+
+修复：加 `_spin_guard = (hi-lo)*4+64` 硬上限。
+**效果：49/49 模块 1.3 秒全部解出**（此前 4 个模块卡 50 分钟无果）。
+
+> **判断方法**：进程"卡住"和"很慢"完全不同。
+> 看 **CPU 占用 + 是否有增量产出**，不要看等了多久。
+> 多进程同时 0% CPU 且 wchan 全是 futex → 直接判定死锁。
+
+### 30.4 原版设置默认值的权威来源
+
+`ty_core.lua:600-860` 是 `if 设置.X == nil then 设置.X = 默认值` 的密集段落，
+**这是查默认值的唯一可信来源**，不要靠猜或靠 UI 文案推断。
+
+本次据此发现并修正：`show_file_type_label` 默认是 **true**（此前写成了 false）。
+
+### 30.5 原版设置项清单（未移植部分）
+
+| 键名 | 默认 | cloudbox 状态 |
+|---|---|---|
+| `show_share_button` | true | ⬜ 未移植 |
+| `show_bookmark_folder_button` | true | ⬜ 未移植 |
+| `show_close_button` | true | ⬜ 未移植 |
+| `show_desc_tag` | true | ⬜ 未移植 |
+| `show_donate_button` | false | ➖ 不适用（无捐赠渠道） |
+| `show_wallet_button` | true | ➖ 不适用（无会员体系） |
+| `show_system_app` | false | ➖ 不适用（非文件管理器） |
+
+未移植的功能模块及理由见 `/workspace/v1.3.4.9 逆向分析报告.md` §6。
