@@ -280,9 +280,22 @@ class DirectLinkRepositoryImpl @Inject constructor(
     /**
      * 探测直链是否可直接下载；若返回的是验证中间页，则二次解析出真实下载地址。
      *
-     * 中间页形态（2026-09 实测，https://developer2.lanrar.com/file/?A2VU…）：
-     *   页面含 down_r(el) 与两个参数：file='UzsHJFx1…'、sign='AzIFZQFk…'
-     *   向同目录 ajax.php POST {file, el, sign} → {"zt":1,"url":"真实下载地址"}
+     * **2026-09 v1.3.4.9 对照实测：直链域名会下发两种截然不同的中间页，必须都处理。**
+     *
+     * ┌ 形态 A：业务验证页（老形态，domain=developer2.lanrar.com）
+     * │   页面含 down_r(el) 与参数 file='…' / sign='…'
+     * │   → POST 同目录 ajax.php {file, el, sign} → {"zt":1,"url":"真实下载地址"}
+     * ├ 形态 B：acw 挑战页（新形态，domain=*.dmpdmp.com）
+     * │   页面形如 <html><script>var arg1='40位HEX';(function(a,c){…})(a0i,0x760bf)…
+     * │   ⚠️ 与分享页那种「纯 arg1 常量表」挑战不同：这里是一段**混淆 JS**，
+     * │      必须在真实 JS 引擎里跑完才会 Set-Cookie acw_sc__v2。
+     *       实测同一 session 连续请求 3 次仍返回挑战页 → 靠重试/换 UA 都过不去。
+     * │   → 原版 v1.3.4.9 的做法（home_func.lua:11875 起）：
+     * │     识别「var arg1=」后走 **WebView「带 header 重载」**，借系统 WebView
+     * │     执行 JS 拿到 challenge cookie，再回主进程继续下载。
+     * │   本实现同一思路：把挑战页丢给 [DirectLinkWebViewBridge]（WebView 执行），
+     * │   拿回 acw_sc__v2 写进 CookieJar，然后重试**同一条直链**。
+     * └ 形态 C：都不是 → 原样返回（真文件流）
      *
      * 只读前 1KB 判断，不下载正文；任何异常都回落原链（不阻塞解析）。
      */
@@ -305,10 +318,58 @@ class DirectLinkRepositoryImpl @Inject constructor(
             val n = input.read(buf, 0, buf.size)
             if (n <= 0) return@runCatching link
             val head = String(buf, 0, n, Charsets.UTF_8)
-            if (!head.contains("down_r(")) return@runCatching link
-            resolveVerifiedUrl(link.url, head)?.let { real -> link.copy(url = real) } ?: link
+
+            // ⚠️ 每个分支都必须 return@use（显式类型），否则 Kotlin 会把整块推断成
+            //    Nothing，导致 use{} 的返回值类型与函数声明的 DirectLink 不符而编译失败。
+            // 形态 A：业务验证页
+            if (head.contains("down_r(")) {
+                val real = resolveVerifiedUrl(link.url, head)
+                return@use if (real != null) link.copy(url = real) else link
+            }
+
+            // 形态 B：acw 挑战页 —— 必须真跑 JS 才能拿到 cookie
+            if (head.contains("var arg1=") || head.contains("acw_sc__v2")) {
+                val cookie = challengeCookieFor(link)
+                if (cookie != null) {
+                    putChallengeCookie(link.url, cookie)
+                    return@use link
+                }
+            }
+            return@use link
         }
     }.getOrDefault(link)
+
+    /**
+     * 让 WebView 执行挑战页 JS，取回 acw_sc__v2 的完整 `name=value` 串。
+     *
+     * 为什么必须借 WebView：挑战 JS 是自解密的混淆代码（a0i/a0j 字符串表 +
+     * 控制流平坦化），静态还原成本极高且作者随时可换；而系统 WebView 本身就是
+     * 合法 JS 引擎，直接跑一遍最稳。原版 v1.3.4.9 也是这么做的。
+     *
+     * 失败返回 null（不抛），调用方回落到原链 —— 宁可让用户看到一个 HTML 提示页，
+     * 也不要整个解析流程崩掉。
+     */
+    private fun challengeCookieFor(link: DirectLink): String? = runCatching {
+        DirectLinkWebViewBridge.acquireCookieSync(link.url, link.referer)
+    }.getOrNull()
+
+    /** 把挑战 cookie 写进共享 CookieJar（后续下载走同一个 OkHttp 实例即自动携带） */
+    private fun putChallengeCookie(url: String, cookie: String) {
+        val name = cookie.substringBefore('=')
+        val value = cookie.substringAfter('=', "")
+        if (name.isBlank() || value.isBlank()) return
+        val host = url.toHttpUrlOrNull()?.host ?: return
+        runCatching {
+            apiClient.cookieJar.putCookie(
+                okhttp3.Cookie.Builder()
+                    .name(name)
+                    .value(value)
+                    .domain(host)
+                    .path("/")
+                    .build()
+            )
+        }
+    }
 
     /** 验证中间页 → POST ajax.php 换真实下载地址 */
     private fun resolveVerifiedUrl(pageUrl: String, html: String): String? {

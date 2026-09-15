@@ -43,6 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.cloudbox.app.common.ClipboardLinkWatcher
+import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
 import com.cloudbox.app.feature.resolve.ResolveScreen
@@ -70,12 +71,18 @@ fun MainScreen(
     onShareConsumed: () -> Unit = {},
     clipboardWatcher: ClipboardLinkWatcher = hiltViewModel<MainViewModel>().clipboardWatcher,
     authRepository: AuthRepository = hiltViewModel<MainViewModel>().authRepository,
+    settingsStore: SettingsStore = hiltViewModel<MainViewModel>().settingsStore,
     searchViewModel: SearchViewModel = hiltViewModel()
 ) {
     var tab by remember { mutableIntStateOf(0) }
     val pendingLink by clipboardWatcher.pendingLink.collectAsState()
     // currentAccount 是 Flow（非 StateFlow），collectAsState 必须提供 initial
     val account by authRepository.currentAccount.collectAsState(initial = null)
+
+    // V30：读取界面显示设置。`collectAsState` 的 initial 用与原版一致的默认值
+    // （账号按钮默认显示、后缀标签默认隐藏），避免首帧闪一下再变。
+    val showAccountButton by settingsStore.showAccountButton.collectAsState(initial = true)
+    val showFileTypeLabel by settingsStore.showFileTypeLabel.collectAsState(initial = false)
 
     // Android 10+ 从其他 App 复制链接再切回本 App 时，系统回调不会触发，
     // 必须在每次回到前台时主动补查一次剪贴板（需求规格 9 节）
@@ -170,7 +177,12 @@ fun MainScreen(
                     onOpenRecycle = onOpenRecycle,
                     onOpenSettings = onOpenSettings,
                     onOpenAbout = onOpenAbout,
-                    onLogout = onLogout
+                    onLogout = onLogout,
+                    // V30：账号入口按钮开关（对齐原版 show_account_button）。
+                    // 关掉后"我的"页不显示账号切换入口——单账号用户没有切换需求，
+                    // 这块区域对他是纯噪音。
+                    showAccountButton = showAccountButton,
+                    showFileTypeLabel = showFileTypeLabel
                 )
             }
         }
@@ -185,13 +197,19 @@ private fun MeTab(
     onOpenRecycle: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAbout: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    /** V30：是否显示账号入口（原版 show_account_button） */
+    showAccountButton: Boolean = true,
+    /** V30：是否在条目上显示类型标签（原版 show_file_type_label） */
+    showFileTypeLabel: Boolean = false
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("当前账号：$accountName", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(16.dp))
+        if (showAccountButton) {
+            Text("当前账号：$accountName", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(16.dp))
+        }
         MeEntry("下载管理", onOpenDownload)
-        MeEntry("收藏夹", onOpenFavorites)
+        MeEntry("收藏夹" + if (showFileTypeLabel) "（文件夹可检查更新）" else "", onOpenFavorites)
         MeEntry("回收站", onOpenRecycle)
         MeEntry("设置", onOpenSettings)
         // 关于页（对齐原版 about.lua）：版本号 / 检查更新 / 更新日志

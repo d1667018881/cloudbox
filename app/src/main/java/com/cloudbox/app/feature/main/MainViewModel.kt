@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.common.ClipboardLinkWatcher
+import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.DirectLinkRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,8 @@ import kotlinx.coroutines.launch
 class MainViewModel @Inject constructor(
     val clipboardWatcher: ClipboardLinkWatcher,
     val authRepository: AuthRepository,
+    /** V30：主界面读取界面显示设置（show_account_button / show_file_type_label） */
+    val settingsStore: SettingsStore,
     private val directLinkRepository: DirectLinkRepository,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {

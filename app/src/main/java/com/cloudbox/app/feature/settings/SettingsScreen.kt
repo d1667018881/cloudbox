@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -293,6 +294,85 @@ fun SettingsScreen(
             }
             HorizontalDivider()
 
+            // ==================== 界面显示（对齐原版 v1.3.4.9 自定义设置页） ====================
+            SectionTitle("界面显示")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("显示文件后缀标签", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "在文件图标处叠加显示文件类型后缀",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.showFileTypeLabel,
+                    onCheckedChange = viewModel::saveShowFileTypeLabel
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("显示账号切换按钮", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "关闭后首页不再显示账号入口（单账号用户可关）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.showAccountButton,
+                    onCheckedChange = viewModel::saveShowAccountButton
+                )
+            }
+            HorizontalDivider()
+
+            // ==================== 收藏夹（对齐原版 v1.3.4.9 消息设置页） ====================
+            SectionTitle("收藏夹")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("自动检查收藏夹更新", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "定期检查收藏的文件夹是否有新文件，有更新会在收藏夹显示红点。" +
+                            "收藏的文件夹过多时检查会较慢，不建议设置过短的间隔。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.autoCheckFavoritesDays > 0,
+                    onCheckedChange = { on ->
+                        viewModel.saveAutoCheckFavoritesDays(if (on) DEFAULT_CHECK_DAYS else 0)
+                    }
+                )
+            }
+            if (state.autoCheckFavoritesDays > 0) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("检查间隔", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    // 原版档位：1 / 3 / 7 / 14 / 30 天
+                    CHECK_INTERVAL_DAYS.forEach { d ->
+                        FilterChip(
+                            selected = state.autoCheckFavoritesDays == d,
+                            onClick = { viewModel.saveAutoCheckFavoritesDays(d) },
+                            label = { Text("${d}天") },
+                            modifier = Modifier.padding(start = 6.dp)
+                        )
+                    }
+                }
+            }
+            HorizontalDivider()
+
             Spacer(Modifier.height(24.dp))
             Text("云匣 v0.1.0 · 仅供个人学习使用",
                 style = MaterialTheme.typography.bodySmall,
@@ -502,6 +582,12 @@ fun SettingsScreen(
         )
     }
 }
+
+/** 打开「自动检查收藏夹更新」时默认使用 7 天（原版档位之一，取中间值最不激进） */
+private const val DEFAULT_CHECK_DAYS = 7
+
+/** 原版 settings/message_settings.lua 的档位：1 / 3 / 7 / 14 / 30 天 */
+private val CHECK_INTERVAL_DAYS = listOf(1, 3, 7, 14, 30)
 
 @Composable
 private fun SectionTitle(text: String) {

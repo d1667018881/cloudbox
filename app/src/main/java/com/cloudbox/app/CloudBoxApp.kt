@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.data.remote.LanzouApiClient
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.DomainRepository
@@ -11,6 +12,7 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -29,6 +31,7 @@ class CloudBoxApp : Application(), Configuration.Provider {
     @Inject lateinit var apiClient: LanzouApiClient
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var domainRepository: DomainRepository
+    @Inject lateinit var settingsStore: SettingsStore
     @Inject lateinit var workerFactory: HiltWorkerFactory
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -97,6 +100,16 @@ class CloudBoxApp : Application(), Configuration.Provider {
             authRepository.ensureSession()
             // 启动时拉取远程域名配置（未配置远程 URL 时 refreshRemote 直接返回失败，静默忽略）
             domainRepository.refreshRemote()
+            // V30：对齐已保存的收藏夹自动检查设置。
+            // 周期任务本身会持久化，但卸装重装 / 清数据 / 系统清理都会让它消失
+            // 而设置仍在，所以启动时幂等地同步一次。
+            runCatching {
+                val days = settingsStore.autoCheckFavoritesDays.first()
+                com.cloudbox.app.feature.favorites.FavoriteUpdateCheckScheduler
+                    .syncFromSettings(this@CloudBoxApp, days)
+            }.onFailure {
+                Log.w("CloudBoxFavCheck", "自动检查调度同步失败：${it.message}")
+            }
         }
         // 自检日志：确认 Hilt 工厂已注入、且配置能被读取。
         //

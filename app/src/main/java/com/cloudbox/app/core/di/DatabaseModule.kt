@@ -27,6 +27,25 @@ private val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+/**
+ * v5 → v6：`favorite_shares` 增加 kind / pass / hasUpdate / lastCheckAt
+ * （对齐原版 v1.3.4.9 的「检查收藏文件夹更新」）。
+ *
+ * 同样是无损 ALTER TABLE。`kind` 默认 'file' 是**保守选择**：
+ * 升级前收藏的数据无法可靠区分文件夹/文件（旧表没存过这个信息），
+ * 默认成 'file' 只会导致「旧收藏暂时没有更新检查入口」——比猜成 'folder'
+ * 然后对一堆单文件链接跑更新检查（每次都会误报"有更新"）要好得多。
+ * 用户重新收藏一次即可自动修正类型。
+ */
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE favorite_shares ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'")
+        db.execSQL("ALTER TABLE favorite_shares ADD COLUMN pass TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE favorite_shares ADD COLUMN hasUpdate INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE favorite_shares ADD COLUMN lastCheckAt INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 /** Room 数据库提供者 */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -36,7 +55,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "cloudbox.db")
-            .addMigrations(MIGRATION_4_5)
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
             .fallbackToDestructiveMigration() // 其余 schema 变更直接重建；收藏夹已单独保护
             .build()
 }

@@ -197,10 +197,24 @@ class ResolveViewModel @Inject constructor(
         }
     }
 
-    /** 收藏分享链接 */
+    /**
+     * 收藏分享链接。
+     *
+     * V30（对齐 v1.3.4.9）：把「是不是文件夹」与提取码一并存进收藏。
+     * 原版用 `open_link_history[i].type` / `.pass` 区分，并且**只对 folder 型
+     * 收藏做更新检查**（favorites.lua:1126）—— 不记这两个字段的话，
+     * 收藏夹页的「检查收藏文件夹更新」永远是空的。
+     *
+     * 类型判定用 [isFolderShareUrl] 初筛；它可能误判（短链形态多变），
+     * 但收藏夹里的类型只影响「要不要给它做更新检查」，误判的代价是可接受且可纠正的
+     * （用户在解析页对同一链接重新收藏一次即可覆盖）。
+     */
     fun favorite(url: String, name: String) {
         viewModelScope.launch {
+            val kind = if (isFolderShareUrl(url)) "folder" else "file"
+            val pwd = _uiState.value.password
             shareRepository.addFavorite(url, name)
+            shareRepository.correctKind(url, kind, pwd)
             _uiState.update { it.copy(message = "已收藏") }
         }
     }

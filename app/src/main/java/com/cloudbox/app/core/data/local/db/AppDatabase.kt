@@ -19,7 +19,7 @@ import androidx.room.RoomDatabase
         DirectLinkEntity::class,
         FavoriteShareEntity::class
     ],
-    version = 5, // v5：favorite_shares 增加 pinned（置顶）字段
+    version = 6, // v5：favorite_shares 增加 pinned；v6：增加 kind/pass/hasUpdate/lastCheckAt
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

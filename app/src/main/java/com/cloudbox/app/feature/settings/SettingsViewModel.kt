@@ -36,6 +36,27 @@ data class SettingsUiState(
     val appLanguage: String = "system",
     /** 移动网络下载前提醒（默认开） */
     val warnMobileNetwork: Boolean = true,
+    /**
+     * V30：列表里显示文件类型标签（图片/视频/压缩包…）。
+     *
+     * 对齐原版 `show_file_type_label`。默认**关**：原版默认也是关，
+     * 且标签对已知扩展名的文件是冗余信息，只在用户明确想看时才占位。
+     */
+    val showFileTypeLabel: Boolean = false,
+    /**
+     * V30：是否显示账号入口按钮。
+     *
+     * 对齐原版 `show_account_button`。默认**开**：这是 App 的主要入口之一，
+     * 关掉它用户就没有直达账号中心的路径了，属于"用户主动关闭"型开关。
+     */
+    val showAccountButton: Boolean = true,
+    /**
+     * V30：收藏夹自动检查更新的间隔（天）。0 = 关闭。
+     *
+     * 对齐原版 `auto_check_favorites_time`（原版存的是字符串，
+     * 这里改为 Int 更好比较；存储层仍以字符串落盘以保持兼容）。
+     */
+    val autoCheckFavoritesDays: Int = 0,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
     val cookieExported: String? = null,
@@ -80,12 +101,18 @@ class SettingsViewModel @Inject constructor(
             val dark = settingsStore.darkMode.first()
             val lang = settingsStore.appLanguage.first()
             val warnMobile = settingsStore.warnMobileNetwork.first()
+            val showTypeLabel = settingsStore.showFileTypeLabel.first()
+            val showAccountBtn = settingsStore.showAccountButton.first()
+            val autoCheckDays = settingsStore.autoCheckFavoritesDays.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
                     spoofSuffixList = spoofList,
                     thirdPartyResolver = resolver, darkMode = dark,
-                    appLanguage = lang, warnMobileNetwork = warnMobile
+                    appLanguage = lang, warnMobileNetwork = warnMobile,
+                    showFileTypeLabel = showTypeLabel,
+                    showAccountButton = showAccountBtn,
+                    autoCheckFavoritesDays = autoCheckDays
                 )
             }
         }
@@ -166,6 +193,55 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setWarnMobileNetwork(enabled)
             _uiState.update { it.copy(warnMobileNetwork = enabled) }
+        }
+    }
+
+    // ==================== V30：界面显示 / 收藏夹自动检查 ====================
+
+    /**
+     * 是否在列表里显示文件类型标签。
+     *
+     * 这里显式弹一条提示而不是静默保存：这个开关影响的是**别的页面**的观感，
+     * 用户在设置页拨动开关后看不见任何变化，容易以为没生效而反复点。
+     */
+    fun saveShowFileTypeLabel(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setShowFileTypeLabel(enabled)
+            _uiState.update {
+                it.copy(showFileTypeLabel = enabled, message = if (enabled) "已显示文件类型标签" else "已隐藏文件类型标签")
+            }
+        }
+    }
+
+    /** 是否显示账号入口按钮 */
+    fun saveShowAccountButton(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setShowAccountButton(enabled)
+            _uiState.update { it.copy(showAccountButton = enabled) }
+        }
+    }
+
+    /**
+     * 收藏夹自动检查间隔（天），0 = 关闭。
+     *
+     * 只写"间隔"这一个值，不再单独存一个开关：开关状态由 `days > 0` 推导。
+     * 两个字段（enabled + days）来存同一件事，迟早会出现
+     * "开关是开的但天数是 0"这种自相矛盾的状态，不如从一开始就只留一个真值来源。
+     */
+    fun saveAutoCheckFavoritesDays(days: Int) {
+        viewModelScope.launch {
+            val safe = days.coerceAtLeast(0)
+            settingsStore.setAutoCheckFavoritesDays(safe)
+            // 设置落盘后立刻同步调度状态：开启/关闭/改间隔都走同一个入口，
+            // 避免出现"改了间隔但旧任务还在按旧间隔跑"的分叉状态。
+            com.cloudbox.app.feature.favorites.FavoriteUpdateCheckScheduler
+                .sync(context.applicationContext, safe)
+            _uiState.update {
+                it.copy(
+                    autoCheckFavoritesDays = safe,
+                    message = if (safe > 0) "已开启收藏夹自动检查（每 $safe 天）" else "已关闭收藏夹自动检查"
+                )
+            }
         }
     }
 

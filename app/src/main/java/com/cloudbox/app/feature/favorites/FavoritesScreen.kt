@@ -1,6 +1,7 @@
 package com.cloudbox.app.feature.favorites
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,12 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -51,11 +54,17 @@ import com.cloudbox.app.core.domain.model.FavoriteShare
 /**
  * 收藏夹：收藏的分享链接列表（需求规格 6 节）。
  *
- * 本轮补齐（对齐原版 `favorites.lua`）：
+ * 对齐原版 `favorites.lua`：
  * - **编辑**：改名称与备注
  * - **置顶**：置顶项恒排列表最前
  * - **复制链接**：一键复制分享地址
  * - 删除、解析沿用原有能力
+ *
+ * V30 新增（对齐 v1.3.4.9）：
+ * - **检查收藏文件夹更新**：工具栏「刷新」按钮 + 进度显示
+ *   （原版 favorites.lua:1206 更新按钮，tooltip「检查收藏文件夹更新」）
+ * - **更新红点**：检测到变化的文件夹在标题后显示红点
+ *   （原版 `open_link_history[i].update`）
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,8 +73,8 @@ fun FavoritesScreen(
     onOpenShare: (String) -> Unit,
     viewModel: FavoritesViewModel = hiltViewModel()
 ) {
-    val favorites by viewModel.favorites.collectAsState()
-    val message by viewModel.message.collectAsState()
+    val state by viewModel.state.collectAsState()
+    val favorites = state.favorites
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -76,8 +85,8 @@ fun FavoritesScreen(
     // 删除二次确认
     var deleteTarget by remember { mutableStateOf<FavoriteShare?>(null) }
 
-    LaunchedEffect(message) {
-        message?.let {
+    LaunchedEffect(state.message) {
+        state.message?.let {
             snackbar.showSnackbar(it)
             viewModel.dismissMessage()
         }
@@ -118,6 +127,26 @@ fun FavoritesScreen(
                 title = { Text("收藏夹") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+                },
+                actions = {
+                    // 原版：检查收藏文件夹更新（favorites.lua:1206 更新按钮）
+                    if (state.checking) {
+                        // 进度：原版用 Ticker 每秒刷新「正在检查收藏文件夹更新」
+                        Text(
+                            "${state.checkDone}/${state.checkTotal}",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.size(12.dp))
+                    } else {
+                        IconButton(onClick = { viewModel.checkFolderUpdates() }) {
+                            Icon(Icons.Filled.Refresh, "检查收藏文件夹更新")
+                        }
+                    }
                 }
             )
         }
@@ -137,14 +166,40 @@ fun FavoritesScreen(
                 )
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                items(favorites, key = { it.shareUrl }) { fav ->
-                    FavoriteRow(
-                        fav = fav,
-                        onOpen = { onOpenShare(fav.shareUrl) },
-                        onMore = { menuTarget = fav }
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                // 检查进度条（原版「正在检查收藏文件夹更新」+ 批量进度条）
+                if (state.checking) {
+                    Text(
+                        if (state.checkCurrent.isBlank()) {
+                            "正在检查收藏文件夹更新…"
+                        } else {
+                            "正在检查：${state.checkCurrent}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                     )
-                    HorizontalDivider()
+                    if (state.checkTotal > 0) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { state.checkDone.toFloat() / state.checkTotal },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        )
+                    }
+                    HorizontalDivider(Modifier.padding(top = 6.dp))
+                }
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(favorites, key = { it.shareUrl }) { fav ->
+                        FavoriteRow(
+                            fav = fav,
+                            onOpen = {
+                                // 点开即清红点（原版 favorites.lua fn20：update = false）
+                                viewModel.clearUpdateFlag(fav)
+                                onOpenShare(fav.shareUrl)
+                            },
+                            onMore = { menuTarget = fav }
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }
@@ -175,6 +230,14 @@ fun FavoritesScreen(
                         viewModel.notify("已复制链接")
                     }
                 )
+                // 原版只给文件夹型收藏提供「更新」入口（favorites.lua:1126）
+                if (fav.isFolder) {
+                    DropdownMenuItem(
+                        text = { Text("检查此文件夹更新") },
+                        leadingIcon = { Icon(Icons.Filled.Refresh, null) },
+                        onClick = { menuTarget = null; viewModel.checkFolderUpdates() }
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("去解析") },
                     onClick = { menuTarget = null; onOpenShare(fav.shareUrl) }
@@ -227,6 +290,23 @@ private fun FavoriteRow(
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1
                 )
+                // 更新红点（原版 open_link_history[i].update）
+                if (fav.hasUpdate) {
+                    Spacer(Modifier.size(6.dp))
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .background(MaterialTheme.colorScheme.error, CircleShape)
+                    )
+                }
+                if (fav.isFolder) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        "文件夹",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Text(
                 fav.shareUrl,

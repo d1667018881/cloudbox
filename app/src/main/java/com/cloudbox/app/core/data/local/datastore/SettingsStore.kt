@@ -31,6 +31,12 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private val keyLanguage = stringPreferencesKey("app_language") // system / zh / en
     private val keyWarnMobileNetwork = booleanPreferencesKey("warn_mobile_network")
 
+    // ---- V30（对齐原版 v1.3.4.9 自定义设置页 / 消息设置页） ----
+    private val keyShowFileTypeLabel = booleanPreferencesKey("show_file_type_label")
+    private val keyShowAccountButton = booleanPreferencesKey("show_account_button")
+    /** 收藏夹自动检查间隔（天，0=关闭）。用 String 存 Int，见字段注释 */
+    private val keyAutoCheckDays = stringPreferencesKey("auto_check_favorites_time")
+
     /** 当前 UA：未自定义时返回默认桌面 UA（伪装关键） */
     val userAgent: Flow<String> = context.settingsDataStore.data.map {
         it[keyUserAgent] ?: AppConstants.DESKTOP_UA
@@ -76,6 +82,54 @@ class SettingsStore @Inject constructor(private val context: Context) {
     val warnMobileNetwork: Flow<Boolean> = context.settingsDataStore.data.map {
         it[keyWarnMobileNetwork] ?: true
     }
+
+    // ==================== V30 新增（对齐原版 v1.3.4.9 自定义设置页） ====================
+
+    /**
+     * 是否在文件图标处显示文件后缀标签。
+     *
+     * 对齐原版 `show_file_type_label`（settings/customize_settings.lua
+     * 「格式开关」/「格式文本」）。默认关闭——原版也是让用户自己去开；
+     * 列表项本来就会显示完整文件名，后缀标签属于"更好看"而非"更必要"。
+     */
+    val showFileTypeLabel: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyShowFileTypeLabel] ?: false
+    }
+
+    /**
+     * 是否显示账号入口按钮。
+     *
+     * 对齐原版 `show_account_button`（settings/customize_settings.lua
+     * 「账号开关」/「账号计数」）。默认开启——不多账号切换的用户会关掉它。
+     */
+    val showAccountButton: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyShowAccountButton] ?: true
+    }
+
+    /**
+     * 检查收藏文件夹更新的间隔（天）。
+     *
+     * 对齐原版 `auto_check_favorites` / `auto_check_favorites_time`
+     * （settings/message_settings.lua：开关 + 1/3/7/14/30 天档位，
+     * 文案「打开开关，"启动应用日期"与"上次检查日期"的间隔超过设定值后，
+     * 将触发自动检查」）。
+     *
+     * 默认 **0 = 不自动检查**：后台定时抓别人网盘属于会消耗用户流量的行为，
+     * 必须由用户显式开启。原版的默认值也是关。
+     */
+    val autoCheckFavoritesDays: Flow<Int> = context.settingsDataStore.data.map {
+        // 用 string 存 Int，避免 preferencesDataStore 对 int key 的默认值歧义
+        it[keyAutoCheckDays]?.toIntOrNull() ?: 0
+    }
+
+    suspend fun setShowFileTypeLabel(enabled: Boolean) =
+        edit { p -> p[keyShowFileTypeLabel] = enabled }
+
+    suspend fun setShowAccountButton(enabled: Boolean) =
+        edit { p -> p[keyShowAccountButton] = enabled }
+
+    suspend fun setAutoCheckFavoritesDays(days: Int) =
+        edit { p -> p[keyAutoCheckDays] = days.coerceIn(0, 30).toString() }
 
     // 注：曾经有过 preferWebUpload（上传通道开关），2026-09-09 移除。
     // 上传一律走 App 原生直传——原版 App 就是这么做的，设置页的「上传通道自检」
