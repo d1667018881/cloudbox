@@ -94,6 +94,8 @@ fun FileListScreen(
     // V30：文件类型标签开关（对齐原版 show_file_type_label，默认开）
     val showFileTypeLabel by viewModel.settingsStore.showFileTypeLabel
         .collectAsState(initial = true)
+    // V31：自动加载剩余内容（对齐原版 auto_load「自动加载页面剩余内容」）
+    val autoLoad by viewModel.settingsStore.autoLoad.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadProbeResult by uploadViewModel.probeResult.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
@@ -442,8 +444,9 @@ fun FileListScreen(
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
                             GridItem(file, state, viewModel, showFileTypeLabel) { menuFile = it }
                         }
+                        // V31：列表加载到底时自动请求下一页（对齐原版「自动加载页面剩余内容」）
                         if (state.hasMore) {
-                            item { LoadMoreButton(viewModel) }
+                            item { AutoLoadMoreRow(viewModel, state, autoLoad) }
                         }
                     }
                 } else {
@@ -452,13 +455,10 @@ fun FileListScreen(
                             ListItem(file, state, viewModel, showFileTypeLabel) { menuFile = it }
                             HorizontalDivider()
                         }
+                        // V31：同上。原版没有"加载更多"按钮，滚动到底自动续拉；
+                        // "已全部加载"的文案也一并去掉 —— 用户不需要被告知"没有了"。
                         if (state.hasMore) {
-                            item { LoadMoreButton(viewModel) }
-                        } else if (state.files.isNotEmpty()) {
-                            item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                Text("已全部加载", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            } }
+                            item { AutoLoadMoreRow(viewModel, state, autoLoad) }
                         }
                     }
                 }
@@ -794,10 +794,51 @@ private fun MenuAction(label: String, danger: Boolean = false, onClick: () -> Un
     }
 }
 
+/**
+ * 滚动到底自动续拉下一页（V31）。
+ *
+ * ## 为什么去掉"加载更多"按钮
+ *
+ * 旧实现底部是个「加载更多」按钮 + 「已全部加载」文字。用户反馈：
+ * 每个文件夹底部都挂着"加载更多"，点进去却没有内容 —— 这两个问题同源。
+ *
+ * 根因在 `hasMore` 判错（见 `FileListResponse.hasMore` 的注释）：
+ * 它依赖 `info` 字段，而那个字段在最后一页依然是 1，于是永远为 true。
+ * 按钮就一直挂着，点一下拉到空页，按钮还在。
+ *
+ * 修掉判据之后，这里顺带对齐原版交互：原版**根本没有**"加载更多"按钮，
+ * 而是**滚动到底自动加载**（`设置.auto_load` 开关名叫
+ * 「自动加载页面剩余内容」，默认开，见 action_settings.lua:158）。
+ * 手动按钮在多一屏文件的情况下纯属多余动作。
+ *
+ * ## 为什么用 LaunchedEffect 而不是监听滚动位置
+ *
+ * 这一项只有在**已经滚动到它**的时候才会被 Compose 组合出来（LazyColumn
+ * 是懒加载的），所以"这个 item 被组合"本身就等价于"用户看到了列表底部"。
+ * 比手动算 `lastVisibleItemIndex` 更简单，也不会漏掉"一屏没装满但仍需加载
+ * 下一页"的情况。
+ *
+ * `loadingMore` 时只显示进度指示、不再触发请求 —— 这就是防重入闸门，
+ * 不需要额外加锁。
+ *
+ * @param autoLoad 关掉时只显示进度条、不自动请求（用户在设置页明确表达了
+ *                 "不要预读"，此时保留手动下拉刷新作为唯一入口）
+ */
 @Composable
-private fun LoadMoreButton(viewModel: FileListViewModel) {
-    Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
-        TextButton(onClick = viewModel::loadMore) { Text("加载更多") }
+private fun AutoLoadMoreRow(
+    viewModel: FileListViewModel,
+    state: FileListUiState,
+    autoLoad: Boolean
+) {
+    LaunchedEffect(state.displayFiles.size, state.hasMore, autoLoad) {
+        if (autoLoad && !state.loadingMore) viewModel.loadMore()
+    }
+    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+        // 仅"正在加载"时显示指示器。加载完成后这一行空白，
+        // 不会在列表底部留下任何文字 —— 这正是用户要求的效果。
+        if (state.loadingMore) {
+            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+        }
     }
 }
 

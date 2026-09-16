@@ -53,8 +53,32 @@ data class FileListResponse(
             )
         }
 
-    /** 是否还有下一页：只有 info 是数字且 != 0 才算 true（字符串形态一律 false，防死循环） */
-    val hasMore: Boolean get() = (info as? Number)?.toInt()?.let { it != 0 } ?: false
+    /**
+     * 是否还有下一页。
+     *
+     * ⚠️ V31 修复：**不能用 `info` 字段判断**。
+     *
+     * 旧实现写的是 `(info as? Number)?.toInt()?.let { it != 0 }`。但 `info` 在
+     * task=5 的响应里语义是"本页条数/状态"，**不是**"还有没有下一页"：
+     * 它在最后一页依然是 1，于是 `hasMore` 永远为 true ——
+     * 这正是用户看到"每个文件夹底部都有加载更多、点进去却没东西"的原因。
+     *
+     * 原版（home.lua:11185 / 11758）从来不看 `info`，而是用**页大小**判断：
+     * ```lua
+     * if #a1.text < 18 then 无更多 = true end
+     * ```
+     * 蓝奏云 task=5 每页固定返回 18 条，"本页不足 18 条"等价于"这是最后一页"。
+     * 空目录/超末页返回 `text="no file"`，`items` 为空列表，同样 < 18，判定成立。
+     *
+     * 这个判据比 `info` 可靠得多：它是服务端分页机制的直接推论，
+     * 不依赖某个含义模糊的字段。
+     */
+    val hasMore: Boolean get() = items.size >= PAGE_SIZE
+
+    companion object {
+        /** task=5 每页固定条数（原版硬编码的 18，见 home.lua:11185） */
+        const val PAGE_SIZE = 18
+    }
 }
 
 data class RemoteFile(

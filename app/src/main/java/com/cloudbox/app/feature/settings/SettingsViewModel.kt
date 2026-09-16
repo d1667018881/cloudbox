@@ -57,6 +57,14 @@ data class SettingsUiState(
      * 这里改为 Int 更好比较；存储层仍以字符串落盘以保持兼容）。
      */
     val autoCheckFavoritesDays: Int = 0,
+    /**
+     * V31：自动加载列表剩余内容（滚动到底自动续拉下一页）。
+     *
+     * 对齐原版 `auto_load`「自动加载页面剩余内容」。**默认开**
+     * （原版默认关，这里有意不同 —— 我们已去掉"加载更多"按钮，
+     * 默认关会让用户无法加载第二页，详见 SettingsStore.autoLoad 注释）。
+     */
+    val autoLoad: Boolean = true,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
     val cookieExported: String? = null,
@@ -104,6 +112,7 @@ class SettingsViewModel @Inject constructor(
             val showTypeLabel = settingsStore.showFileTypeLabel.first()
             val showAccountBtn = settingsStore.showAccountButton.first()
             val autoCheckDays = settingsStore.autoCheckFavoritesDays.first()
+            val autoLoadPref = settingsStore.autoLoad.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
@@ -112,7 +121,8 @@ class SettingsViewModel @Inject constructor(
                     appLanguage = lang, warnMobileNetwork = warnMobile,
                     showFileTypeLabel = showTypeLabel,
                     showAccountButton = showAccountBtn,
-                    autoCheckFavoritesDays = autoCheckDays
+                    autoCheckFavoritesDays = autoCheckDays,
+                    autoLoad = autoLoadPref
                 )
             }
         }
@@ -218,6 +228,24 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setShowAccountButton(enabled)
             _uiState.update { it.copy(showAccountButton = enabled) }
+        }
+    }
+
+    /**
+     * 自动加载列表剩余内容（对齐原版 auto_load）。
+     *
+     * 关掉后列表滚动到底不再自动续拉，需要下拉刷新才能看到更新 ——
+     * 适合"流量敏感、不想让 App 预读后面几页"的用户。
+     */
+    fun saveAutoLoad(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setAutoLoad(enabled)
+            _uiState.update {
+                it.copy(
+                    autoLoad = enabled,
+                    message = if (enabled) "已开启自动加载剩余内容" else "已关闭自动加载剩余内容"
+                )
+            }
         }
     }
 

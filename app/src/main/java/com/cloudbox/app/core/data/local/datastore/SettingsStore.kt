@@ -39,6 +39,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /** 上次自动检查时间（epoch millis）。用 String 存 Long，保持与其他数值项一致 */
     private val keyLastAutoCheckTime = stringPreferencesKey("last_auto_check_time")
 
+    // ---- V31（对齐原版「自动加载页面剩余内容」） ----
+    private val keyAutoLoad = booleanPreferencesKey("auto_load")
+
     /** 当前 UA：未自定义时返回默认桌面 UA（伪装关键） */
     val userAgent: Flow<String> = context.settingsDataStore.data.map {
         it[keyUserAgent] ?: AppConstants.DESKTOP_UA
@@ -150,6 +153,27 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setLastAutoCheckTime(millis: Long) =
         edit { p -> p[keyLastAutoCheckTime] = millis.toString() }
+
+    /**
+     * 自动加载列表剩余内容（滚动到底自动续拉下一页）。
+     *
+     * 对齐原版 `auto_load`（ty_core.lua:754 初始化为 **false**；
+     * settings/action_settings.lua 的开关文案是「自动加载页面剩余内容」）。
+     *
+     * ⚠️ 原版默认是 **关**。我们这里默认**开**，这是有意偏离，理由：
+     * 原版关掉它时，列表底部仍然会挂一个"点击加载下一页"的触发区；
+     * 我们这一版已经把底部按钮彻底去掉（用户明确要求不要那行字），
+     * 若再默认关闭自动加载，用户就**没有办法**加载第二页了 —— 功能死锁。
+     * 所以：默认开，且关掉后仍有"滚动到底自动加载"作为唯一路径。
+     *
+     * 保留这个开关是因为原版界面里有它，用户可能有"省流量、不要预读"的诉求。
+     */
+    val autoLoad: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyAutoLoad] ?: true
+    }
+
+    suspend fun setAutoLoad(enabled: Boolean) =
+        edit { p -> p[keyAutoLoad] = enabled }
 
     // 注：曾经有过 preferWebUpload（上传通道开关），2026-09-09 移除。
     // 上传一律走 App 原生直传——原版 App 就是这么做的，设置页的「上传通道自检」

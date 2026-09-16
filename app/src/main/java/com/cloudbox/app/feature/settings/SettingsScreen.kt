@@ -330,6 +330,23 @@ fun SettingsScreen(
                     onCheckedChange = viewModel::saveShowAccountButton
                 )
             }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("自动加载页面剩余内容", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "列表滚动到底部时自动加载下一页，无需手动点击",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.autoLoad,
+                    onCheckedChange = viewModel::saveAutoLoad
+                )
+            }
             HorizontalDivider()
 
             // ==================== 收藏夹（对齐原版 v1.3.4.9 消息设置页） ====================
