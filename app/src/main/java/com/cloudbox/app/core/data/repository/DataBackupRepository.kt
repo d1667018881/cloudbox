@@ -251,7 +251,12 @@ class DataBackupRepository @Inject constructor(
      * 不属于"缓存"，不能在"清缓存"里被删掉。
      */
     fun cacheSizeBytes(): Long = runCatching {
-        context.cacheDir?.walkBottomUp()?.filter { it.isFile }?.sumOf { it.length() }
+        // 注意 `?.` 链会把整个表达式变成可空（`walkBottomUp()` 为 null 时
+        // `sumOf` 根本不会调用，结果是 null 而不是 0），而函数签名要 Long。
+        // 所以这里显式走 `orEmpty()` 把序列兜成空序列，sumOf 才能返回 0L。
+        context.cacheDir?.walkBottomUp().orEmpty()
+            .filter { it.isFile }
+            .sumOf { it.length() }
     }.getOrDefault(0L)
 
     /** 清空应用缓存目录。返回清理出的字节数 */
