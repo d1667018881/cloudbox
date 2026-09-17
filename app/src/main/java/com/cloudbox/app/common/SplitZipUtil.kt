@@ -57,31 +57,4 @@ object SplitZipUtil {
         }
         return volumes
     }
-
-    /** 判断一组文件是否为分卷（.zip/.z01/.z02 或 .001/.002 兼容） */
-    fun isVolume(file: File): Boolean {
-        val name = file.name.lowercase()
-        return name.endsWith(".zip") || Regex(""".*\.z\d{2}$""").containsMatchIn(name)
-    }
-
-    /** 合并分卷：把 .z01/.z02... 追加到 .zip（标准 zip 分卷合并方式） */
-    fun mergeVolumes(volumes: List<File>, output: File) {
-        require(volumes.isNotEmpty()) { "分卷列表为空" }
-        val sorted = volumes.sortedBy { volumeOrder(it) }
-        output.outputStream().use { out ->
-            for (v in sorted) {
-                v.inputStream().use { it.copyTo(out) }
-            }
-        }
-    }
-
-    /** 分卷顺序（#29 修复）：.zip 是含中央目录的【最后】一段，排在 z 序号之后——
-     *  旧实现把 .zip 排第 0 位，一旦合并接线就是数据损坏级 bug */
-    private fun volumeOrder(file: File): Int {
-        val name = file.name.lowercase()
-        if (name.endsWith(".zip")) return Int.MAX_VALUE
-        Regex(""".*\.z(\d{2})$""").find(name)?.let { return it.groupValues[1].toInt() }
-        Regex(""".*\.(\d{3})$""").find(name)?.let { return it.groupValues[1].toInt() }
-        return 0
-    }
 }

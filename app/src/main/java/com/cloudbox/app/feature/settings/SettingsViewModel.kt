@@ -67,7 +67,6 @@ data class SettingsUiState(
     val autoLoad: Boolean = true,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
-    val cookieExported: String? = null,
     /** 上传自检进行中 */
     val probing: Boolean = false,
     /** 上传自检结果（含服务端原始回包），非空时 UI 弹出详情 */

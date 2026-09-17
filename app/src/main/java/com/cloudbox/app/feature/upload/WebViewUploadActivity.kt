@@ -190,6 +190,5 @@ class WebViewUploadActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_FOLDER_ID = "folder_id"
-        const val RESULT_NEED_REFRESH = 2001
     }
 }

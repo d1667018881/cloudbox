@@ -102,7 +102,4 @@ interface UploadRepository {
 
     /** 大文件分卷上传：先切卷再逐个上传，卷间加 1-3s 随机延时防风控 */
     suspend fun uploadSplit(file: File, folderId: Long): List<UploadResult>
-
-    /** 批量上传队列（WorkManager 用） */
-    suspend fun uploadBatch(files: List<File>, folderId: Long, spoofSuffix: Boolean): List<UploadResult>
 }

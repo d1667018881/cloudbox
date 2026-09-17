@@ -13,7 +13,4 @@ interface DirectLinkDao {
 
     @Query("SELECT * FROM direct_link_cache WHERE shareUrl=:shareUrl AND resolvedAt > :after")
     suspend fun getFresh(shareUrl: String, after: Long): DirectLinkEntity?
-
-    @Query("DELETE FROM direct_link_cache WHERE resolvedAt < :before")
-    suspend fun cleanExpired(before: Long)
 }

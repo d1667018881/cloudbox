@@ -1,7 +1,6 @@
 package com.cloudbox.app.core.domain.repository
 
 import com.cloudbox.app.core.domain.model.CloudFile
-import kotlinx.coroutines.flow.Flow
 
 /** 搜索仓库：Room 索引 + 后台同步 */
 interface SearchRepository {

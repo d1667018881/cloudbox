@@ -82,8 +82,6 @@ class AccountSecureStore @Inject constructor(
 
     fun loadPassword(uid: String): String? = prefs.getString("$PREFIX_PWD$uid", null)
 
-    fun removePassword(uid: String) = prefs.edit().remove("$PREFIX_PWD$uid").apply()
-
     // ---------- Cookie ----------
 
     /** 保存账号的全部 Cookie（Set-Cookie 文本，每行一条） */

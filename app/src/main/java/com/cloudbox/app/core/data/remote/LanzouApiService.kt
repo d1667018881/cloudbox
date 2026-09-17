@@ -1,6 +1,5 @@
 package com.cloudbox.app.core.data.remote
 
-import com.cloudbox.app.core.data.dto.AjaxFileResponse
 import com.cloudbox.app.core.data.dto.CommonResponse
 import com.cloudbox.app.core.data.dto.DirListResponse
 import com.cloudbox.app.core.data.dto.FileListResponse
@@ -328,34 +327,6 @@ interface LanzouApiService {
         @Field("shows") shows: Int,
         @Field("shownames") shownames: String
     ): CommonResponse
-
-    // ==================== 直链解析 ====================
-
-    /**
-     * 直链解析（现行端点 ajaxfile.php，2026-09 实测可用）。
-     *
-     * 旧端点 ajaxm.php + 参数 {action, sign, file_id, p, kd, ves} 已随页面改版废弃：
-     * 新版单文件页把签名藏在 iframe（/fn?…）的 `var wp_sign` 里，fid 用 URL 查询传递，
-     * 并新增 websignkey / signs / websign 三个校验字段。继续打 ajaxm.php 必然拿不到直链。
-     *
-     * 实测请求：POST /ajaxfile.php?file=96810913
-     *   action=downprocess&websignkey=asXy&signs=asXy&sign=<wp_sign>&websign=&kd=1&ves=1
-     * 成功响应：{"zt":1,"dom":"https://developer2.lanrar.com","url":"?A2VUags6…","inf":0}
-     * 直链拼接：dom + "/file/" + url
-     */
-    @FormUrlEncoded
-    @POST("ajaxfile.php")
-    suspend fun downProcess(
-        @Query("file") fileId: String,
-        @Field("action") action: String = "downprocess",
-        @Field("websignkey") websignkey: String = "",
-        @Field("signs") signs: String = "",
-        @Field("sign") sign: String,
-        @Field("websign") websign: String = "",
-        @Field("kd") kd: Int = 1,
-        @Field("ves") ves: Int = 1,
-        @Field("p") pwd: String = ""
-    ): AjaxFileResponse
 
     /** 通用 GET（分享页/iframe 页/重定向探测），不经过 Retrofit 转换器 */
     @Streaming

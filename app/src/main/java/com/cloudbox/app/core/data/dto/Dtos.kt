@@ -47,7 +47,6 @@ data class FileListResponse(
                 nameAll = it.str("name_all").orEmpty(),
                 time = it.str("time"),
                 size = it.str("size"),
-                downs = it.str("downs"),
                 onof = it.str("onof"),
                 isDes = it.str("is_des")
             )
@@ -86,7 +85,6 @@ data class RemoteFile(
     val nameAll: String,
     val time: String?,
     val size: String?,
-    val downs: String?,
     val onof: String?,
     val isDes: String?
 )
@@ -196,38 +194,31 @@ data class UploadResponse(
     @SerializedName("info") val info: String? = null
 )
 
-data class UploadTextDto(
-    @SerializedName("id") val id: String? = null
-)
-
-/** 直链解析响应（旧端点 ajaxm.php，已下线，保留兼容）：
- *  {"zt":1, "dom":域名, "url":路径, "inf":文件名} */
-data class AjaxmResponse(
-    @SerializedName("zt") val zt: Int,
-    @SerializedName("dom") val dom: String? = null,
-    @SerializedName("url") val url: String? = null,
-    @SerializedName("inf") val inf: String? = null
-)
-
-/**
- * 直链解析响应（现行端点 ajaxfile.php，2026-09 实测）。
- * 实测样本：{"zt":1,"dom":"https:\/\/developer2.lanrar.com","url":"?A2VUags6…","inf":0}
+/*
+ * ════════════════════════════════════════════════════════════════════
+ * 直链解析响应契约（V32 说明 —— 这里只有文档，没有 data class）
+ * ════════════════════════════════════════════════════════════════════
  *
- * 与旧文档两处不同：
- * 1) url 以 '?' 开头（不再是 '/xxx.html'），拼接规则仍是 dom + "/file/" + url；
- * 2) inf 正常时是**数字 0** 而不是文件名 —— 用 Any? 承接避免 Gson 类型不符直接抛异常，
- *    真实文件名改从分享页 <title> 提取（见 DirectLinkRepositoryImpl）。
+ * 为什么不留类型声明：直链解析必须带**每请求动态的 Referer**（见
+ * DirectLinkRepositoryImpl 第 5 步），Retrofit 的静态接口声明表达不了，
+ * 所以实际实现用 OkHttp + FormBody 直发、用 org.json.JSONObject 解析。
+ * 于是 AjaxmResponse / AjaxFileResponse 这两个 data class 从未被实例化，
+ * 属于原型期残留，已删除。下面的字段契约保留给未来排障参考。
+ *
+ * ── 现行端点：ajaxfile.php（2026-09 实测）─────────────────────────
+ * 请求：POST /ajaxfile.php?file=<fid>
+ *   action=downprocess&websignkey=<ajaxdata>&signs=<ajaxdata>
+ *   &sign=<wp_sign>&websign=&kd=<kdns>&ves=1[&p=<提取码>]
+ * 响应：{"zt":1,"dom":"https://developer2.lanrar.com","url":"?A2VUags6…","inf":0}
+ * 直链拼接：dom + "/file/" + url   ← url 以 '?' 开头，不可去前导字符
+ * 注意 inf 正常时是**数字 0** 而非文件名；真实文件名从分享页 <title> 提取。
+ *
+ * ── 旧端点：ajaxm.php（已下线）────────────────────────────────────
+ * 响应：{"zt":1,"dom":"…","url":"/xxx.html","inf":"<文件名>"}
+ * 蓝奏云历史上在 ajaxfile / ajaxm 之间来回切换过，若主端点失效需要临时
+ * 回退，可参照上面两份字段结构。取值一律用 optXxx 并给默认值 ——
+ * inf 的类型在两个端点间就不一致（数字 vs 字符串）。
  */
-data class AjaxFileResponse(
-    @SerializedName("zt") val zt: Int,
-    @SerializedName("dom") val dom: String? = null,
-    @SerializedName("url") val url: String? = null,
-    @SerializedName("inf") val inf: Any? = null
-) {
-    /** inf 为字符串且非空、非纯数字时才算有效文件名 */
-    val infAsName: String?
-        get() = (inf as? String)?.takeIf { it.isNotBlank() && it.toLongOrNull() == null }
-}
 
 /**
  * 分享页文件夹内文件列表（filemoreajax.php）。
@@ -250,9 +241,7 @@ data class ShareFileListResponse(
                 id = it.str("id"),
                 nameAll = it.str("name_all"),
                 size = it.str("size"),
-                time = it.str("time"),
-                icon = it.str("icon"),
-                duan = it.str("duan")
+                time = it.str("time")
             )
         }
 
@@ -271,7 +260,5 @@ data class ShareFileItem(
     val id: String? = null,
     val nameAll: String? = null,
     val size: String? = null,
-    val time: String? = null,
-    val icon: String? = null,
-    val duan: String? = null
+    val time: String? = null
 )

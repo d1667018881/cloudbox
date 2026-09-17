@@ -195,28 +195,6 @@ class UploadRepositoryImpl @Inject constructor(
             }
         }
 
-    override suspend fun uploadBatch(files: List<File>, folderId: Long, spoofSuffix: Boolean): List<UploadResult> =
-        withContext(Dispatchers.IO) {
-            val results = mutableListOf<UploadResult>()
-            files.forEachIndexed { index, file ->
-                if (index > 0) {
-                    delay(ThreadLocalRandom.current().nextLong(
-                        AppConstants.BATCH_DELAY_MIN_MS, AppConstants.BATCH_DELAY_MAX_MS + 1
-                    ))
-                }
-                results.add(
-                    if (isOversize(file)) {
-                        val split = uploadSplit(file, folderId)
-                        val ok = split.count { it.success }
-                        UploadResult(file.name, null, ok == split.size, "分卷 $ok/${split.size} 成功")
-                    } else {
-                        uploadFile(file, folderId, spoofSuffix)
-                    }
-                )
-            }
-            results
-        }
-
     // ==================== 内部实现 ====================
 
     /**

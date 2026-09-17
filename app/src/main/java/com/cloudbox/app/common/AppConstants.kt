@@ -1,6 +1,5 @@
 package com.cloudbox.app.common
 
-import com.cloudbox.app.core.domain.model.LanzouDomainConfig
 
 /**
  * 全局常量集中地。
@@ -57,21 +56,6 @@ object AppConstants {
     /** 账号中心根地址（挑战 Cookie 写域时取 host 用） */
     const val ACCOUNT_CENTER_BASE = "https://accounts.woozooo.com"
 
-    /** 受信任的分享/接口域名后缀（与 RemoteDomainSource.isTrustedDomain 同步维护）。
-     *  用于：1) Cookie 持久化域过滤；2) 远程配置校验等需要"完整枚举"的场景。
-     *  注意：链接识别不走此枚举（蓝奏云单字母变体域名太多，枚举必漏），
-     *  统一走 [TRUSTED_HOST_REGEX]（见 DomainUtils.isTrustedShareHost）。 */
-    val TRUSTED_SHARE_HOSTS = setOf(
-        "woozooo.com",
-        "lanzou.com",
-        "lanzoui.com",
-        "lanzoup.com",
-        "lanzoux.com",
-        "lanzouo.com",
-        "lanzouh.com",
-        "lanzouu.com"
-    )
-
     /** 受信任 host 匹配正则：lanzou + 可选单个字母后缀（lanzouw/lanzouq/lanzoum 等
      *  全部单字母变体均覆盖，蓝奏云换域名无需改代码）+ 多级子域 + woozooo.com。
      *  钓鱼域天然排除：lanzoucloud.com / evil-lanzou.com 等"lanzou 后跟多字母"的域
@@ -84,9 +68,6 @@ object AppConstants {
     val SHARE_URL_REGEX = Regex(
         """https?://(?:[a-z0-9-]+\.)*(?:lanzou[a-z]?|woozooo)\.com/[a-zA-Z0-9]+/?"""
     )
-
-    /** 从 URL 中提取分享 ID（最后一层路径段，如 lanzou.com/i5g8y1a 的 i5g8y1a） */
-    val SHARE_ID_REGEX = Regex("""/([a-zA-Z0-9]+)/?$""")
 
     /**
      * 从**任意文本**里捞出 URL 候选（用于整段分享文本的场景）。
@@ -138,7 +119,6 @@ object AppConstants {
 
     /** phpdisk_info 有效期约 20 天；超过 18 天视为"即将过期"触发重登（留 2 天余量，
      *  避免下载/上传中途 Cookie 失效导致任务失败） */
-    const val COOKIE_MAX_AGE_MS = 20L * 24 * 3600 * 1000
     const val COOKIE_RELOGIN_THRESHOLD_MS = 18L * 24 * 3600 * 1000
 
     /** 远程域名配置默认拉取地址（可被用户覆盖）。
@@ -147,18 +127,9 @@ object AppConstants {
 
     /** 风控相关：同 UA/IP 对同一分享页 7 天访问上限约 5 次（超限临时拉黑），
      *  因此批量解析必须加 1-3s 随机延时（需求规格 7 节） */
-    const val SHARE_PAGE_RATE_LIMIT_WINDOW_MS = 7L * 24 * 3600 * 1000
     const val BATCH_DELAY_MIN_MS = 1_000L
     const val BATCH_DELAY_MAX_MS = 3_000L
 
-    /** 上传：免费用户单文件上限 100MB（来源：爱企查/php中文网 2026 资料，多来源印证）。
-     *  注意：不写死任何"登录后自动放宽"逻辑——会员额度社区传闻 200M-210M 无权威佐证
-     *  （需求规格 4 节硬性要求） */
-    const val FREE_FILE_LIMIT_BYTES = 100L * 1024 * 1024
-
     /** 分卷单卷上限 95MB：留 5MB 余量，避免贴线被拒（需求规格要求） */
     const val SPLIT_VOLUME_BYTES = 95L * 1024 * 1024
-
-    /** 配置是否已初始化的 DataStore key */
-    const val DS_KEY_DOMAIN_INIT = "domain_init"
 }

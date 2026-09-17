@@ -24,13 +24,6 @@ object DomainUtils {
         }
     }
 
-    /** 从分享链接中提取分享 ID，失败返回 null */
-    fun extractShareId(url: String): String? {
-        // 兼容 lanzou.com/i5g8y1a 与 lanzou.com/i5g8y1a/ 两种形态
-        val clean = url.trim().trimEnd('/')
-        return AppConstants.SHARE_ID_REGEX.find(clean)?.groupValues?.get(1)
-    }
-
     /**
      * 判断是否为受支持的分享链接：正则初筛 + host 后缀白名单双重校验，
      *  防止钓鱼域名（如 lanzoucloud.com）被误判。

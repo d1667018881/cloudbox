@@ -1,7 +1,6 @@
 package com.cloudbox.app.feature.filelist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,11 +62,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.cloudbox.app.core.domain.model.CloudFile
-import com.cloudbox.app.core.domain.model.ShareInfo
 import com.cloudbox.app.feature.filelist.dialog.MoveFolderDialog
 import com.cloudbox.app.feature.filelist.dialog.RenameDialog
 import com.cloudbox.app.feature.filelist.dialog.ShareDialog

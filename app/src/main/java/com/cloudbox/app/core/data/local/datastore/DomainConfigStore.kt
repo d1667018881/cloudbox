@@ -56,8 +56,6 @@ class DomainConfigStore @Inject constructor(private val context: Context) {
             )
         }
 
-    suspend fun getOverrides(): PartialDomainConfig = observeOverrides().first()
-
     suspend fun saveOverrides(config: LanzouDomainConfig) {
         context.domainDataStore.edit { p ->
             p[keyLogin] = config.loginEntry

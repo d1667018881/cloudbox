@@ -51,10 +51,6 @@ interface FavoriteShareDao {
     @Query("SELECT * FROM favorite_shares WHERE kind='folder'")
     suspend fun getFolders(): List<FavoriteShareEntity>
 
-    /** 同上的 Flow 版：检查过程中实时刷新红点 */
-    @Query("SELECT * FROM favorite_shares WHERE kind='folder'")
-    fun observeFolders(): Flow<List<FavoriteShareEntity>>
-
     /** 修正收藏类型（用户在解析页重新收藏时自动补正） */
     @Query("UPDATE favorite_shares SET kind=:kind, pass=:pass WHERE shareUrl=:url")
     suspend fun updateKindAndPass(url: String, kind: String, pass: String)

@@ -8,15 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -145,11 +140,11 @@ fun MainScreen(
                     icon = { Icon(Icons.Filled.Link, null) },
                     label = { Text("解析") }
                 )
-                // ⚠️ 原「上传」tab 已移除（2026-09-15）。
-                //    理由：网盘页 FAB 已经能"传到当前目录"，独立上传页只是多一个
-                //    选目录的步骤，属于重复入口。文件分享进来的场景现在由
-                //    ACTION_SEND 直接进网盘页上传，也不再需要这个页面。
-                //    UploadScreen.kt 文件保留未删，需要时可随时恢复入口。
+                // ⚠️ 原「上传」tab 已于 2026-09-15 移除，UploadScreen.kt 也已删除
+                //    （V32 死代码清理）。理由：网盘页 FAB 已经能"传到当前目录"，
+                //    独立上传页只是多一个选目录的步骤，属于重复入口。
+                //    文件分享进来的场景由 ACTION_SEND 直接进网盘页上传。
+                //    上传能力本身完整保留在 FileListScreen + UploadViewModel。
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },

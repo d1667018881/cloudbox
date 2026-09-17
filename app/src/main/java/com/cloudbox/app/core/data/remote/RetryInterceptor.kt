@@ -4,7 +4,6 @@ import com.cloudbox.app.common.AppConstants
 import okhttp3.Interceptor
 import okhttp3.Response
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 

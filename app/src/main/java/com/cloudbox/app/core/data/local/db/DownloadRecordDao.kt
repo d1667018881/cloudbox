@@ -18,9 +18,6 @@ interface DownloadRecordDao {
     @Query("DELETE FROM download_records WHERE downloadId=:downloadId")
     suspend fun deleteByDownloadId(downloadId: Long)
 
-    @Query("DELETE FROM download_records WHERE rowId=:rowId")
-    suspend fun deleteByRowId(rowId: Long)
-
     @Query("SELECT * FROM download_records WHERE downloadId=:downloadId")
     suspend fun getByDownloadId(downloadId: Long): DownloadRecordEntity?
 

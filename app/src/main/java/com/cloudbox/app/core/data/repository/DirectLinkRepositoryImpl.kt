@@ -232,6 +232,21 @@ class DirectLinkRepositoryImpl @Inject constructor(
         val kd = HtmlExtractor.extractKdns(fnHtml) ?: 1
 
         // 5) POST ajaxfile.php?file=<fid>
+        //
+        // 为什么不用 Retrofit 的 @POST 方法而在这里手工拼（V32 说明）：
+        // 本请求必须带 Referer=iframeUrl 且域要与 token 同源，Retrofit 的
+        // 静态接口声明表达不了"每请求动态 Referer"，所以走 OkHttp 直发。
+        // （原先 LanzouApiService.downProcess 是一份等价的 Retrofit 声明，
+        //   但从未被调用 —— 属于原型期残留，已删除。）
+        //
+        // 端点演进（勿回退到 ajaxm.php）：
+        // 旧端点 ajaxm.php + {action, sign, file_id, p, kd, ves} 已随改版废弃。
+        // 新版单文件页把签名藏在 iframe（/fn?…）的 `var wp_sign` 里，fid 用 URL
+        // 查询传递，并新增 websignkey / signs / websign 三个校验字段。
+        // 实测请求：
+        //   POST /ajaxfile.php?file=96810913
+        //   action=downprocess&websignkey=asXy&signs=asXy&sign=<wp_sign>&websign=&kd=1&ves=1
+        // 成功响应：{"zt":1,"dom":"https://developer2.lanrar.com","url":"?A2VUags6…","inf":0}
         val form = FormBody.Builder()
             .add("action", "downprocess")
             .add("websignkey", ajaxData)

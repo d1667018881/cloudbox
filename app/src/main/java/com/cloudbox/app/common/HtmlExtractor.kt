@@ -55,9 +55,6 @@ object HtmlExtractor {
     /** var fid = 123;（单文件页与部分旧页面均用此形态） */
     private val RE_FID_VAR = Regex("""var\s+fid\s*=\s*(\d+)\s*;""")
 
-    /** 分享页 lx："lx':'?(\d)'?," */
-    private val RE_LX = Regex("""'lx':'?(\d)'?,""")
-
     /** 文件夹分享页 uid：'uid':'556911' 或 'uid':556911 */
     private val RE_UID_SHARE = Regex("""['"]uid['"]\s*:\s*'?(\d+)'?""")
 
@@ -115,8 +112,6 @@ object HtmlExtractor {
         RE_FID_FILE.find(html)?.groupValues?.get(1)
             ?: RE_FID_OLD.find(html)?.groupValues?.get(1)
             ?: RE_FID_VAR.find(html)?.groupValues?.get(1)
-
-    fun extractLx(html: String): String? = RE_LX.find(html)?.groupValues?.get(1)
 
     fun extractFormhash(html: String): String? =
         RE_FORMHASH.find(html)?.groupValues?.get(1)
