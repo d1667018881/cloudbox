@@ -19,4 +19,8 @@ interface FileCacheDao {
         "SELECT * FROM cloud_files WHERE accountUid=:uid AND isFolder=0 AND name LIKE '%'||:keyword||'%' ESCAPE '\\' LIMIT 200"
     )
     suspend fun searchLike(uid: String, keyword: String): List<FileCacheEntity>
+
+    /** 清空全部文件列表缓存（「重置应用」用） */
+    @Query("DELETE FROM cloud_files")
+    suspend fun clearAllCache()
 }

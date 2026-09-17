@@ -73,6 +73,45 @@ class DomainConfigStore @Inject constructor(private val context: Context) {
         }
     }
 
+    // ==================== V32：备份 / 恢复 ====================
+
+    /**
+     * 用户手动覆盖的域名配置快照（未覆盖的项不出现在结果里）。
+     *
+     * 用快照 key 名（"loginEntry" 等）而不是 DataStore 内部 key 名：
+     * 这是备份文件的对外契约，将来重构 DataStore 的 key 命名
+     * 不应该让旧备份失效。
+     */
+    suspend fun snapshotOverrides(): Map<String, String> {
+        val p = context.domainDataStore.data.first()
+        return buildMap {
+            p[keyLogin]?.let { put(SNAP_LOGIN, it) }
+            p[keyDisk]?.let { put(SNAP_DISK, it) }
+            p[keyShare]?.let { put(SNAP_SHARE, it) }
+            p[keyUpload]?.let { put(SNAP_UPLOAD, it) }
+            p[keyFallback]?.let { put(SNAP_FALLBACK, it) }
+        }
+    }
+
+    /** 按 key 覆盖写回域名配置（不清空备份里没有的项，理由同 SettingsStore） */
+    suspend fun applyOverrides(map: Map<String, String>) {
+        context.domainDataStore.edit { p ->
+            map[SNAP_LOGIN]?.let { p[keyLogin] = it }
+            map[SNAP_DISK]?.let { p[keyDisk] = it }
+            map[SNAP_SHARE]?.let { p[keyShare] = it }
+            map[SNAP_UPLOAD]?.let { p[keyUpload] = it }
+            map[SNAP_FALLBACK]?.let { p[keyFallback] = it }
+        }
+    }
+
+    private companion object {
+        const val SNAP_LOGIN = "loginEntry"
+        const val SNAP_DISK = "diskMain"
+        const val SNAP_SHARE = "shareBase"
+        const val SNAP_UPLOAD = "uploadServer"
+        const val SNAP_FALLBACK = "fallbackDomains"
+    }
+
     /** 观察远程配置（未拉取过为 null） */
     fun observeRemote(): Flow<LanzouDomainConfig?> =
         context.domainDataStore.data.map { p ->

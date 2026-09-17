@@ -77,6 +77,15 @@ fun SettingsScreen(
     var publisherName by remember { mutableStateOf("") }
     var oldPwd by remember { mutableStateOf("") }
     var newPwd by remember { mutableStateOf("") }
+    // 数据管理（V32）
+    var resetConfirm by remember { mutableStateOf(false) }
+
+    // 恢复数据的文件选择器。用 OpenDocument 而不是 GetContent：
+    // 前者返回的 uri 在 Activity 重建后依然可读（系统会给持久读权限），
+    // 后者只在本次会话内有效，旋转屏幕后再读会 SecurityException。
+    val restorePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(viewModel::prepareRestore) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -331,8 +340,50 @@ fun SettingsScreen(
             }
             HorizontalDivider()
 
+            // ==================== 数据管理（对齐原版 privacy_settings 的备份/重置） ====================
+            SectionTitle("数据管理")
+            DataActionRow(
+                title = "备份数据",
+                subtitle = "把收藏夹和全部设置导出成一个 JSON 文件，" +
+                    "存放在 Download/云匣备份/。不含账号密码与 Cookie（那是凭据，" +
+                    "明文写进文件不安全），换机后重新登录一次即可。",
+                buttonText = "备份",
+                enabled = !state.dataBusy,
+                onClick = viewModel::backupData
+            )
+            DataActionRow(
+                title = "恢复数据",
+                subtitle = "从备份文件恢复收藏夹与设置。会先清空现有收藏，" +
+                    "所以选完文件后会让您再确认一次。",
+                buttonText = "选择文件",
+                enabled = !state.dataBusy,
+                // 用 */* 而不是 application/json：备份文件经常在传输/网盘落盘后
+                // 丢掉 MIME（变成 octet-stream 或空），只筛 json 会导致
+                // 用户在文件选择器里**看不见自己的备份文件**。
+                // 文件对不对由 prepareRestore 解析时判断，这里放开更实用。
+                onClick = { restorePicker.launch(arrayOf("*/*")) }
+            )
+            DataActionRow(
+                title = "清除缓存",
+                subtitle = "清理上传中间文件、分卷临时文件等。" +
+                    "已下载到本机的文件不受影响。",
+                buttonText = "清除（${formatCacheSize(state.cacheBytes)}）",
+                enabled = !state.dataBusy,
+                onClick = viewModel::clearCache
+            )
+            DataActionRow(
+                title = "重置应用",
+                subtitle = "设置恢复默认、收藏夹与本地缓存清空。" +
+                    "登录状态会保留，不会把您登出。",
+                buttonText = "重置",
+                enabled = !state.dataBusy,
+                danger = true,
+                onClick = { resetConfirm = true }
+            )
+            HorizontalDivider()
+
             Spacer(Modifier.height(24.dp))
-            Text("云匣 v0.1.0 · 仅供个人学习使用",
+            Text("云匣 v0.1.143 · 仅供个人学习使用",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))
@@ -539,6 +590,76 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { pwdDialog = false }) { Text("取消") } }
         )
     }
+
+    // ---------- V32：恢复数据前预览（恢复是破坏性操作，必须先让用户看清内容） ----------
+    state.restorePreview?.let { p ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissRestorePreview,
+            title = { Text("确认恢复") },
+            text = {
+                Column {
+                    Text("这份备份包含 " +
+                        "${p.favoriteCount} 个收藏、${p.settingCount} 项设置。",
+                        style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "备份时间：${formatBackupTime(p.backupTime)}\n" +
+                            "备份来自：云匣 v${p.backupAppVersion}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "⚠️ 恢复会**清空现有收藏夹**再写入备份内容，" +
+                            "当前已有的收藏将无法找回。设置项按备份内容覆盖，不会动登录状态。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmRestore) { Text("确认恢复") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissRestorePreview) { Text("取消") }
+            }
+        )
+    }
+
+    // ---------- V32：重置应用二次确认 ----------
+    if (resetConfirm) {
+        AlertDialog(
+            onDismissRequest = { resetConfirm = false },
+            title = { Text("重置应用") },
+            text = {
+                Column {
+                    Text("将清除：", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "· 全部设置项（恢复默认值）\n" +
+                            "· 收藏夹（全部清空）\n" +
+                            "· 域名配置改动\n" +
+                            "· 本地缓存与文件列表缓存",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "登录状态会保留，已下载到本机的文件不受影响。\n" +
+                            "此操作不可撤销，建议先「备份数据」。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    resetConfirm = false
+                    viewModel.resetAppData()
+                }) { Text("确认重置") }
+            },
+            dismissButton = { TextButton(onClick = { resetConfirm = false }) { Text("取消") } }
+        )
+    }
 }
 
 /** 打开「自动检查收藏夹更新」时默认使用 7 天（原版档位之一，取中间值最不激进） */
@@ -546,6 +667,61 @@ private const val DEFAULT_CHECK_DAYS = 7
 
 /** 原版 settings/message_settings.lua 的档位：1 / 3 / 7 / 14 / 30 天 */
 private val CHECK_INTERVAL_DAYS = listOf(1, 3, 7, 14, 30)
+
+/**
+ * 数据管理区的单行：左侧标题+说明，右侧一个按钮。
+ *
+ * 和 [SettingRow] 的区别是右侧是个按钮而不是箭头：这一区全是**动作**
+ * （备份/恢复/清除/重置），点箭头会让人以为是进子页面。
+ */
+@Composable
+private fun DataActionRow(
+    title: String,
+    subtitle: String,
+    buttonText: String,
+    enabled: Boolean,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        TextButton(
+            onClick = onClick,
+            enabled = enabled,
+            colors = if (danger) {
+                androidx.compose.material3.ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            } else {
+                androidx.compose.material3.ButtonDefaults.textButtonColors()
+            }
+        ) { Text(buttonText) }
+    }
+}
+
+/** 缓存体积的紧凑显示（设置页里只需要看个大概量级） */
+private fun formatCacheSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f GB", bytes / 1024.0 / 1024 / 1024)
+    bytes >= 1024L * 1024 -> String.format(java.util.Locale.US, "%.0f MB", bytes / 1024.0 / 1024)
+    bytes >= 1024L -> String.format(java.util.Locale.US, "%.0f KB", bytes / 1024.0)
+    else -> "$bytes B"
+}
+
+/** 备份时间戳转可读文本；0 表示备份文件里没写（老文件） */
+private fun formatBackupTime(millis: Long): String =
+    if (millis <= 0) "未知"
+    else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(millis))
 
 @Composable
 private fun SectionTitle(text: String) {

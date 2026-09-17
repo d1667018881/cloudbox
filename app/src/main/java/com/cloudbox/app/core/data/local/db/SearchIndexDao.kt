@@ -23,4 +23,8 @@ interface SearchIndexDao {
     /** #22/#23 修复：索引行数计数（isSynced 用，替代全表拉取判空） */
     @Query("SELECT COUNT(*) FROM file_search_fts WHERE accountUid=:uid")
     suspend fun countForAccount(uid: String): Int
+
+    /** 清空全部索引（「重置应用」用） */
+    @Query("DELETE FROM file_search_fts")
+    suspend fun clearAll()
 }

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.cloudbox.app.common.AppConstants
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -198,5 +199,89 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.settingsDataStore.edit { block(it) }
+    }
+
+    // ==================== V32：备份 / 恢复 / 重置 ====================
+
+    /**
+     * 全部设置项的**字符串快照**（key 名 → 值）。
+     *
+     * 为什么统一转成字符串：Play 备份/恢复这类场景下，键值类型会随版本变化，
+     * 用字符串承载可以避免"旧备份里是 int、新版本读成 String"这类崩溃。
+     * 每个 key 的语义由 [applySnapshot] 按名字还原。
+     *
+     * ⚠️ 这里手工列举，而不是遍历 DataStore 的 preferences.asMap()。
+     * 遍历的写法看着更"自动"，但会把**将来新增的 key** 悄悄带进备份，
+     * 而那些 key 在旧版本的 [applySnapshot] 里没有还原分支 —— 恢复后
+     * 数据静默丢失，问题极难查。宁可新增设置项时多写一行。
+     */
+    suspend fun snapshotAll(): Map<String, String> {
+        val p = context.settingsDataStore.data.first()
+        return buildMap {
+            p[keyUserAgent]?.let { put(KEY_USER_AGENT, it) }
+            p[keySuffixSpoof]?.let { put(KEY_SUFFIX_SPOOF, it.toString()) }
+            p[keySpoofSuffixList]?.let { put(KEY_SPOOF_SUFFIX_LIST, it) }
+            p[keyThirdPartyResolver]?.let { put(KEY_THIRD_PARTY_RESOLVER, it) }
+            p[keyDarkMode]?.let { put(KEY_DARK_MODE, it) }
+            p[keyLanguage]?.let { put(KEY_LANGUAGE, it) }
+            p[keyWarnMobileNetwork]?.let { put(KEY_WARN_MOBILE_NETWORK, it.toString()) }
+            p[keyShowFileTypeLabel]?.let { put(KEY_SHOW_FILE_TYPE_LABEL, it.toString()) }
+            p[keyShowAccountButton]?.let { put(KEY_SHOW_ACCOUNT_BUTTON, it.toString()) }
+            p[keyAutoCheckDays]?.let { put(KEY_AUTO_CHECK_DAYS, it) }
+            p[keyLastAutoCheckTime]?.let { put(KEY_LAST_AUTO_CHECK_TIME, it) }
+            p[keyAutoLoad]?.let { put(KEY_AUTO_LOAD, it.toString()) }
+        }
+    }
+
+    /**
+     * 按 key 覆盖写回（**不清空**备份里没有的 key）。
+     *
+     * 不全量替换的原因见 [snapshotAll] 注释：备份来自旧版本时，
+     * 它没有后来新增的 key，全量替换会把那些设置重置成默认值 ——
+     * 用户会觉得"恢复一次备份，把我另外几项设置搞没了"。
+     */
+    suspend fun applySnapshot(map: Map<String, String>) = edit { p ->
+        map[KEY_USER_AGENT]?.let { p[keyUserAgent] = it }
+        map[KEY_SUFFIX_SPOOF]?.toBooleanStrictOrNull()?.let { p[keySuffixSpoof] = it }
+        map[KEY_SPOOF_SUFFIX_LIST]?.let { p[keySpoofSuffixList] = it }
+        map[KEY_THIRD_PARTY_RESOLVER]?.let { p[keyThirdPartyResolver] = it }
+        map[KEY_DARK_MODE]?.let { p[keyDarkMode] = it }
+        map[KEY_LANGUAGE]?.let { p[keyLanguage] = it }
+        map[KEY_WARN_MOBILE_NETWORK]?.toBooleanStrictOrNull()?.let { p[keyWarnMobileNetwork] = it }
+        map[KEY_SHOW_FILE_TYPE_LABEL]?.toBooleanStrictOrNull()?.let { p[keyShowFileTypeLabel] = it }
+        map[KEY_SHOW_ACCOUNT_BUTTON]?.toBooleanStrictOrNull()?.let { p[keyShowAccountButton] = it }
+        map[KEY_AUTO_CHECK_DAYS]?.let { p[keyAutoCheckDays] = it }
+        map[KEY_LAST_AUTO_CHECK_TIME]?.let { p[keyLastAutoCheckTime] = it }
+        map[KEY_AUTO_LOAD]?.toBooleanStrictOrNull()?.let { p[keyAutoLoad] = it }
+    }
+
+    /**
+     * 重置全部设置为默认值（「重置应用」用）。
+     *
+     * 直接 `clear()` 整个 Preferences：所有读取处都有 `?: 默认值` 兜底，
+     * 清空即等价于"回出厂设置"，不需要把每个 key 逐个写成默认值 ——
+     * 那样反而容易漏掉某个 key，导致"重置了但某一项还是旧的"。
+     * **账号相关数据不在这个 DataStore 里**（走 EncryptedSharedPreferences），
+     * 所以清空不会影响登录态。
+     */
+    suspend fun resetAll() {
+        context.settingsDataStore.edit { it.clear() }
+    }
+
+    private companion object {
+        // 快照用的 key 名。与上面 DataStore key 的字面量保持一致 ——
+        // 这是备份文件的对外契约，改动会让旧备份无法恢复，务必谨慎。
+        const val KEY_USER_AGENT = "user_agent"
+        const val KEY_SUFFIX_SPOOF = "suffix_spoof_enabled"
+        const val KEY_SPOOF_SUFFIX_LIST = "spoof_suffix_list"
+        const val KEY_THIRD_PARTY_RESOLVER = "third_party_resolver_url"
+        const val KEY_DARK_MODE = "dark_mode"
+        const val KEY_LANGUAGE = "app_language"
+        const val KEY_WARN_MOBILE_NETWORK = "warn_mobile_network"
+        const val KEY_SHOW_FILE_TYPE_LABEL = "show_file_type_label"
+        const val KEY_SHOW_ACCOUNT_BUTTON = "show_account_button"
+        const val KEY_AUTO_CHECK_DAYS = "auto_check_favorites_time"
+        const val KEY_LAST_AUTO_CHECK_TIME = "last_auto_check_time"
+        const val KEY_AUTO_LOAD = "auto_load"
     }
 }
