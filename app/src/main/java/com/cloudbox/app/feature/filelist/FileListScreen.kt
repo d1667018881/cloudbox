@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -94,7 +93,6 @@ fun FileListScreen(
     // V31：自动加载剩余内容（对齐原版 auto_load「自动加载页面剩余内容」）
     val autoLoad by viewModel.settingsStore.autoLoad.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
-    val uploadProbeResult by uploadViewModel.probeResult.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
@@ -140,18 +138,6 @@ fun FileListScreen(
         }
     }
 
-    // 诊断用单选：拿真实文件在当前目录跑一遍上传链路，直接看服务端回包。
-    //
-    // ⚠️ 用 GetContent 而不是 OpenDocument：实测（2026-09-12）OpenDocument
-    //    在部分文件管理器下**不返回 DISPLAY_NAME**，文件名会退化成
-    //    `upload_<时间戳>` 这种没有扩展名的形式，服务端直接回
-    //    "不能上传.格式的文件" —— 诊断结果就被这个假象带偏了。
-    //    GetContent 返回的 uri 带完整文件名，也更接近真实上传的取件方式。
-    val diagnosePicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { uploadViewModel.diagnoseUpload(it, state.folderStack.last().first) }
-    }
     val webUploadLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) {
@@ -390,17 +376,6 @@ fun FileListScreen(
                         )
                         // 官方网页上传页：仅作**手动备用入口**（传超大文件、或哪天
                         // 原生通道被风控挡住时用）。它不是默认路径。
-                        // 诊断：拿**真实文件**在**当前目录**跑一遍上传链路，
-                        // 直接把服务端原始回包显示出来，成败一眼定性，不用猜。
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("诊断上传（拿文件测一遍）") },
-                            leadingIcon = { Icon(Icons.Filled.BugReport, null) },
-                            onClick = {
-                                showFabMenu = false
-                                // GetContent 的入参是单个 mime 字符串（不是数组）
-                                diagnosePicker.launch("*/*")
-                            }
-                        )
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("打开官方网页上传页（备用）") },
                             leadingIcon = { Icon(Icons.Filled.Language, null) },
@@ -707,31 +682,6 @@ fun FileListScreen(
     }
     state.shareResult?.let { share ->
         ShareDialog(share = share, onDismiss = viewModel::dismissShare)
-    }
-
-    // 诊断进行中：真实文件要读流 + 真发一次请求，大文件会等一会儿，给个反馈免得像卡死
-    if (uploadState.diagnosing) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { },
-            title = { Text("正在诊断上传…") },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp))
-                    Spacer(Modifier.size(12.dp))
-                    Text("正在把文件真发一次，请稍候", style = MaterialTheme.typography.bodySmall)
-                }
-            },
-            confirmButton = {}
-        )
-    }
-
-    // 诊断结果：HTTP 码 + 目录 + 文件名大小 + 服务端原始回包，可一键复制
-    uploadProbeResult?.let { r ->
-        com.cloudbox.app.feature.upload.UploadProbeDialog(
-            result = r,
-            onDismiss = uploadViewModel::dismissProbe,
-            timeline = uploadTimeline
-        )
     }
 
     // 上传失败时：用同一个弹窗把"时间线 + 失败名单"摊开。

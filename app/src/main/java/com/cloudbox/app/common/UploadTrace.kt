@@ -24,13 +24,15 @@ import javax.inject.Singleton
  * ```
  *
  * 前四段发生在 **UploadViewModel** 里，但第五段（Worker 侧）发生在
- * **UploadWorker** 里，而用户查看日志的入口可能在**设置页**（另一个 ViewModel）。
- * 如果日志挂在 UploadViewModel 上：
+ * **UploadWorker** 里。如果日志挂在 UploadViewModel 上：
  * - Worker 要写日志就得反查 ViewModel（不可行，Worker 没有 UI 作用域）；
- * - 设置页拿不到网盘页那个 ViewModel 实例，看不到日志；
  * - ViewModel 随页面销毁重建，日志会丢。
  *
  * 所以做成 Hilt 单例：谁都能写、谁都能读，生命周期跟随进程。
+ *
+ * V32 变更：设置页的「上传日志」独立入口已移除（临时诊断入口清理），
+ * 现在唯一的读取方是网盘页的**上传失败明细弹窗**——用户上传失败点
+ * "看详情"时，时间线随之展开。
  *
  * ─────────────────────────────────────────────────────────────
  * 判读方法（这是本类存在的意义）
@@ -45,14 +47,14 @@ import javax.inject.Singleton
  * | 有 RUNNING + 服务端回包 | 链路通，问题在服务端判定或目标目录 |
  * | 回包 zt=0 且 info 是中文原因 | 服务端明确拒绝（如「不能上传.格式的文件」） |
  *
- * @see UploadProbeResult 诊断结果（含 HTTP 码 / 耗时 / 原始回包）
+ * @see com.cloudbox.app.feature.upload.UploadProbeDialog 失败明细弹窗（时间线在这里展开）
  */
 @Singleton
 class UploadTrace @Inject constructor() {
 
     private val _lines = MutableStateFlow<List<String>>(emptyList())
 
-    /** 供 UI 收集展示（设置页、网盘页失败详情弹窗都用它） */
+    /** 供 UI 收集展示（网盘页的上传失败明细弹窗用它） */
     val lines: StateFlow<List<String>> = _lines.asStateFlow()
 
     private val stamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
@@ -69,7 +71,7 @@ class UploadTrace @Inject constructor() {
     /** 取当前快照（复制出去，避免调用方持有内部列表） */
     fun snapshot(): List<String> = _lines.value
 
-    /** 清空（设置页「清空日志」用） */
+    /** 清空（每个上传会话开始时调用，避免时间线无限累积） */
     fun clear() {
         _lines.value = emptyList()
     }

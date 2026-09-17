@@ -4,7 +4,6 @@ import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.common.SplitZipUtil
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.data.remote.LanzouApiClient
-import com.cloudbox.app.core.domain.repository.UploadProbeResult
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import com.cloudbox.app.core.domain.repository.UploadResult
 import kotlinx.coroutines.Dispatchers
@@ -15,9 +14,7 @@ import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
 import okio.source
-import android.content.Context
 import android.util.Log
-import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.ThreadLocalRandom
 import javax.inject.Inject
@@ -63,7 +60,6 @@ import javax.inject.Singleton
  */
 @Singleton
 class UploadRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val apiClient: LanzouApiClient,
     private val settingsStore: SettingsStore
 ) : UploadRepository {
@@ -262,84 +258,6 @@ class UploadRepositoryImpl @Inject constructor(
             else ->
                 UploadResult(uploadName, null, false,
                     "${resp.info?.takeIf { it.isNotBlank() } ?: "上传失败"}（$raw）")
-        }
-    }
-
-    /** 内置探针：40 字节临时 txt */
-    override suspend fun probeUpload(folderId: Long): UploadProbeResult =
-        withContext(Dispatchers.IO) {
-            val probe = File(context.cacheDir, "cloudbox_upload_probe.txt").apply {
-                writeText("cloudbox upload probe ${System.currentTimeMillis()}\n")
-            }
-            runProbe(probe, "text/plain", folderId)
-        }
-
-    /**
-     * 用真实文件跑自检（排障主力：内置探针太小，过得了不代表真文件过得了）。
-     *
-     * ⚠️ 命名必须与 [uploadFile] 完全一致：真实上传会按"后缀伪装"开关改名
-     * （如 x.apk → x.apk.zip），探针若用原名，就等于在测另一条路径——
-     * 失败若恰好出在改名后的文件名上，探针永远测不出来，还会反过来误导
-     * 我们得出"协议没问题"的结论。
-     */
-    override suspend fun probeUploadWith(file: File, folderId: Long): UploadProbeResult =
-        withContext(Dispatchers.IO) {
-            val effSpoof = runCatching { settingsStore.suffixSpoofEnabled.first() }
-                .getOrDefault(true)
-            val uploadName =
-                if (effSpoof && needsSpoof(file)) "${file.name}.zip" else file.name
-            runProbe(file, mimeOf(uploadName), folderId, uploadName)
-        }
-
-    /**
-     * 自检公共实现：完整走一遍上传链路，返回服务端**原始**回包。
-     *
-     * 不走 [doUpload] 的原因：那里会把响应解析成 UploadResponse 再拼摘要，
-     * 而排障恰恰需要未经处理的原文（可能包含我们 DTO 里没声明的字段）。
-     *
-     * @param uploadName 实际提交的文件名（可能已被后缀伪装改写）
-     */
-    private suspend fun runProbe(
-        file: File,
-        mime: String,
-        folderId: Long,
-        uploadName: String = file.name
-    ): UploadProbeResult {
-        val hasCred = apiClient.cookieJar.hasUploadCredentials()
-        val t0 = System.currentTimeMillis()
-        return runCatching {
-            val boundary = "----CloudBoxBoundary" +
-                java.util.UUID.randomUUID().toString().replace("-", "")
-            val body = buildOriginalMultipart(boundary, folderId, uploadName, mime, file)
-            val resp = apiClient.uploadApiService.uploadProbe(body, "UTF-8")
-            val raw = runCatching { resp.body()?.string() ?: "<空响应体>" }
-                .getOrElse { "<读取响应失败: ${it.message}>" }
-            val elapsed = System.currentTimeMillis() - t0
-            Log.i(TAG, "探针 file=$uploadName size=${file.length()}B folder=$folderId " +
-                    "耗时=${elapsed}ms HTTP=${resp.code()} body=${raw.take(200)}")
-            UploadProbeResult(
-                httpCode = resp.code(),
-                requestUrl = resp.raw().request.url.toString(),
-                rawBody = raw,
-                hasCredential = hasCred,
-                fileName = file.name,
-                fileSize = file.length(),
-                targetFolderId = folderId,
-                uploadAs = uploadName.takeIf { it != file.name }.orEmpty(),
-                elapsedMs = elapsed
-            )
-        }.getOrElse {
-            UploadProbeResult(
-                httpCode = -1,
-                requestUrl = "请求未发出",
-                rawBody = "异常：${it.javaClass.simpleName} ${it.message}",
-                hasCredential = hasCred,
-                fileName = file.name,
-                fileSize = file.length(),
-                targetFolderId = folderId,
-                uploadAs = uploadName.takeIf { it != file.name }.orEmpty(),
-                elapsedMs = System.currentTimeMillis() - t0
-            )
         }
     }
 

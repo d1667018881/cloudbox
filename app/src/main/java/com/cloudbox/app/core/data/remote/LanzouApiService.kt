@@ -255,16 +255,6 @@ interface LanzouApiService {
         @Header("Charset") charset: String
     ): UploadResponse
 
-    /**
-     * 上传自检专用：返回**未解析**的原始响应，用于把服务端回包原样呈现给用户排障
-     * （DTO 只声明已知字段，排障时恰恰需要看未知字段）。
-     */
-    @POST("html5up.php")
-    suspend fun uploadProbe(
-        @Body body: RequestBody,
-        @Header("Charset") charset: String
-    ): Response<ResponseBody>
-
     // ==================== 账号中心设置（原版 account.lua） ====================
 
     /**

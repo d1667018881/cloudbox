@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import com.cloudbox.app.core.domain.repository.UploadProbeResult
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -60,9 +59,7 @@ class UploadViewModel @Inject constructor(
          * 不要拿 failedFiles.isEmpty() 代替：用户 dismiss 后 failedFiles 仍在，
          * 需要一个能随会话重置的独立标志。
          */
-        val hasFailure: Boolean = false,
-        /** 真实文件诊断进行中（大文件可能要等一会儿，必须给个反馈） */
-        val diagnosing: Boolean = false
+        val hasFailure: Boolean = false
     )
 
     private val _uiState = MutableStateFlow(UploadUiState())
@@ -290,42 +287,6 @@ class UploadViewModel @Inject constructor(
             observeWorks(currentWorkIds, batches.map { it.size })
         }
     }
-
-    // ==================== 真实文件诊断（排障用） ====================
-
-    /**
-     * 拿用户选的真实文件、在**当前目录**下跑一遍完整上传链路。
-     *
-     * 为什么必须能在网盘页直接跑：设置页的自检固定传根目录（folderId=-1），
-     * 而用户实际多半在子目录上传。目录 id 不对、真实文件太大/格式受限，
-     * 这些只有在"真实目录 + 真实文件"下才复现得出来。
-     */
-    private val _probeResult = MutableStateFlow<UploadProbeResult?>(null)
-    val probeResult: StateFlow<UploadProbeResult?> = _probeResult.asStateFlow()
-
-    fun diagnoseUpload(uri: Uri, folderId: Long) {
-        viewModelScope.launch {
-            _probeResult.value = null
-            _uiState.update { it.copy(diagnosing = true) }
-            val r = withContext(Dispatchers.IO) {
-                val f = copyUriToCache(uri)
-                if (f == null) {
-                    UploadProbeResult(
-                        httpCode = -1,
-                        requestUrl = "未发出（本地读取阶段就失败了）",
-                        rawBody = lastCopyError ?: "无法读取所选文件",
-                        hasCredential = false
-                    )
-                } else {
-                    uploadRepository.probeUploadWith(f, folderId)
-                }
-            }
-            _probeResult.value = r
-            _uiState.update { it.copy(diagnosing = false) }
-        }
-    }
-
-    fun dismissProbe() { _probeResult.value = null }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 

@@ -78,25 +78,6 @@ interface UploadRepository {
      */
     fun uploadPageUrl(folderId: Long): String
 
-    /**
-     * 上传通道自检（探针）：往目标目录传一个几十字节的临时 txt，
-     * 把服务端**原始回包**完整返回供排障。
-     *
-     * 为什么需要它：html5up.php 在参数不符时往往不报错，而是回 `zt=1` 却不入库
-     * （表现为"显示成功、云端没有文件"）。只看 App 的成功/失败文案无法定位，
-     * 必须看到 zt / info / text 的真实形态。
-     */
-    suspend fun probeUpload(folderId: Long): UploadProbeResult
-
-    /**
-     * 用**指定文件**跑自检（排障主力）。
-     *
-     * 为什么必须有它：内置探针只有 40 字节，能过不代表真实文件能过。
-     * 文件太大（超时）、格式受限、文件名编码异常，这些只有拿真文件测才暴露得出来。
-     * 用户拿那个"一直失败的文件"点一下，回包原文就能直接定性。
-     */
-    suspend fun probeUploadWith(file: File, folderId: Long): UploadProbeResult
-
     /** 单文件直传（不支持格式会按设置伪装后缀） */
     suspend fun uploadFile(file: File, folderId: Long, spoofSuffix: Boolean): UploadResult
 

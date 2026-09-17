@@ -17,10 +17,14 @@ import androidx.compose.ui.unit.dp
 import com.cloudbox.app.core.domain.repository.UploadProbeResult
 
 /**
- * 上传自检结果弹窗（设置页与网盘页共用，故放在这里而不是某个 Screen 内部）。
+ * 上传失败明细弹窗（V32：原「上传自检结果」弹窗，探针入口已移除后改为专用）。
+ *
+ * 当前**唯一**用途：网盘页上传失败时点"看详情"，把「失败名单 + 上传时间线」摊开。
+ * 调用方（FileListScreen）用一个 `httpCode = -2` 的哨兵
+ * [UploadProbeResult] 装载本地构造的文案，见那里的 showFailureDetail 分支。
  *
  * 展示 HTTP 码 / 被测文件（名 + 大小）/ 请求地址 / 凭证状态 / **服务端原始回包**，
- * 并提供"复制"——排障时把这几行发出来，就能判断是没登录、参数不对、
+ * 并提供"复制"——出问题时把这几行发出来，就能判断是没登录、参数不对、
  * 文件太大，还是端点失效。
  */
 @Composable
@@ -33,10 +37,15 @@ fun UploadProbeDialog(
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("上传自检结果") },
+        title = { Text("上传失败明细") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("HTTP ${result.httpCode}", style = MaterialTheme.typography.titleSmall)
+                // -2 是"非探针"哨兵：调用方把本地拼的失败明细塞进 UploadProbeResult 时用。
+                // 直接显示 "HTTP -2" 对用户毫无意义，换成中文状态行。
+                Text(
+                    if (result.httpCode == -2) "上传未完成" else "HTTP ${result.httpCode}",
+                    style = MaterialTheme.typography.titleSmall
+                )
                 Spacer(Modifier.height(6.dp))
                 if (result.fileName.isNotBlank()) {
                     Text(

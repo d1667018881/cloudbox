@@ -4,24 +4,19 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.common.AppConstants
-import com.cloudbox.app.common.UploadTrace
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.model.AccountInfo
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.ProfileRepository
 import com.cloudbox.app.core.domain.repository.ProfileResult
-import com.cloudbox.app.core.domain.repository.UploadProbeResult
-import com.cloudbox.app.core.domain.repository.UploadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /** 设置页 UI 状态 */
@@ -67,10 +62,6 @@ data class SettingsUiState(
     val autoLoad: Boolean = true,
     val accounts: List<AccountInfo> = emptyList(),
     val currentUid: String? = null,
-    /** 上传自检进行中 */
-    val probing: Boolean = false,
-    /** 上传自检结果（含服务端原始回包），非空时 UI 弹出详情 */
-    val probeResult: UploadProbeResult? = null,
     val message: String? = null
 )
 
@@ -79,25 +70,11 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
-    private val profileRepository: ProfileRepository,
-    private val uploadRepository: UploadRepository,
-    private val uploadTrace: UploadTrace
+    private val profileRepository: ProfileRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
-
-    /**
-     * 上传链路时间线（全局单例，跨页面/跨 Worker）。
-     *
-     * 为什么要有这个持久入口：上传失败时网盘页只弹一个 Snackbar，
-     * 一旦被划掉或错过就再也看不到原因（"点看详情看不到"）。
-     * 这里把同一份时间线挂到设置页，任何时候都能回来翻。
-     */
-    val uploadTimeline: StateFlow<List<String>> = uploadTrace.lines
-
-    /** 清空时间线（排查前先清一次，时间线更干净） */
-    fun clearUploadTimeline() = uploadTrace.clear()
 
     init {
         viewModelScope.launch {
@@ -321,68 +298,6 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(message = if (ok) "Cookie 已恢复" else "恢复失败") }
         }
     }
-
-    // ==================== 上传通道自检 ====================
-
-    /**
-     * 跑一次探针上传：往根目录传一个 40 字节 txt，把服务端原始回包展示出来。
-     *
-     * 用途：上传"显示成功却没上去"时，用它一眼看出是没登录（zt=9）、
-     * 参数不对（zt=1 但 text 不是数组），还是域名/端点不对（404、HTML 页面）。
-     */
-    fun runUploadProbe() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(probing = true, probeResult = null) }
-            val r = uploadRepository.probeUpload(-1L)
-            _uiState.update { it.copy(probing = false, probeResult = r) }
-        }
-    }
-
-    /**
-     * 用**用户选的真实文件**跑自检——排障主力。
-     *
-     * 内置探针只有 40 字节，它能过只说明链路通；
-     * 真正失败的文件可能是太大（超时）、格式受限、或文件名编码有问题，
-     * 这些只有拿原文件测才会暴露。
-     */
-    fun runUploadProbeWith(uri: android.net.Uri) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(probing = true, probeResult = null) }
-            val r = withContext(Dispatchers.IO) {
-                val f = copyUriToCache(uri)
-                if (f == null) {
-                    UploadProbeResult(
-                        httpCode = -1,
-                        requestUrl = "未发出",
-                        rawBody = "无法读取所选文件（把它拷进 App 缓存失败）",
-                        hasCredential = false
-                    )
-                } else {
-                    uploadRepository.probeUploadWith(f, -1L)
-                }
-            }
-            _uiState.update { it.copy(probing = false, probeResult = r) }
-        }
-    }
-
-    /** SAF uri → 缓存文件，保留原始文件名（与 UploadViewModel 的做法一致） */
-    private fun copyUriToCache(uri: android.net.Uri): java.io.File? = runCatching {
-        val name = runCatching {
-            context.contentResolver.query(uri, null, null, null, null)?.use { c ->
-                val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0 && !c.isNull(idx)) c.getString(idx) else null
-            }
-        }.getOrNull() ?: "probe_${System.currentTimeMillis()}"
-        val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        val dir = java.io.File(context.cacheDir, "probe").apply { mkdirs() }
-        val out = java.io.File(dir, safeName)
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            out.outputStream().use { output -> input.copyTo(output) }
-        }
-        out.takeIf { it.exists() && it.length() > 0 }
-    }.getOrNull()
-
-    fun dismissProbe() = _uiState.update { it.copy(probeResult = null) }
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 
