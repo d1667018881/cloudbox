@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -68,6 +69,7 @@ import com.cloudbox.app.feature.filelist.dialog.MoveFolderDialog
 import com.cloudbox.app.feature.filelist.dialog.RenameDialog
 import com.cloudbox.app.feature.filelist.dialog.ShareDialog
 import com.cloudbox.app.feature.filelist.dialog.SimpleInputDialog
+import kotlinx.coroutines.launch
 
 /**
  * 文件列表主界面：面包屑 + 双模式（列表/网格）+ 下拉刷新 + 分页 + 多选批量操作。
@@ -94,11 +96,17 @@ fun FileListScreen(
     val autoLoad by viewModel.settingsStore.autoLoad.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
+    // 「从已安装应用上传」拷 APK 时要挂协程（几十 MB，不能占主线程）
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
     var moveTarget by remember { mutableStateOf(false) }
     var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
+    // V32：从已安装应用上传的选择器
+    var showAppPicker by remember { mutableStateOf(false) }
+    // 防重入：APK 拷贝期间用户再点一次会双会话并行
+    var copyingApk by remember { mutableStateOf(false) }
     // "上传到指定目录"：先选目录，选完再拉起文件选择器
     var showUploadFolderPicker by remember { mutableStateOf(false) }
     // 上一轮"上传到指定目录"选中的目录（null = 用当前浏览目录）
@@ -353,14 +361,24 @@ fun FileListScreen(
                             onClick = { showFabMenu = false; showNewFolder = true }
                         )
                         // 上传**永远**走 App 原生直传：选完文件立刻自己传，不弹网页。
-                        // 原版 App 就是这么做的（disasm/home.txt:6537-6560），
-                        // 设置页的「上传通道自检」也实测证明这条路确实传得上去。
+                        // 原版 App 就是这么做的（disasm/home.txt:6537-6560）。
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("上传文件到当前目录") },
                             leadingIcon = { Icon(Icons.Filled.UploadFile, null) },
                             onClick = {
                                 showFabMenu = false
                                 filePicker.launch(arrayOf("*/*"))
+                            }
+                        )
+                        // V32：「从已安装应用上传」——选一个手机上已装好的 App，
+                        // 直接把它的 APK 传上去，省掉"先导出安装包再选文件"那一步。
+                        // 对齐原版「本机应用」目录（file.lua 的 获取应用线程）。
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("上传已安装应用…") },
+                            leadingIcon = { Icon(Icons.Filled.Android, null) },
+                            onClick = {
+                                showFabMenu = false
+                                showAppPicker = true
                             }
                         )
                         // 传去**别的**目录：先选目标目录，再选文件。
@@ -507,10 +525,51 @@ fun FileListScreen(
             }
         )
     }
-    // ==================== 单文件操作菜单 ====================
+
+    // ==================== 从已安装应用上传（V32） ====================
+    //
+    // 选中的应用 → 复制其主 APK 到缓存（同时改名为「应用名_包名尾.apk」）→
+    // 交给 enqueueUpload 走完全相同的既有链路（分批 → Worker）。
+    //
+    // 为什么复用 enqueueUpload 而不是另开一条上传路径：
+    // 那条链路已经处理了防重入、分批、离线等待、进度回放、失败名单等全部边界，
+    // 重新实现一遍只会引入新的时序 bug。APK 就是普通文件，没有特殊之处。
+    //
+    // 复制那一步的必要性（不改名会传出一堆 base.apk）见 InstalledApps.copyToCache。
+    if (showAppPicker) {
+        com.cloudbox.app.feature.upload.InstalledAppPickerDialog(
+            onDismiss = { showAppPicker = false },
+            onPick = { app ->
+                if (!copyingApk) {
+                    copyingApk = true
+                    // 拷 APK 可能几十 MB，必须在 IO 线程
+                    scope.launch {
+                        val dir = java.io.File(context.cacheDir, "uploaded_apps")
+                        val copied = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.cloudbox.app.common.InstalledApps.copyToCache(app, dir)
+                        }
+                        copyingApk = false
+                        showAppPicker = false
+                        if (copied == null) {
+                            uploadViewModel.showMessage(
+                                "读取不到「${app.label}」的安装包（可能被系统限制），请改用「上传文件到当前目录」"
+                            )
+                        } else {
+                            // 目标目录与「上传文件到当前目录」一致：当前浏览目录
+                            uploadViewModel.enqueueUpload(
+                                listOf(android.net.Uri.fromFile(copied)),
+                                state.folderStack.last().first
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    // ==================== 单条操作菜单 ====================
     //
     // 点文件不再直接弹分享框，而是先给菜单 —— 对齐原版行为。
-    // ==================== 单条操作菜单 ====================
     //
     // 按文件夹 / 文件分流，对齐官网菜单（2026-09 实测）：
     // · 文件 ⋯ 菜单：外链分享 / 自定义外链 / 缩略图 / 重命名 / 移动 / 提取码 / 描述 / 短网址 / 直链

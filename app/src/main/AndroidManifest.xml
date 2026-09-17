@@ -24,6 +24,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!--
+      「上传已安装应用」需要枚举本机应用以取回其 APK 路径。
+
+      Android 11（API 30）起引入包可见性限制：不声明本权限时
+      PackageManager.getInstalledPackages() 只会返回极少数包，
+      应用列表会残缺到不可用。用 QUERY_ALL_PACKAGES 申请完整可见性。
+
+      用途声明（应用商店审核需要）：仅在本机枚举已安装应用供用户**手动挑选**，
+      取所选应用的 sourceDir 作为上传源文件；不收集、不上传、不共享应用列表，
+      不涉及任何后台自动读取。
+    -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <!-- 二维码扫描（对齐原版 qr.lua）。声明为非必需，没相机的设备也能装 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

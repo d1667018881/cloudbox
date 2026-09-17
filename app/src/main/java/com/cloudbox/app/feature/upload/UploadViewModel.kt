@@ -290,6 +290,14 @@ class UploadViewModel @Inject constructor(
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 
+    /**
+     * 直接抛一条提示。
+     *
+     * 供调用方在**入队之前**发现本地问题时报错（如"从已安装应用上传"时
+     * 读不到 APK 文件）。走同一个 message 通道，Snackbar 就会照常弹出来。
+     */
+    fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
+
     /** 观察各批次：RUNNING 更新全局进度，终态累计完成数并收集失败名单 */
     private fun observeWorks(
         workIds: List<UUID>,
