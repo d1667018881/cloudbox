@@ -2449,3 +2449,113 @@ context.cacheDir?.walkBottomUp().orEmpty().filter { it.isFile }.sumOf { it.lengt
 ### 31.6 本次到达的版本
 
 `v0.1.143` → 本次提交后 CI 通过则为 `v0.1.145`。
+
+---
+
+## 32. V32 复查：我在自己刚写的代码里找到的 4 个问题（2026-09-18）
+
+> 触发：「再次检查一下是否有问题」。三个 V32 提交都已 CI 通过、功能可用，
+> 但复查仍然找出 4 处实质问题。**"能编译、能跑、CI 绿"不等于没问题**。
+
+### 32.1 APK 副本永久泄漏（真 bug）
+
+`InstalledApps.copyToCache` 会在 `cacheDir/uploaded_apps/` 产出一份
+**完整 APK 副本**（几十 MB），而**没有任何代码清理它**。
+
+注意这里有两份拷贝，容易只看一份：
+| 拷贝 | 位置 | 谁清 |
+|---|---|---|
+| `copyToCache` 产出的（改名副本） | `cacheDir/uploaded_apps/` | ❌ 没人清 ← bug |
+| `enqueueUpload` 内部的（Uri→缓存） | `cacheDir/uploads/<uuid>/` | ✅ Worker 清 |
+
+每上传一个 App 泄漏一份，用户会莫名发现"什么都没干存储少了几百兆"。
+
+**修复**：新增 `purgeStaleCopies`，在下次打开应用选择器时统一清理。
+
+### 32.2 修复 1 引入的竞态（更危险）
+
+加清理的同时必须想清楚"有没有拷贝正在跑"。存在这条时序：
+
+```
+用户选中 App → 拷贝进行中 → 用户立刻重开选择器
+→ 清理正好删掉正在写的文件
+→ copyToCache 的 out.length() 读到 0（已打开的文件被 unlink 后仍可写，但大小不可信）
+→ 上传空/截断的 APK → 服务端秒回包 → 用户看到"上传成功"，云端是坏文件
+```
+
+**这正是本仓库反复栽过的"假成功"**（§20/§21/§24 都在讲这个），
+绝不能在新功能里重演。
+
+**修复**：
+1. `purgeStaleCopies(dir, keep)` 增加 `keep` 参数，跳过在途文件；
+2. 调用方在**启动拷贝之前**（不是之后）用 `targetFileFor()` 算出目标路径
+   并登记为 `inFlightAppCopy`，传给选择器；
+3. 拷贝结束置回 `null`。
+
+> 顺序是关键：登记必须在拷贝开始**前**完成，否则存在一个窗口期，
+> 期间重开选择器会看不到在途文件。
+
+`targetFileFor()` 抽成公共函数的理由：让"登记在途"和"实际写入"
+用**同一套文件名规则**。各写一遍的话，将来改一处忘一处 →
+两个名字对不上 → 跳过逻辑静默失效 → bug 复活。
+
+### 32.3 空备份会把收藏夹清空（数据安全）
+
+`restore()` 收到"既无收藏也无设置"的备份时照常执行，
+用空内容覆盖用户的真实收藏，**且不可撤销**。
+
+触发路径：备份文件被截断/损坏到只剩元信息外壳（`kind` 字段还在），
+`inspect()` 能过（它只校验 `kind` 和 `format_version`），
+但 `favorites` 和 `settings` 都是空。
+
+用户的本意是"恢复备份"，得到的结果却是"删光收藏"。
+
+**修复**：
+1. `RestorePreview` 增加 `isEmpty` 标记；
+2. `restore()` 默认（`allowEmptyFavorites = false`）拒绝空备份；
+3. UI 在预览弹窗用红字说明"里面没有任何内容，恢复只会清空现有收藏，
+   通常是文件不完整"，确认按钮文案改为「**仍要清空**」，
+   用户显式点了才传 `true`。
+
+> 设计原则：**破坏性操作遇到"看起来不对"的输入时，默认拒绝并解释原因，
+> 而不是照常执行然后让用户承担后果。**
+
+### 32.4 另外三处小修
+
+| 问题 | 修复 |
+|---|---|
+| `restore(json, appVersionName)` 的参数从未被使用 | 删除该参数 |
+| `InstalledApps.formatBytes` 未指定 Locale | 固定 `Locale.US`（否则阿拉伯语环境输出 `١٢.٣٤ MB`） |
+| 我自己新加的 `deleteCopied` 无调用点（同类死代码） | 删除 |
+
+第 3 条值得单独说：**我在同一轮改动里批评了死代码，然后自己又写了一个。**
+审计标准必须一贯地用在包括自己新写的代码上。
+
+### 32.5 复查确认无误的部分
+
+不要只列问题 —— 以下都实际查过了：
+
+- **跨页刷新**：收藏夹/文件列表走 Room Flow，设置项走 DataStore Flow
+  （`MainScreen`/`MainActivity`/`FileListScreen` 都是 `collectAsState`），
+  重置或恢复后其他页面**自动更新**，不需要额外通知机制。
+  只有 `ResolveViewModel` / `UploadRepositoryImpl` 用 `.first()` 现读，
+  但那是"每次操作时读一次"的语义，不受影响。
+- **诊断移除无孤儿**：`UploadTimelineSection` / `probeResult` /
+  `runUploadProbe` / `dismissProbe` 全仓出现 0 次。
+- **保留项确实在被用**：`UploadProbeResult` + `UploadProbeDialog`
+  在 `FileListScreen:769` 有真实调用方。
+- **新增 import 全部被使用**。
+
+### 32.6 一个自己挖的坑（编译期才发现）
+
+`appCopyDir` 是 `InstalledApps` object 的成员。同一批改动里：
+- `FileListScreen` 用了全限定 `com.cloudbox.app.common.InstalledApps.appCopyDir(...)` → 编译通过
+- `InstalledAppPickerDialog` 漏了前缀写成 `appCopyDir(...)` → **Unresolved reference**
+
+**教训**：同一个函数在两个文件里两种写法，是"迟早漏前缀"的信号。
+跨文件调用 object 成员时保持写法统一，别一个全限定、一个裸名。
+
+### 32.7 版本
+
+`v0.1.146` → `v0.1.148`（`v0.1.144` 是失败运行，`v0.1.147` 是本次编译失败运行，
+都在标签序列里缺失 —— **标签序列有空洞就说明有构建失败过**，可据此快速回溯）。
