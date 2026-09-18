@@ -8,6 +8,7 @@ import com.cloudbox.app.core.data.local.db.AppDatabase
 import com.cloudbox.app.core.data.local.db.FavoriteShareEntity
 import com.cloudbox.app.core.data.local.datastore.DomainConfigStore
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
+import com.cloudbox.app.core.domain.repository.DownloadRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -58,7 +59,17 @@ class DataBackupRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: AppDatabase,
     private val settingsStore: SettingsStore,
-    private val domainConfigStore: DomainConfigStore
+    private val domainConfigStore: DomainConfigStore,
+    /**
+     * 只为了「重置应用」时正确地清空下载。
+     *
+     * 为什么不在参数里凑合着用 DAO：清空下载不只是删数据库行，
+     * 还必须取消系统 DownloadManager 的任务（见 [resetAppData] 注释）。
+     * 那段逻辑已经在 [DownloadRepository.clearAll] 里实现且被下载页
+     * 使用，直接复用比在这里重写一遍更可靠 —— 重写就意味着
+     * 将来下载模块改了清理语义，这里会静默地不同步。
+     */
+    private val downloadRepository: DownloadRepository
 ) {
 
     /** 备份文件格式版本。将来结构变了要 +1，恢复时据此兼容旧文件 */
@@ -327,11 +338,19 @@ class DataBackupRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             settingsStore.resetAll()
             domainConfigStore.clearOverrides()
+            // 下载记录必须走 DownloadRepository.clearAll()，**不能**直接调
+            // DownloadRecordDao.clearAll()。
+            //
+            // 区别在于前者会先 `downloadManager.remove(record.downloadId)`
+            // 取消系统下载任务，再清表；后者只清表。直接用 DAO 的话，
+            // 重置后系统下载管理器里**仍在跑的任务会继续下载**，
+            // 但 App 的下载列表已经空了 —— 用户看到通知栏有进度、
+            // 进去却找不到这条记录，也没法取消。变成"幽灵下载"。
+            downloadRepository.clearAll()
             db.withTransaction {
                 db.favoriteShareDao().clearAll()
                 db.directLinkDao().clearAll()
                 db.fileCacheDao().clearAllCache()
-                db.downloadRecordDao().clearAll()
                 db.searchIndexDao().clearAll()
             }
         }
@@ -368,7 +387,43 @@ class DataBackupRepository @Inject constructor(
             val name = "cloudbox_backup_$stamp.json"
 
             val dir = resolveBackupDir()
-            val out = File(dir, name).apply { writeText(json) }
+            val out = File(dir, name)
+
+            // 先写临时文件、校验通过后再改名成正式名。
+            //
+            // 为什么要这一步：`writeText` 只保证"调用没有抛异常"，
+            // 不保证"目标文件内容完整"。存储写满、文件系统报错被吞、
+            // 进程在写到一半时被杀 —— 这些情况都可能留下一个**截断的
+            // JSON**。而截断的备份文件对一个已经重置过 App 的用户来说
+            // 等于没备份（他以为自己有救命稻草，其实没有）。
+            //
+            // 做法：写 .tmp → 回读校验（长度一致 + 能解析 + kind 正确）
+            // → 改名。改名在同一个文件系统内是原子的，所以用户看到的
+            // 永远是一个完整的文件，不存在"半截备份"这个中间态。
+            val tmp = File(dir, "$name.tmp")
+            try {
+                tmp.writeText(json)
+
+                // 回读校验：不信 writeText 的返回值，直接看磁盘上到底是什么
+                val written = tmp.readText()
+                if (written.length != json.length) {
+                    throw IllegalStateException(
+                        "备份写入不完整（应写 ${json.length} 字节，实际 ${written.length} 字节），" +
+                            "可能是存储空间不足"
+                    )
+                }
+                // 再解析一次：长度一致但内容损坏（编码问题等）也要拦住
+                inspect(written).getOrThrow()
+
+                if (!tmp.renameTo(out)) {
+                    throw IllegalStateException("备份文件改名失败（目标目录可能不可写）")
+                }
+            } catch (e: Throwable) {
+                // 失败就清掉临时文件，不留下 .tmp 垃圾
+                runCatching { tmp.delete() }
+                throw e
+            }
+
             out to summary
         }
 

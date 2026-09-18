@@ -242,17 +242,36 @@ class SettingsStore @Inject constructor(private val context: Context) {
      */
     suspend fun applySnapshot(map: Map<String, String>) = edit { p ->
         map[KEY_USER_AGENT]?.let { p[keyUserAgent] = it }
-        map[KEY_SUFFIX_SPOOF]?.toBooleanStrictOrNull()?.let { p[keySuffixSpoof] = it }
+        map[KEY_SUFFIX_SPOOF]?.toLooseBool()?.let { p[keySuffixSpoof] = it }
         map[KEY_SPOOF_SUFFIX_LIST]?.let { p[keySpoofSuffixList] = it }
         map[KEY_THIRD_PARTY_RESOLVER]?.let { p[keyThirdPartyResolver] = it }
         map[KEY_DARK_MODE]?.let { p[keyDarkMode] = it }
         map[KEY_LANGUAGE]?.let { p[keyLanguage] = it }
-        map[KEY_WARN_MOBILE_NETWORK]?.toBooleanStrictOrNull()?.let { p[keyWarnMobileNetwork] = it }
-        map[KEY_SHOW_FILE_TYPE_LABEL]?.toBooleanStrictOrNull()?.let { p[keyShowFileTypeLabel] = it }
-        map[KEY_SHOW_ACCOUNT_BUTTON]?.toBooleanStrictOrNull()?.let { p[keyShowAccountButton] = it }
+        map[KEY_WARN_MOBILE_NETWORK]?.toLooseBool()?.let { p[keyWarnMobileNetwork] = it }
+        map[KEY_SHOW_FILE_TYPE_LABEL]?.toLooseBool()?.let { p[keyShowFileTypeLabel] = it }
+        map[KEY_SHOW_ACCOUNT_BUTTON]?.toLooseBool()?.let { p[keyShowAccountButton] = it }
         map[KEY_AUTO_CHECK_DAYS]?.let { p[keyAutoCheckDays] = it }
         map[KEY_LAST_AUTO_CHECK_TIME]?.let { p[keyLastAutoCheckTime] = it }
-        map[KEY_AUTO_LOAD]?.toBooleanStrictOrNull()?.let { p[keyAutoLoad] = it }
+        map[KEY_AUTO_LOAD]?.toLooseBool()?.let { p[keyAutoLoad] = it }
+    }
+
+    /**
+     * 宽松的布尔解析。
+     *
+     * 为什么不用 `toBooleanStrictOrNull()`：那个函数**只认**小写
+     * `"true"` / `"false"`，其余一律返回 null。而我们这里的输入来自
+     * 用户电脑上的备份文件 —— 用户完全可能手工改它，或者用别的工具
+     * 生成（写 `True`、`1`、`yes`）。此时 `?.let` 会静默跳过，
+     * 结果是"恢复了备份，但某一项设置没回来，且没有任何提示"——
+     * 正是 [snapshotAll] 注释里批评过的那种静默失败。
+     *
+     * 这里对常见写法都容忍；实在认不出来才返回 null（调用方跳过该项，
+     * 保留当前值 —— 比强行当成 false 更安全，至少不会平白改变用户设置）。
+     */
+    private fun String.toLooseBool(): Boolean? = when (trim().lowercase()) {
+        "true", "1", "yes", "on" -> true
+        "false", "0", "no", "off" -> false
+        else -> null
     }
 
     /**

@@ -245,8 +245,20 @@ data class ShareFileListResponse(
             )
         }
 
-    /** 是否还有下一页：zt==1 才有（zt==2 取完、zt==3 提取码错误） */
-    val hasMore: Boolean get() = zt == 1
+    // 这里**刻意不提供** hasMore 之类的"还有下一页吗"属性。
+    //
+    // 原因：filemoreajax.php 的翻页判断必须同时看 zt 和本页条数，
+    // 门面化的布尔属性会把这个判断藏起来，让调用方以为可以直接信任它。
+    // 实测语义是：
+    //   zt=1 还有下一页；zt=2 取完（text="no file"）；zt=3 提取码错误
+    // 而 zt 只是状态码，**不能**简化成"zt==1 即还有页"——服务端异常时
+    // 可能返回 zt=1 但 text 为空，此时继续翻页会白跑到底（上限 50 次）。
+    //
+    // 真实调用方（DirectLinkRepositoryImpl.resolveFolderFromPage）就是
+    // 显式 when(resp.zt) 并叠加"本页 0 条"兜底的写法，这是正确形态。
+    //
+    // 而网盘列表（FileListResponse）可以用属性，因为那边的判据
+    // "本页 18 条"是能从数据本身验证的，不依赖任何状态码。
 }
 
 /**
