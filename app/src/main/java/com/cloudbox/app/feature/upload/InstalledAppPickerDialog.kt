@@ -92,7 +92,7 @@ fun InstalledAppPickerDialog(
             //
             // 清的是 uploaded_apps（本功能的改名副本），不是 uploads/
             // （那是 enqueueUpload 自己的目录，由 Worker 负责回收）。
-            InstalledApps.purgeStaleCopies(appCopyDir(context), keep = inFlightCopy)
+            InstalledApps.purgeStaleCopies(InstalledApps.appCopyDir(context), keep = inFlightCopy)
             InstalledApps.list(context, includeSystem)
         }
         loading = false
