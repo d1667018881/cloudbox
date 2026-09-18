@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.drawable.Drawable
 import java.io.File
+import java.util.Locale
 
 /**
  * 本机已安装应用枚举（「上传已安装应用」功能的数据源）。
@@ -34,6 +35,15 @@ import java.io.File
  * 「从已安装应用上传」时调用**，不做任何后台枚举。
  */
 object InstalledApps {
+
+    /**
+     * APK 副本的落盘目录（`cacheDir/uploaded_apps`）。
+     *
+     * 提成公共函数是为了让"写"和"清"两处用同一个常量：
+     * 目录名散落在两个文件里手写字符串，改一处忘另一处就会
+     * 出现"清了但没清干净"这种极难发现的问题。
+     */
+    fun appCopyDir(context: Context): File = File(context.cacheDir, "uploaded_apps")
 
     /**
      * 一条已安装应用记录。
@@ -109,12 +119,36 @@ object InstalledApps {
     /**
      * 给用户看的体积换算（对齐原版 fn78：≥1GB 用 GB，否则 ≥1MB 用 MB，
      * 否则 ≥1KB 用 KB，再否则用 B）。
+     *
+     * 显式指定 `Locale.US`：`String.format` 不带 Locale 会用系统默认，
+     * 在阿拉伯语 / 波斯语等使用本国数字的环境下会输出 `١٢.٣٤ MB`
+     * （东阿拉伯数字），中文用户看到的是一串看不懂的字符。
+     * 体积数值属于"技术数字"，不随界面语言本地化，固定用 ASCII 数字。
      */
     fun formatBytes(bytes: Long): String = when {
-        bytes >= 1L shl 30 -> String.format("%.2f GB", bytes.toDouble() / (1L shl 30))
-        bytes >= 1L shl 20 -> String.format("%.2f MB", bytes.toDouble() / (1L shl 20))
-        bytes >= 1L shl 10 -> String.format("%.2f KB", bytes.toDouble() / (1L shl 10))
+        bytes >= 1L shl 30 -> String.format(Locale.US, "%.2f GB", bytes.toDouble() / (1L shl 30))
+        bytes >= 1L shl 20 -> String.format(Locale.US, "%.2f MB", bytes.toDouble() / (1L shl 20))
+        bytes >= 1L shl 10 -> String.format(Locale.US, "%.2f KB", bytes.toDouble() / (1L shl 10))
         else -> "$bytes B"
+    }
+
+    /**
+     * 算出某个应用对应的副本文件路径（不创建、不拷贝）。
+     *
+     * 单独提出来，是为了让"拷贝前先登记在途文件"和"真正执行拷贝"
+     * 两处对**目标路径的判断完全一致**。若各写一遍文件名拼接规则，
+     * 一旦将来改动（比如加长 `take(40)`），两处会悄悄不一致，
+     * 结果是"登记的文件名"和"实际写入的文件名"不同 →
+     * 防竞态的跳过逻辑失效 → 又回到"拷贝途中被删"的 bug。
+     */
+    fun targetFileFor(entry: AppEntry, targetDir: File): File {
+        // 文件名：应用名_包名后段.apk
+        // 带上包名是因为不同应用重名很常见（"文件管理器"能有好几个），
+        // 而包名唯一 —— 但包名通常很长（com.tencent.mm），所以只取最后一段。
+        val safeLabel = entry.label.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(40)
+        val pkgTail = entry.packageName.substringAfterLast('.')
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        return File(targetDir, "${safeLabel}_${pkgTail}.apk")
     }
 
     /**
@@ -138,6 +172,20 @@ object InstalledApps {
      * "拷贝到缓存"不重复：那一步是 Uri → 缓存，这里承担的是
      * **改名**和**跨沙箱读取**这两件事。
      *
+     * ─────────────────────────────────────────────────────────────
+     * ⚠️ 残留副本由 [purgeStaleCopies] 在下次打开选择器时清理
+     * ─────────────────────────────────────────────────────────────
+     * 这里产出的是一份**完整 APK 副本**（几十 MB），而 `enqueueUpload`
+     * 内部还会再拷一份到 `uploads/<uuid>/`（那份由 Worker 自己回收）。
+     *
+     * 那这份副本谁来清？**不能在上传后立刻删** ——
+     * `enqueueUpload` 是异步的（拷贝在 `viewModelScope.launch` 里做），
+     * 调用方拿到返回时内容还没读完，此时删源文件会让它读到 0 字节。
+     *
+     * 所以改为在**下次打开应用选择器时**统一清理（见 [purgeStaleCopies]）。
+     * 清理时会跳过"正在拷贝中"的那一个（由调用方传入）。代价是副本会多留
+     * 一会儿 —— 但它在 cacheDir 下，系统空间紧张时会自行回收，不会无限增长。
+     *
      * @return 复制后的文件；失败返回 null（调用方据此提示，不崩）
      */
     fun copyToCache(entry: AppEntry, targetDir: File): File? =
@@ -146,17 +194,57 @@ object InstalledApps {
             if (!src.exists() || !src.isFile) return null
 
             targetDir.mkdirs()
-            // 文件名：应用名_包名后段.apk
-            // 带上包名是因为不同应用重名很常见（"文件管理器"能有好几个），
-            // 而包名唯一 —— 但包名通常很长（com.tencent.mm），所以只取最后一段。
-            val safeLabel = entry.label.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(40)
-            val pkgTail = entry.packageName.substringAfterLast('.')
-                .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            val out = File(targetDir, "${safeLabel}_${pkgTail}.apk")
+            val out = targetFileFor(entry, targetDir)
 
             src.inputStream().use { ins ->
                 out.outputStream().use { o -> ins.copyTo(o) }
             }
-            out.takeIf { it.exists() && it.length() > 0 }
+
+            // 拷完发现是空文件 / 中途失败留下的半截文件：一并删掉再返回 null，
+            // 否则失败路径同样会留下垃圾（而且是个看起来"正常"的 .apk，
+            // 用户和后续排查都会被它误导）。
+            if (!out.exists() || out.length() <= 0L) {
+                out.delete()
+                return null
+            }
+            out
         }.getOrNull()
+
+    /**
+     * 清空 `uploaded_apps` 目录里上一轮遗留的副本。
+     *
+     * 在打开应用选择器时调用（见 `InstalledAppPickerDialog`）。这个时机
+     * 相对安全：上一轮的拷贝通常已经结束，本次还没开始选。
+     *
+     * 为什么不在上传后立刻删：`enqueueUpload` 是异步的，调用方拿到返回时
+     * 内容还没读完，删源文件会让它读到 0 字节（详见 [copyToCache] 注释）。
+     *
+     * 为什么必须有这个兜底：进程被杀死、上传任务根本没起来、用户选中后
+     * 又反悔 —— 这些路径都不会有人来删副本，不清就会一直累积。
+     *
+     * ─────────────────────────────────────────────────────────────
+     * ⚠️ [keep] 参数不是可选的优化，是**防竞态的必要条件**
+     * ─────────────────────────────────────────────────────────────
+     * 存在这样一条时序：用户选中 App → 上一轮的拷贝还在进行 → 用户立刻
+     * 再打开选择器 → 这里的删除**正好把正在写的那份文件删掉** →
+     * `copyToCache` 的 `out.length()` 读到 0（Linux 下已打开的文件被
+     * unlink 后仍可写，但大小不再可信）→ 上传一个空/截断的 APK →
+     * 服务端秒回包 → 用户看到"上传成功"但云端是个坏文件。
+     *
+     * 这正是本仓库反复栽过的"假成功"，绝不能在这里重演。
+     * 因此调用方必须把"当前正在拷贝的文件"传进来，这里跳过它。
+     *
+     * @param keep 不能删的文件（正在拷贝中）；null 表示没有在途任务
+     */
+    fun purgeStaleCopies(targetDir: File, keep: File? = null) {
+        runCatching {
+            targetDir.listFiles()?.forEach { f ->
+                // 用绝对路径比较：调用方持有的可能是同一个 File 的另一次构造，
+                // File 的 equals 虽然按路径比较，但显式比绝对路径更明确、不受
+                // 相对路径写法影响。
+                if (keep != null && f.absolutePath == keep.absolutePath) return@forEach
+                f.delete()
+            }
+        }
+    }
 }

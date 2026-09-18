@@ -46,7 +46,7 @@ import kotlinx.coroutines.withContext
  * 交给常规上传链路（等价于用户先导出 APK 再选文件，但省掉了导出那一步）。
  *
  * ─────────────────────────────────────────────────────────────
- * 两个刻意的设计
+ * 三个刻意的设计
  * ─────────────────────────────────────────────────────────────
  * 1. **枚举放在协程里做，且带"加载中"态**。`getInstalledPackages(0)`
  *    在装有几百个应用的机器上要几百毫秒到一两秒，在主线程做会卡帧。
@@ -56,10 +56,17 @@ import kotlinx.coroutines.withContext
  *    （ty_core.lua:709，默认 false）。系统应用用户基本不会去备份，
  *    而且数量多（动辄上百个）会把常用的第三方应用挤下去。
  *    给一个开关让需要的人自己打开。
+ *
+ * 3. **打开时顺手清理上一轮的 APK 副本**，但必须跳过 [inFlightCopy]。
+ *    详见 `InstalledApps.purgeStaleCopies` 的注释 —— 不跳过会造成
+ *    "拷贝途中被删" → 上传空文件 → 假成功。
+ *
+ * @param inFlightCopy 当前正在拷贝的副本文件（调用方持有）；null 表示无在途任务
  */
 @Composable
 fun InstalledAppPickerDialog(
     onDismiss: () -> Unit,
+    inFlightCopy: java.io.File? = null,
     onPick: (InstalledApps.AppEntry) -> Unit
 ) {
     val context = LocalContext.current
@@ -72,6 +79,20 @@ fun InstalledAppPickerDialog(
     LaunchedEffect(includeSystem) {
         loading = true
         apps = withContext(Dispatchers.IO) {
+            // 顺手清掉上一轮遗留的 APK 副本。
+            //
+            // 为什么在这里清、而不是"上传完就删"：enqueueUpload 是**异步**的
+            // （内部 viewModelScope.launch 里才做 Uri → 缓存 的拷贝），
+            // 调用方拿到返回时内容还没读完，此时删源文件会让它读到 0 字节。
+            // 而打开选择器的这一刻相对安全 —— 上一轮的拷贝通常已结束。
+            //
+            // inFlightCopy 必须传：万一上一轮拷贝还在跑（用户选中后立刻
+            // 重开选择器），删除会把正在写的文件 unlink 掉，让 copyToCache
+            // 读到一个 0 长度文件 → 传上去是坏的 APK。详见 purgeStaleCopies。
+            //
+            // 清的是 uploaded_apps（本功能的改名副本），不是 uploads/
+            // （那是 enqueueUpload 自己的目录，由 Worker 负责回收）。
+            InstalledApps.purgeStaleCopies(appCopyDir(context), keep = inFlightCopy)
             InstalledApps.list(context, includeSystem)
         }
         loading = false

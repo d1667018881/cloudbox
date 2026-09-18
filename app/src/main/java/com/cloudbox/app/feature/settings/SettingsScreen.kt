@@ -595,7 +595,7 @@ fun SettingsScreen(
     state.restorePreview?.let { p ->
         AlertDialog(
             onDismissRequest = viewModel::dismissRestorePreview,
-            title = { Text("确认恢复") },
+            title = { Text(if (p.isEmpty) "这份备份是空的" else "确认恢复") },
             text = {
                 Column {
                     Text("这份备份包含 " +
@@ -609,16 +609,32 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text(
-                        "⚠️ 恢复会**清空现有收藏夹**再写入备份内容，" +
-                            "当前已有的收藏将无法找回。设置项按备份内容覆盖，不会动登录状态。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    if (p.isEmpty) {
+                        // 空备份：文件可能是被截断了，恢复它不会有任何收益，
+                        // 只会把当前收藏清空 —— 必须用最强措辞拦住。
+                        Text(
+                            "⚠️ 里面既没有收藏也没有设置，恢复它只会把您现有的收藏夹清空，" +
+                                "不会带回任何内容。\n\n" +
+                                "这通常说明备份文件不完整（传输/同步中被截断）。" +
+                                "建议取消，重新找一份完整的备份文件。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        Text(
+                            "⚠️ 恢复会清空现有收藏夹再写入备份内容，" +
+                                "当前已有的收藏将无法找回。设置项按备份内容覆盖，不会动登录状态。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = viewModel::confirmRestore) { Text("确认恢复") }
+                TextButton(onClick = viewModel::confirmRestore) {
+                    // 空备份时把按钮文案改成"仍要清空"，让用户明确知道自己点的是什么
+                    Text(if (p.isEmpty) "仍要清空" else "确认恢复")
+                }
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissRestorePreview) { Text("取消") }

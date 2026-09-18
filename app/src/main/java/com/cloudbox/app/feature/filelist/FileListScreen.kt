@@ -107,6 +107,10 @@ fun FileListScreen(
     var showAppPicker by remember { mutableStateOf(false) }
     // 防重入：APK 拷贝期间用户再点一次会双会话并行
     var copyingApk by remember { mutableStateOf(false) }
+    // 正在拷贝中的 APK 副本文件。选择器打开时会清理上一轮残留，
+    // 必须把这个文件排除在外 —— 否则拷贝途中被删会传出空文件（假成功）。
+    // 详见 InstalledApps.purgeStaleCopies 的注释。
+    var inFlightAppCopy by remember { mutableStateOf<java.io.File?>(null) }
     // "上传到指定目录"：先选目录，选完再拉起文件选择器
     var showUploadFolderPicker by remember { mutableStateOf(false) }
     // 上一轮"上传到指定目录"选中的目录（null = 用当前浏览目录）
@@ -539,15 +543,26 @@ fun FileListScreen(
     if (showAppPicker) {
         com.cloudbox.app.feature.upload.InstalledAppPickerDialog(
             onDismiss = { showAppPicker = false },
+            // 把"正在拷贝中的文件"告诉选择器：它打开时会清理上一轮残留，
+            // 必须跳过这个文件，否则会在拷贝途中把它删掉（详见 purgeStaleCopies 注释）
+            inFlightCopy = inFlightAppCopy,
             onPick = { app ->
                 if (!copyingApk) {
                     copyingApk = true
+                    // 先算出目标路径并登记为"在途"，再启动协程做真正的拷贝。
+                    // 顺序不能反：登记必须在拷贝开始**之前**完成，否则选择器
+                    // 在这个窗口期被重开时，清理逻辑看不到它、会把它删掉。
+                    val dir = com.cloudbox.app.common.InstalledApps.appCopyDir(context)
+                    val target = com.cloudbox.app.common.InstalledApps
+                        .targetFileFor(app, dir)
+                    inFlightAppCopy = target
                     // 拷 APK 可能几十 MB，必须在 IO 线程
                     scope.launch {
-                        val dir = java.io.File(context.cacheDir, "uploaded_apps")
                         val copied = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.cloudbox.app.common.InstalledApps.copyToCache(app, dir)
                         }
+                        // 拷贝结束，解除"在途"标记：此后重开选择器可以放心清理它
+                        inFlightAppCopy = null
                         copyingApk = false
                         showAppPicker = false
                         if (copied == null) {

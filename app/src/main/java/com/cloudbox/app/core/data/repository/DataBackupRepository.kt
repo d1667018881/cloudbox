@@ -165,12 +165,15 @@ class DataBackupRepository @Inject constructor(
             )
         }
         val favArr = root.optJSONArray("favorites") ?: JSONArray()
+        val settingCount = root.optJSONObject("settings")?.length() ?: 0
         RestorePreview(
             favoriteCount = favArr.length(),
-            settingCount = root.optJSONObject("settings")?.length() ?: 0,
+            settingCount = settingCount,
             backupTime = root.optLong("backup_time", 0L),
             backupAppVersion = root.optString("backup_version", "未知"),
-            backupVersionCode = root.optLong("backup_version_code", 0L)
+            backupVersionCode = root.optLong("backup_version_code", 0L),
+            // 空备份标记：UI 据此弹强警告，且要求用户显式确认后才允许恢复
+            isEmpty = favArr.length() == 0 && settingCount == 0
         )
     }
 
@@ -180,7 +183,9 @@ class DataBackupRepository @Inject constructor(
         val settingCount: Int,
         val backupTime: Long,
         val backupAppVersion: String,
-        val backupVersionCode: Long
+        val backupVersionCode: Long,
+        /** 收藏与设置都是空的 —— 恢复它等于清空当前数据（见 [restore] 的说明） */
+        val isEmpty: Boolean
     )
 
     /**
@@ -190,13 +195,43 @@ class DataBackupRepository @Inject constructor(
      * 备份里没有的 key 保留当前值，这样即使备份来自旧版本、
      * 缺少后来新增的设置项，也不会把它们重置成默认值。
      *
+     * ─────────────────────────────────────────────────────────────
+     * 关于 [allowEmptyFavorites]
+     * ─────────────────────────────────────────────────────────────
+     * 这个参数存在的唯一理由是**保护用户数据**。
+     *
+     * 正常情况下，一份既没有收藏、又没有设置的"备份"，只可能是
+     * 用户在 App 里**什么都没攒下**的时候导出的（新装、刚重置），
+     * 用它恢复没有任何损失。
+     *
+     * 但还有一种可能：文件被截断/损坏到只剩元信息外壳，
+     * `inspect()` 能过（`kind` 字段还在），favorites 与 settings 都是空。
+     * 此时若照常执行，就会**用空内容把用户真实的收藏夹整个清掉** ——
+     * 而用户的本意是"恢复备份"，得到的结果却是"删光收藏"，
+     * 且不可撤销。这种情况必须拦下来。
+     *
+     * 所以默认（false）拒绝"两样都空"的备份；UI 侧在预览弹窗里
+     * 明确告知用户"这份备份是空的"，由用户显式确认后才用 true 调用。
+     *
      * @return 恢复摘要
      */
-    suspend fun restore(json: String, appVersionName: String): Result<RestoreSummary> =
+    suspend fun restore(
+        json: String,
+        allowEmptyFavorites: Boolean = false
+    ): Result<RestoreSummary> =
         runCatching {
             val preview = inspect(json).getOrThrow()
             val root = JSONObject(json)
             val favArr = root.optJSONArray("favorites") ?: JSONArray()
+
+            // 空备份保护：收藏与设置都是空的，说明这份备份没有可恢复的内容。
+            // 继续执行只会造成破坏（清空现有收藏），没有任何收益。
+            if (preview.favoriteCount == 0 && preview.settingCount == 0 && !allowEmptyFavorites) {
+                throw IllegalArgumentException(
+                    "这份备份里没有收藏也没有设置，恢复它会把当前内容清空。" +
+                        "请确认文件是否完整，或改用「重置应用」达到同样目的"
+                )
+            }
 
             // 收藏夹：整体替换（放在事务里，中途失败不会留下半套数据）
             val items = (0 until favArr.length()).mapNotNull { i ->

@@ -82,7 +82,9 @@ data class RestorePreviewUi(
     val favoriteCount: Int,
     val settingCount: Int,
     val backupTime: Long,
-    val backupAppVersion: String
+    val backupAppVersion: String,
+    /** 空备份：UI 需用红字警告"恢复它等于清空当前数据" */
+    val isEmpty: Boolean = false
 )
 
 @HiltViewModel
@@ -434,7 +436,8 @@ class SettingsViewModel @Inject constructor(
                             favoriteCount = p.favoriteCount,
                             settingCount = p.settingCount,
                             backupTime = p.backupTime,
-                            backupAppVersion = p.backupAppVersion
+                            backupAppVersion = p.backupAppVersion,
+                            isEmpty = p.isEmpty
                         )
                     )
                 }
@@ -447,10 +450,13 @@ class SettingsViewModel @Inject constructor(
     /** 用户在预览弹窗里点了「确认恢复」 */
     fun confirmRestore() {
         val json = _uiState.value.pendingRestoreJson ?: return
+        val preview = _uiState.value.restorePreview ?: return
         if (_uiState.value.dataBusy) return
         viewModelScope.launch {
             _uiState.update { it.copy(dataBusy = true, restorePreview = null, pendingRestoreJson = null) }
-            dataBackupRepository.restore(json, appVersionName())
+            // 空备份：把用户的"确认"当作显式授权（预览弹窗已经用红字警告过）。
+            // 非空备份走默认的 false，多一层保险。
+            dataBackupRepository.restore(json, allowEmptyFavorites = preview.isEmpty)
                 .onSuccess { s ->
                     // 恢复期间设置项被替换，界面上的开关值必须重新读一遍，
                     // 否则用户会看到"设置页显示的还是旧值，但实际已经是备份里的值"。
