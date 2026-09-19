@@ -2791,6 +2791,33 @@ LaunchedEffect(state.uaInput) { uaInput = state.uaInput }
 > 前两轮靠"检查我改了什么"，第三轮靠"换一个提问角度"——
 > 后者的收获率（1/1 命中真问题）并不比前者低。
 
-### 34.5 版本
+### 34.5 一个自己造出来的编译错误（值得单独记）
 
-`v0.1.151` → `v0.1.152`。
+`4f0bda1` 里我把输入框缓存提升为 state 字段时，**误留了两行旧的裸赋值**：
+
+```kotlin
+uaInput = safe        // ← 这里是 ViewModel 的方法体，不是某个接收者内部
+_uiState.update { it.copy(userAgent = safe, uaInput = safe, ...) }
+```
+
+字段确实存在（`SettingsUiState` 的成员），但它**不在当前作用域**里 ——
+`it.copy(...)` 里的 `uaInput` 才是成员初始化，裸写的那个是自由标识符。
+CI 报得很准：
+
+```
+e: SettingsViewModel.kt:165:13 Unresolved reference 'uaInput'.
+e: SettingsViewModel.kt:196:13 Unresolved reference 'resolverInput'.
+```
+
+**教训不是"要小心"，而是"批量替换要看清作用域"**：
+同一个名字在两种上下文里都合法（一个在 `copy` 的参数位置、
+一个在方法体里），文本替换无法区分它们。修法是删掉两行冗余赋值
+（字段本来就被 `copy` 写入了），提交 `68b712a`。
+
+> 这件事和 §34.1 那个 bug 是同一根源的两种表现：
+> **"看起来一样的东西在不同作用域里含义不同"**。
+> 前者的 `remember` 在弹窗内外含义不同，后者的字段名在 `copy` 内外含义不同。
+
+### 34.6 版本
+
+`v0.1.151` → `v0.1.152`（编译失败）→ `v0.1.153`（2m 48s 通过）。
