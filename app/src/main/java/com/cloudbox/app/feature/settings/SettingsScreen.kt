@@ -62,8 +62,17 @@ fun SettingsScreen(
     // 自定义伪装后缀列表
     var spoofDialog by remember { mutableStateOf(false) }
     var spoofInput by remember { mutableStateOf("") }
-    var uaInput by remember { mutableStateOf(state.userAgent) }
-    var resolverInput by remember { mutableStateOf(state.thirdPartyResolver) }
+    // UA / 第三方解析 URL 的输入框初值。
+    //
+    // ⚠️ 不要退回 `remember { mutableStateOf(state.userAgent) }`：
+    //    输入框是弹窗里的，关闭时整块从组合树移除，但 remember 的值会保留。
+    //    "恢复备份/重置"改变了设置后再次打开弹窗，看到的还会是旧文本，
+    //    与列表行上显示的值自相矛盾。改为跟随 state 的 LaunchedEffect，
+    //    输入过程中不会被覆盖（state 只在初始化/保存/恢复时变，不会逐字符变）。
+    var uaInput by remember { mutableStateOf(state.uaInput) }
+    var resolverInput by remember { mutableStateOf(state.resolverInput) }
+    LaunchedEffect(state.uaInput) { uaInput = state.uaInput }
+    LaunchedEffect(state.resolverInput) { resolverInput = state.resolverInput }
     // 账号中心设置（task=7/8/10/15）
     var extLinkDialog by remember { mutableStateOf(false) }
     var linkCodeDialog by remember { mutableStateOf(false) }

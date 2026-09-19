@@ -74,7 +74,19 @@ data class SettingsUiState(
     /** 恢复前的预览：用户选完文件后先弹它确认，确认了才真正写库 */
     val restorePreview: RestorePreviewUi? = null,
     /** 恢复确认弹窗要用的原始备份文本（预览时读出来的，避免再读一次文件） */
-    val pendingRestoreJson: String? = null
+    val pendingRestoreJson: String? = null,
+    /**
+     * UA / 第三方解析 URL 的**输入框缓存**。
+     *
+     * 为什么放在 ViewModel 而不是 Composable 的 `remember` 里：
+     * `remember` 只在首次组合时取初值，dialog 关闭（从组合树移除）后
+     * 那份值不会丢，再次打开时依旧是旧的。于是"恢复备份改了设置 → 打开
+     * 输入框看到的还是旧文本"这种自相矛盾就会出现（详见 [reloadSettingsFromStore]）。
+     * 放进 state 后，输入框可以靠 `LaunchedEffect` 与 state 保持同步。
+     */
+    val uaInput: String = "",
+    /** 同 [uaInput]，见其注释 */
+    val resolverInput: String = ""
 )
 
 /** 恢复预览（UI 层副本，不直接暴露 Repository 的 data class，避免 UI 依赖数据层类型） */
@@ -121,7 +133,9 @@ class SettingsViewModel @Inject constructor(
                     showFileTypeLabel = showTypeLabel,
                     showAccountButton = showAccountBtn,
                     autoCheckFavoritesDays = autoCheckDays,
-                    autoLoad = autoLoadPref
+                    autoLoad = autoLoadPref,
+                    uaInput = ua,
+                    resolverInput = resolver
                 )
             }
         }
@@ -143,8 +157,13 @@ class SettingsViewModel @Inject constructor(
 
     fun saveUserAgent(ua: String) {
         viewModelScope.launch {
-            settingsStore.setUserAgent(ua.trim().ifEmpty { AppConstants.DESKTOP_UA })
-            _uiState.update { it.copy(userAgent = ua.trim().ifEmpty { AppConstants.DESKTOP_UA }, message = "UA 已保存（立即生效）") }
+            val safe = ua.trim().ifEmpty { AppConstants.DESKTOP_UA }
+            settingsStore.setUserAgent(safe)
+            // 同步输入框缓存（理由见 [reloadSettingsFromStore]）：
+            // 用户清空输入框时 state 会回落默认 UA，输入框也必须跟着回落，
+            // 否则下次打开看到的是一片空白，而实际生效的是默认 UA。
+            uaInput = safe
+            _uiState.update { it.copy(userAgent = safe, uaInput = safe, message = "UA 已保存（立即生效）") }
         }
     }
 
@@ -168,8 +187,14 @@ class SettingsViewModel @Inject constructor(
 
     fun saveThirdPartyResolver(url: String) {
         viewModelScope.launch {
-            settingsStore.setThirdPartyResolver(url.trim())
-            _uiState.update { it.copy(thirdPartyResolver = url.trim()) }
+            val safe = url.trim()
+            settingsStore.setThirdPartyResolver(safe)
+            // 输入框缓存同步成规范化后的值：手动输入时是"点保存 → dialog 立刻关闭"，
+            // 看不出差别；但「恢复备份」会直接改这个设置，下一次打开 dialog 时
+            // 输入框拿到的还是关闭时留下的旧文本，用户会以为恢复没生效。
+            // 详见 [reloadSettingsFromStore]。
+            resolverInput = safe
+            _uiState.update { it.copy(thirdPartyResolver = safe, resolverInput = safe) }
         }
     }
 
@@ -523,6 +548,16 @@ class SettingsViewModel @Inject constructor(
     /** 重新从 DataStore 读全部设置项，覆盖到 UI state（恢复 / 重置后调用） */
     private suspend fun reloadSettingsFromStore() {
         val s = settingsStore
+        // ⚠️ 设置页的 UA / 第三方解析 URL 是**弹窗里的输入框**，其初值必须在
+        //    这里一并刷新，否则恢复/重置后会自相矛盾：
+        //
+        //    输入框原本写成 `remember { mutableStateOf(state.userAgent) }` ——
+        //    remember 只在首次组合时取初值，且弹窗关闭（从组合树移除）后
+        //    那份值不会丢。结果是"列表行显示的是新 UA，点开输入框看到的还是
+        //    旧的"，用户顺手点一下「保存」就把刚恢复的值覆盖回去了。
+        //
+        //    现在输入框跟随 [SettingsUiState.uaInput] / [SettingsUiState.resolverInput]，
+        //    所以这两个字段必须在这里跟着一起更新。
         _uiState.update {
             it.copy(
                 userAgent = s.userAgent.first(),
@@ -535,7 +570,10 @@ class SettingsViewModel @Inject constructor(
                 showFileTypeLabel = s.showFileTypeLabel.first(),
                 showAccountButton = s.showAccountButton.first(),
                 autoCheckFavoritesDays = s.autoCheckFavoritesDays.first(),
-                autoLoad = s.autoLoad.first()
+                autoLoad = s.autoLoad.first(),
+                // 输入框缓存跟着刷新，注释见本函数开头
+                uaInput = s.userAgent.first(),
+                resolverInput = s.thirdPartyResolverUrl.first()
             )
         }
     }
