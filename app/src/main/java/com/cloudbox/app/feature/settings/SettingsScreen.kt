@@ -392,7 +392,10 @@ fun SettingsScreen(
             HorizontalDivider()
 
             Spacer(Modifier.height(24.dp))
-            Text("云匣 v0.1.143 · 仅供个人学习使用",
+            // 版本号取 BuildConfig（CI 注入），**不要**硬编码字面量。
+            // 这里原本写死 "v0.1.143"，发到 v0.1.154 时还停在旧值 ——
+            // 用户报问题时按这行说法给版本号，我们就会去查错的版本。
+            Text("云匣 v${com.cloudbox.app.BuildConfig.VERSION_NAME} · 仅供个人学习使用",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp))

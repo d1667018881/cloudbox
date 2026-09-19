@@ -3,7 +3,10 @@ package com.cloudbox.app.core.data.repository
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
+import androidx.work.WorkManager
 import com.cloudbox.app.core.data.local.db.AppDatabase
 import com.cloudbox.app.core.data.local.db.FavoriteShareEntity
 import com.cloudbox.app.core.data.local.datastore.DomainConfigStore
@@ -11,6 +14,7 @@ import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.repository.DownloadRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,6 +24,7 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resumeWith
 
 /**
  * 数据备份 / 恢复 / 清理（V32 新增）。
@@ -69,7 +74,13 @@ class DataBackupRepository @Inject constructor(
      * 使用，直接复用比在这里重写一遍更可靠 —— 重写就意味着
      * 将来下载模块改了清理语义，这里会静默地不同步。
      */
-    private val downloadRepository: DownloadRepository
+    private val downloadRepository: DownloadRepository,
+    /**
+     * 只为了「清缓存 / 重置」前确认没有在途上传（见 [clearCache] 的说明）。
+     *
+     * Hilt 已通过 AppModule.provideWorkManager 提供它（UploadViewModel 也在用）。
+     */
+    private val workManager: WorkManager
 ) {
 
     /** 备份文件格式版本。将来结构变了要 +1，恢复时据此兼容旧文件 */
@@ -78,6 +89,7 @@ class DataBackupRepository @Inject constructor(
         const val KIND_TAG = "cloudbox_backup"
         /** 备份文件存放的子目录名（公共下载目录下 / 应用私有下载目录下同名） */
         const val BACKUP_DIR_NAME = "云匣备份"
+        const val TAG = "CloudBoxBackup"
     }
 
     /**
@@ -305,8 +317,42 @@ class DataBackupRepository @Inject constructor(
             .sumOf { it.length() }
     }.getOrDefault(0L)
 
-    /** 清空应用缓存目录。返回清理出的字节数 */
+    /**
+     * 清空应用缓存目录。返回清理出的字节数。
+     *
+     * ─────────────────────────────────────────────────────────────
+     * ⚠️ 上传进行中时**必须拒绝**
+     * ─────────────────────────────────────────────────────────────
+     * 待上传文件的唯一副本就放在 `cacheDir/uploads/<uuid>/` 下（见
+     * `UploadViewModel.copyUriToCache`）。而这里做的是 `cacheDir` 全量删除，
+     * 于是会出现这样一条真实路径：
+     *
+     * ```
+     * 用户 FAB 选 10 个文件 → 已拷进 cacheDir → 切到「我的」→ 设置 → 清除缓存
+     *   → uploads/ 被整体删掉
+     *   → Worker 执行时 File.exists() == false
+     *   → 全部计入失败名单「本地缓存文件已丢失，请重新选择后上传」
+     * ```
+     *
+     * 结果不算"假成功"（这一点 V5 已经修好了，Worker 会如实上报失败），
+     * 但用户刚选完的一整批文件**无声变砖**，且提示是"请重新选择"——
+     * 他刚选过。清缓存这个动作本身就写着"清理上传中间文件"，
+     * 用户不会预期它把**还没传上去的**文件也清掉。
+     *
+     * 所以这里用 WorkManager 查一次在途上传：只要还有未完成的批次，
+     * 就抛异常让调用方把原因如实告诉用户。[resetAppData] 也走这个函数，
+     * 因此"重置应用"同样被保护 —— 重置连 DB 一起清，再删掉待传文件，
+     * 用户的损失不只是一批文件。
+     *
+     * @throws IllegalStateException 有上传任务在途时
+     */
     suspend fun clearCache(): Long = withContext(Dispatchers.IO) {
+        if (hasUploadInFlight()) {
+            throw IllegalStateException(
+                "有文件正在上传，现在清缓存会把还没传上去的文件删掉。" +
+                    "请等上传结束后再清理"
+            )
+        }
         val before = cacheSizeBytes()
         runCatching {
             context.cacheDir?.listFiles()?.forEach { it.deleteRecursively() }
@@ -314,6 +360,35 @@ class DataBackupRepository @Inject constructor(
         // 清完重算：目录里可能有系统刚写回的文件，用差值更能反映真实释放量
         val after = cacheSizeBytes()
         (before - after).coerceAtLeast(0L)
+    }
+
+    /**
+     * 是否还有上传批次未到终态。
+     *
+     * 判定口径与 `UploadViewModel.init` 的"会话恢复"完全一致：按
+     * `UploadWorker.TAG_UPLOAD_SESSION` 取全部批次，只要有一条
+     * `!state.isFinished`（ENQUEUED / RUNNING / BLOCKED）就算在途。
+     *
+     * 为什么要带上 ENQUEUED：离线时批次会停在 ENQUEUED 等网络，
+     * 那个状态下文件同样还没传上去，缓存文件一样不能删。
+     *
+     * 取不到 WorkManager（初始化异常等）时返回 true —— **宁可误报"正在上传"
+     * 拦住清理，也不能误判为"没有上传"把用户的文件删掉**。清理缓存晚做一次
+     * 没有任何代价，误删一次是不可逆的。
+     */
+    private suspend fun hasUploadInFlight(): Boolean = runCatching {
+        val tag = com.cloudbox.app.feature.upload.UploadWorker.TAG_UPLOAD_SESSION
+        val future = workManager.getWorkInfosByTag(tag)
+        val infos = suspendCancellableCoroutine { cont ->
+            future.addListener(
+                { cont.resumeWith(runCatching { future.get() }) },
+                ContextCompat.getMainExecutor(context)
+            )
+        }
+        infos.any { !it.state.isFinished }
+    }.getOrElse { e ->
+        Log.w(TAG, "查询上传任务状态失败（按「有上传在途」处理）：${e.javaClass.simpleName} ${e.message}")
+        true
     }
 
     /**
@@ -335,6 +410,20 @@ class DataBackupRepository @Inject constructor(
      * - 缓存目录 → 清空
      */
     suspend fun resetAppData(): Result<Unit> = runCatching {
+        // ⚠️ 有上传在途时**整体拒绝**，而且必须查在**动手之前**。
+        //
+        //    不能依赖末尾那句 clearCache() 来兜底：它是最后一步，
+        //    此时设置、收藏夹、数据库**都已经被清空了**，如果它再抛异常，
+        //    用户拿到的是"重置失败"，但实际上数据已经没了 ——
+        //    半完成状态比干脆没做更糟：用户以为没重置成功，其实已经重置了。
+        //
+        //    所以先检查一次，早失败、不产生任何副作用。
+        if (hasUploadInFlight()) {
+            throw IllegalStateException(
+                "有文件正在上传，现在重置会把这些还没传上去的文件一起清掉。" +
+                    "请等上传结束后再重置"
+            )
+        }
         withContext(Dispatchers.IO) {
             settingsStore.resetAll()
             domainConfigStore.clearOverrides()

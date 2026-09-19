@@ -500,20 +500,35 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(restorePreview = null, pendingRestoreJson = null) }
     }
 
-    /** 清缓存 */
+    /**
+     * 清缓存。
+     *
+     * ⚠️ 必须包 runCatching：仓储层在**有上传在途**时会抛异常拒绝执行
+     * （待上传文件的唯一副本就在 cacheDir 下，删了就没了 —— 详见
+     * DataBackupRepository.clearCache 的注释）。旧实现直接裸调，
+     * 异常会逃逸出 launch → 未捕获 → 崩溃；或者 `dataBusy` 永远停在 true，
+     * 之后所有数据管理按钮全部点不动。
+     */
     fun clearCache() {
         if (_uiState.value.dataBusy) return
         viewModelScope.launch {
             _uiState.update { it.copy(dataBusy = true) }
-            val freed = dataBackupRepository.clearCache()
-            val bytes = withContext(Dispatchers.IO) { dataBackupRepository.cacheSizeBytes() }
-            _uiState.update {
-                it.copy(
-                    dataBusy = false,
-                    cacheBytes = bytes,
-                    message = if (freed > 0) "已清除 ${formatBytes(freed)} 缓存" else "缓存已经是空的"
-                )
-            }
+            runCatching { dataBackupRepository.clearCache() }
+                .onSuccess { freed ->
+                    val bytes = withContext(Dispatchers.IO) { dataBackupRepository.cacheSizeBytes() }
+                    _uiState.update {
+                        it.copy(
+                            dataBusy = false,
+                            cacheBytes = bytes,
+                            message = if (freed > 0) "已清除 ${formatBytes(freed)} 缓存" else "缓存已经是空的"
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(dataBusy = false, message = e.readableMessage())
+                    }
+                }
         }
     }
 
