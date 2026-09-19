@@ -162,7 +162,6 @@ class SettingsViewModel @Inject constructor(
             // 同步输入框缓存（理由见 [reloadSettingsFromStore]）：
             // 用户清空输入框时 state 会回落默认 UA，输入框也必须跟着回落，
             // 否则下次打开看到的是一片空白，而实际生效的是默认 UA。
-            uaInput = safe
             _uiState.update { it.copy(userAgent = safe, uaInput = safe, message = "UA 已保存（立即生效）") }
         }
     }
@@ -193,7 +192,6 @@ class SettingsViewModel @Inject constructor(
             // 看不出差别；但「恢复备份」会直接改这个设置，下一次打开 dialog 时
             // 输入框拿到的还是关闭时留下的旧文本，用户会以为恢复没生效。
             // 详见 [reloadSettingsFromStore]。
-            resolverInput = safe
             _uiState.update { it.copy(thirdPartyResolver = safe, resolverInput = safe) }
         }
     }
