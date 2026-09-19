@@ -2821,3 +2821,139 @@ e: SettingsViewModel.kt:196:13 Unresolved reference 'resolverInput'.
 ### 34.6 版本
 
 `v0.1.151` → `v0.1.152`（编译失败）→ `v0.1.153`（2m 48s 通过）。
+
+---
+
+## 35. 四轮复查：换到"功能路径"找问题（V32）
+
+前三轮的范围分别是：V32 新增代码 → 这几轮的全部改动 → 全数据层 + 设置页。
+第四轮又换了角度：**不看代码，看"用户会怎么操作"**。
+
+具体做法是走"功能路径"而不是"文件路径"：把每个界面动作用户真会做出来的
+顺序串起来，问一句"中途做点别的会怎样"。四轮里这一类的收获最大。
+
+### 35.1 清缓存/重置会删掉在途上传的源文件（数据丢失）
+
+**路径**：
+
+```
+FAB「上传文件到当前目录」→ 选 10 个文件
+  → UploadViewModel 把文件拷进 cacheDir/uploads/<uuid>/（这一步是**唯一副本**）
+  → 用户切到「我的」→ 设置 → 数据管理 → 「清除缓存」
+  → DataBackupRepository.clearCache() 执行 cacheDir.listFiles().forEach{ deleteRecursively() }
+  → uploads/ 被整体删除
+  → Worker 执行时 File(it).exists() == false
+  → 10 个文件全部进失败名单：「本地缓存文件已丢失，请重新选择后上传」
+```
+
+两个界面在用户眼中毫无关系，**数据层也没有任何耦合** ——
+但 `clearCache` 删的是整个 `cacheDir`，而 `uploads/` 恰好住在里面。
+
+它**不是**"假成功"（V5 已经修好了，Worker 会如实报失败），
+但用户刚选完的一整批文件无声作废，而提示让他"重新选择" —— 他刚选过。
+而且「清除缓存」的副标题本来就写着"清理上传中间文件"，
+用户不会预期它把**还没传上去的**文件也清掉。
+
+**修法**：`clearCache()` 在执行前用 WorkManager 查一次在途上传。
+
+```kotlin
+private suspend fun hasUploadInFlight(): Boolean = runCatching {
+    val future = workManager.getWorkInfosByTag(UploadWorker.TAG_UPLOAD_SESSION)
+    val infos = suspendCancellableCoroutine { cont ->
+        future.addListener({ cont.resumeWith(runCatching { future.get() }) },
+                           ContextCompat.getMainExecutor(context))
+    }
+    infos.any { !it.state.isFinished }
+}.getOrElse { e -> Log.w(TAG, "查询失败（按有上传在途处理）…"); true }
+```
+
+三个设计决定：
+
+| 决定 | 理由 |
+|---|---|
+| 判定包含 `ENQUEUED` | 离线时批次停在 ENQUEUED 等网络，文件同样没传上去 |
+| **查询失败返回 true** | 宁可误报"正在上传"拦住清理，也不能误判"没有上传"把文件删掉。清理晚做一次没有代价，误删不可逆 |
+| 放在仓储层而不是 UI 层 | `clearCache` 有 3 个入口（清缓存 / 重置 / 未来可能的其它），放在这里全都被保护 |
+
+### 35.2 重置的检查必须在**动手之前**（半完成状态）
+
+第一版修法里我只在 `clearCache()` 加了检查，而 `resetAppData()` 的末尾
+会调它。这样有个更糟的后果：
+
+```kotlin
+suspend fun resetAppData(): Result<Unit> = runCatching {
+    withContext(Dispatchers.IO) {
+        settingsStore.resetAll()          // ← 已经清了
+        domainConfigStore.clearOverrides()// ← 已经清了
+        db.withTransaction { ... }        // ← 已经清了
+    }
+    clearCache()                          // ← 这里才抛异常
+}
+```
+
+用户看到的是「重置失败」，但实际上**数据已经没了**。
+半完成状态比干脆没做更危险：他以为没重置成功，就不会去重新配置，
+而设置、收藏夹、缓存全都已经空了。
+
+修法是在函数开头单独查一次 —— 早失败、零副作用：
+
+```kotlin
+suspend fun resetAppData(): Result<Unit> = runCatching {
+    if (hasUploadInFlight()) throw IllegalStateException("有文件正在上传，现在重置会…")
+    withContext(Dispatchers.IO) { /* 真正的清理 */ }
+    clearCache()
+}
+```
+
+> 这条可以推广成一条通用规则：
+> **破坏性操作的前置校验，必须放在第一个写操作之前，
+> 不能"顺手"塞在某个中间步骤里。**
+
+### 35.3 异常逃逸：`clearCache()` 裸调没有 runCatching
+
+加了守卫后 `clearCache()` 会抛异常，而两个调用点都是**裸调**：
+
+```kotlin
+val freed = dataBackupRepository.clearCache()   // SettingsViewModel，在 launch 里
+```
+
+后果两种，都难看：
+
+- 异常逃逸出 `viewModelScope.launch` → 未捕获 → 崩溃；
+- 就算没崩，`_uiState.update { dataBusy = false }` 那行永远执行不到
+  → `dataBusy` 卡在 `true` → **之后备份/恢复/清缓存/重置四个按钮全部点不动**。
+
+改成 `runCatching{}.onSuccess{}.onFailure{}`，失败时把仓储给的文案
+原样展示给用户（`readableMessage()` 会取 message，我抛的异常带完整中文说明）。
+
+### 35.4 设置页页脚版本号硬编码（落后 11 个版本）
+
+```kotlin
+Text("云匣 v0.1.143 · 仅供个人学习使用", ...)
+```
+
+当前版本已经是 `v0.1.154`。这不是"不好看"，而是**会误导排查**：
+用户报问题时按这行说版本号，我们就会去查错的版本。
+
+改成读 CI 注入的 BuildConfig：
+
+```kotlin
+Text("云匣 v${com.cloudbox.app.BuildConfig.VERSION_NAME} · 仅供个人学习使用", ...)
+```
+
+> 为什么之前会漏：上一轮我**确实**改过这行（`v0.1.0` → `v0.1.143`），
+> 当时的做法是"更新成当前版本号" —— 这是治标。
+> 真正的问题是**它不该是字面量**。凡是"值会随发版变化"的地方，
+> 都必须从单一来源取，手写常量迟早again过期。
+
+### 35.5 四轮的完整清单
+
+| 轮次 | 提问方式 | 范围 | 问题数 |
+|---|---|---|---|
+| §32 一轮 | 我改的这段代码对不对 | V32 新增代码 | 4 |
+| §33 二轮 | 这几轮改动之间是否自洽 | 这几轮全部改动 | 3 |
+| §34 三轮 | 数据层哪里最容易坏 | 全数据层 + 设置页 | 1 |
+| §35 四轮 | **用户会怎么操作** | 功能路径交叉 | 2 实质 + 2 附带 |
+
+累计 10 个。四轮里"功能路径交叉"这一问法的收获率最高，也最难靠读代码发现 ——
+因为**问题不在任何一个文件里**，而在两个界面的交界处。
