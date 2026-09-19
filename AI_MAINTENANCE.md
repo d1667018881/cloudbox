@@ -3055,3 +3055,148 @@ Text("云匣 v${com.cloudbox.app.BuildConfig.VERSION_NAME} · 仅供个人学习
 
 累计 10 个。四轮里"功能路径交叉"这一问法的收获率最高，也最难靠读代码发现 ——
 因为**问题不在任何一个文件里**，而在两个界面的交界处。
+
+---
+
+## §36 第五轮：105 文件全量通读（2026-09-19）
+
+### 36.1 这一轮与前面四轮的区别
+
+前四轮都是**增量**审查（只看刚改的那几段代码、或几个功能的交界处）。
+这一轮是**全量**：105 个源文件、16853 行，逐个读完。
+
+先说结论，避免误导：**前面四轮修的 11 项全部还在，没有被改回去。**
+全量通读的价值不在于"又抓了几个 bug"，而在于**验证了修复没有互相覆盖**。
+
+### 36.2 确认的缺陷（按严重度）
+
+| # | 位置 | 严重度 | 问题 |
+|---|---|---|---|
+| 1 | `UploadViewModel.init` L154-155 | **高** | 中断文件数被清零，导致报"全部上传成功" |
+| 2 | `UploadViewModel.init` L152 | 中 | `globalTotal` 含 CANCELLED，`initialFinished` 不含 → 进度/总数错位 |
+| 3 | `WebViewUploadActivity` | 低 | 系统返回键不走 `setResult(RESULT_OK)`，列表不刷新 |
+
+#### #1 会话恢复时把"中断"清成 0（假成功，同一类问题第五次出现）
+
+```kotlin
+activeSession.filter { it.state.isFinished }.forEach { info ->
+    if (info.state == WorkInfo.State.SUCCEEDED) {
+        ... failedAccumulator.addAll(it)
+    } else {
+        abortedFiles += batchSizeOf(info)          // ← 160 行：如实累加
+        abortedReasons.add("上传任务被中断…")
+    }
+}
+val initialFinished = ...
+globalTotal = ...
+
+abortedFiles = 0        // ← 161 行：紧接着全部清掉
+abortedReasons.clear()
+```
+
+`checkAllFinished()` 里 `abortedFiles` 是**正确性输入**：
+
+```kotlin
+val okCount = (globalTotal - failed.size - aborted).coerceAtLeast(0)
+val (msg, hasFailure) = when {
+    failed.isEmpty() && aborted == 0 -> "全部上传成功（$globalTotal 个）" to false
+    ...
+}
+```
+
+于是：**进程在上传中被杀 → 重进 App → 若剩余批次随后成功 → 报"全部上传成功"，
+而实际上被中断那几批的文件一个都没传上去。**
+
+复现路径：选 20 个文件（4 批）→ 传第 1 批时杀进程 → 重进 App（init 接管会话）
+→ 第 2-4 批跑完 → 弹"全部上传成功（20 个）"，实际云端只有 15 个。
+
+单批场景（≤5 个文件）不受影响，因为 `currentWorkIds` 为空、
+`checkAllFinished()` 立即返回 —— 所以这个 bug 只在**多批 + 中途杀进程**时出现，
+恰好是本项目反复出问题的那个角落。
+
+> **这是"假成功"类问题第五次出现**（V3 N2 → V5 → S5 → V32 四轮 → 本轮）。
+> 每次都在 `Fail`/`Cancelled`/`Missing` 这三种"没传上去"的终态上翻车。
+> 说明"上传成功"的判定链路**天然容易被写错**：它要正确必须同时看
+> 服务端回包 + Worker 终态 + outputData 三样，漏一样就报假成功。
+>
+> **建议**：把 `abortedFiles`/`failedAccumulator`/`globalTotal` 三者封成一个
+> 不可变的 `UploadOutcome`（在一次会话内只构造一次，不给中途 reset 的机会），
+> 比现在散落 7 个 `var` 字段更难写错。
+
+**修法**：删掉 `init` 里那两行重复的清零（L154-155）。
+上方 L131-135 已经清过一次（那是本次接管前的初始化，正确），
+L145-147 的累加必须在清零**之后**才有效 —— 现在的顺序正好把结果吃掉了。
+
+#### #2 进度基数与总数口径不一致
+
+```kotlin
+val initialFinished = activeSession.filter { it.state == SUCCEEDED }.sumOf { batchSizeOf(it) }
+globalTotal = activeSession.filter { it.state != CANCELLED }.sumOf { batchSizeOf(it) }
+```
+
+被 CANCELLED 的批次：算进 `globalTotal`，不算进 `initialFinished`。
+结果进度条永远差那几格、`okCount` 虚高（被取消的文件被算成成功）。
+两处口径必须统一，建议都以"非 CANCELLED"为准。
+
+#### #3 WebView 上传页返回不刷新列表
+
+`WebViewUploadActivity` 顶栏返回按钮调了 `setResult(RESULT_OK); finish()`，
+但**系统返回键/手势**没有拦截 —— 走的是默认 `finish()`，`resultCode` 仍是 `RESULT_CANCELED`。
+而调用方 `FileListScreen` 的 `webUploadLauncher` 回调**不判断 resultCode**，
+一律 `viewModel.refresh()`，所以实际不受影响。
+
+**结论：这一条是"目前无害但脆弱"**。调用方现在宽松，一旦有人给回调加上
+`if (resultCode == RESULT_OK)` 判断，立刻退化成"网页传完了列表不更新"。
+建议补 `onBackPressed` 统一设 `RESULT_OK`（网页上传是天然的成功语义）。
+
+### 36.3 核实无误的高危点（重点确认没有被改坏）
+
+全量通读的主要产出其实是这一节 —— 逐个确认前四轮的修复仍然成立：
+
+| 修复点 | 位置 | 状态 |
+|---|---|---|
+| `hasUploadInFlight` 守卫清缓存/重置 | `DataBackupRepository` L349/L420 | ✅ 两处都在，且重置是**前置**检查 |
+| 重置零副作用早失败 | 同上 L420 | ✅ 在任何写操作之前 |
+| `runCatching` 包 `clearCache` | `SettingsViewModel` L516 | ✅ |
+| 动态版本号（不再硬编码） | `SettingsScreen` L397 | ✅ `BuildConfig.VERSION_NAME` |
+| `toLooseBool` 宽松布尔解析 | `SettingsStore` L271 | ✅ |
+| 备份"写→回读校验→原子改名" | `DataBackupRepository` L491-513 | ✅ 长度+解析双重校验 |
+| 不覆盖同名备份（带时间戳） | 同上 L475 | ✅ |
+| `allowEmptyFavorites` 默认 false | 同上 L242 | ✅ UI 显式传 true 才放行 |
+| `formatBytes` 用 `Locale.US` | `SettingsViewModel` L606 | ✅ 避免阿拉伯语环境出逗号 |
+| 空备份红字警告 | `SettingsScreen` | ✅ |
+| `uaInput`/`resolverInput` 缓存同步 | `SettingsViewModel` L137/L588 | ✅ 两条路径都同步 |
+
+**另外这三处我原本怀疑有问题，读完确认是对的**（记下来免得下次再怀疑一遍）：
+
+- **备份/恢复往返**：写 `.json`、读回按 UTF-8 文本解析 —— 两端一致，
+  且选择器用 `*/*`（注释里说明了"网盘落盘会丢 MIME"），不存在"自己写的备份自己读不了"。
+- **Worker 丢失文件统计**：`missingNames`（按路径精确比对）与 `failed`（按结果）
+  最后 `distinct()` 合并，同名文件不误判、不重复计数。V5 的修复是完整的。
+- **`precheck.py`**：105 文件 0 报错，与 CI 实测一致。
+
+### 36.4 优化空间（非缺陷，按性价比排序）
+
+| 优先级 | 项 | 说明 |
+|---|---|---|
+| 高 | `UploadOutcome` 值对象 | 见 #1 末尾。根治"假成功"这一类，而不是再打一次补丁 |
+| 高 | 统一 `aborted` 口径 | 见 #2。把 `globalTotal`/`initialFinished`/`okCount` 收进同一处计算 |
+| 中 | `FileListScreen` 拆文件 | 996 行、30+ 个 `remember`，已是全项目最大文件 |
+| 中 | 上传延时常量化 | `300..801` / `1000..3001` 散在 5 个文件里，且含义不同（防风控 vs 友好等待） |
+| 低 | `AuthRepositoryImpl` 缩进 | L191-238 一段多余的缩进层级，阅读时容易看错块的归属 |
+| 低 | `UploadTrace` 时间戳用 SimpleDateFormat | 非线程安全（虽有 Hilt 单例保证单实例，但 `log()` 可被多线程调用） |
+
+### 36.5 这一轮的自省
+
+用户问的是"有没有 bug、有没有优化空间"。诚实的回答是：
+
+**新增缺陷 3 个（1 高 1 中 1 低），比上一轮少，但 #1 仍是"假成功"这一类 ——
+说明我之前声称"这一类已经根除"是过度自信。** 真实情况是：
+每次修复都只覆盖了我当时能想到的那个终止路径，而没有把所有终止路径
+在**同一个数据结构**里统一处理。补丁式修法必然留下下一个角落。
+
+所以 36.4 里把"`UploadOutcome` 值对象"排在第一 ——
+它不是可选的洁癖，而是这类 bug 反复出现的**结构性原因**。
+
+优化项本身我没有动手改（用户只要求检查）。若要我实施，建议从 #1 + #2 开始，
+它们同源，一次改动可以一起解决。
