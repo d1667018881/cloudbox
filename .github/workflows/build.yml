@@ -58,6 +58,14 @@ jobs:
         with:
           gradle-version: 8.9
 
+      # 交付前体检（秒级）。放在 gradle 之前 —— 少个括号/多个 import 这类
+      # 手误本可以立刻发现，没必要白等 3~4 分钟的完整构建。
+      # 检查范围与规则见 scripts/precheck.py；它能抓到什么、抓不到什么都写在文件头。
+      # ⚠️ 不用 `|| true` 吞掉失败：这一步失败就应该整轮失败，
+      #    否则它跟不存在没区别（§35 批评过"形同虚设的守卫"）。
+      - name: Pre-check (fast)
+        run: python3 scripts/precheck.py app/src/main/java
+
       - name: Build APK
         id: build
         env:
