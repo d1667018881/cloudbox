@@ -63,8 +63,14 @@ jobs:
       # 检查范围与规则见 scripts/precheck.py；它能抓到什么、抓不到什么都写在文件头。
       # ⚠️ 不用 `|| true` 吞掉失败：这一步失败就应该整轮失败，
       #    否则它跟不存在没区别（§35 批评过"形同虚设的守卫"）。
+      #
+      # 输出追加进 build.log：`if: always()` 的日志上传只抓 build.log，
+      # 体检结果不写进去就无从确认它到底跑没跑 —— 而"不确定有没有执行"
+      # 的守卫等于没有守卫。用 >> 追加，别用 >（会清掉 gradle 在后面写的内容）。
       - name: Pre-check (fast)
-        run: python3 scripts/precheck.py app/src/main/java
+        run: |
+          echo "===== precheck =====" | tee -a build.log
+          python3 scripts/precheck.py app/src/main/java 2>&1 | tee -a build.log
 
       - name: Build APK
         id: build
@@ -73,9 +79,13 @@ jobs:
           VERSION_NAME: "0.1.${{ github.run_number }}"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         # tee 保留完整输出，供下一步失败时留存；PIPESTATUS 保证 gradle 的真实退出码不被管道吞掉
+        #
+        # ⚠️ 必须是 `tee -a`（追加）而不是 `tee`（覆盖）：
+        #    上面的 Pre-check 步骤已经把体检结果写进 build.log 了，
+        #    这里用覆盖会把那段冲掉 —— 于是"守卫跑没跑过"又变成不可验证。
         run: |
           set +e
-          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee -a build.log
           code=${PIPESTATUS[0]}
           echo "gradle_exit=$code" >> "$GITHUB_OUTPUT"
           exit $code
