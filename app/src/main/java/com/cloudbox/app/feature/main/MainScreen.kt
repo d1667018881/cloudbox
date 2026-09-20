@@ -26,7 +26,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +45,7 @@ import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
 import com.cloudbox.app.feature.resolve.ResolveScreen
 import com.cloudbox.app.feature.search.SearchViewModel
+import kotlinx.coroutines.launch
 
 /**
  * 主界面：底部导航容器（网盘 / 解析 / 我的）。
@@ -73,6 +76,47 @@ fun MainScreen(
     val pendingLink by clipboardWatcher.pendingLink.collectAsState()
     // currentAccount 是 Flow（非 StateFlow），collectAsState 必须提供 initial
     val account by authRepository.currentAccount.collectAsState(initial = null)
+
+    // 「退出登录」必须**先真正注销**，再切页面。
+    //
+    // ⚠️ 旧实现的 onLogout 直接由 MainActivity 负责 navigate 到登录页，
+    // 中间**没有任何一处调用 authRepository.logout()** —— 按钮点了等于只换了个界面，
+    // Cookie 与账号槽位原封不动。登录页一挂载就观察到 currentAccount != null，
+    // 立刻又跳回主页，于是用户看到的就是"退出登录闪一下又进来了"。
+    // 详见 AuthRepositoryImpl.logout 的注释（那里还修了"Cookie 根本没清"的第二层问题）。
+    val scope = rememberCoroutineScope()
+    var confirmLogout by remember { mutableStateOf(false) }
+    val doLogout = {
+        scope.launch {
+            account?.uid?.let { authRepository.logout(it) }
+            onLogout()
+        }
+    }
+
+    // 退出登录不可撤销（会清掉该账号保存的密码与 Cookie，下次要重新输入），
+    // 所以先问一句。这里不是"多余的礼数"：这个按钮就在"我的"页最下方，
+    // 紧邻"关于"，误触一次的成本是重新登录 + 重新输密码。
+    if (confirmLogout) {
+        AlertDialog(
+            onDismissRequest = { confirmLogout = false },
+            title = { Text("退出登录") },
+            text = {
+                Text(
+                    "将清除账号「${account?.uid ?: "当前账号"}」在本机保存的登录凭证" +
+                        "与密码（云端数据不受影响）。确定退出？"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmLogout = false
+                    doLogout()
+                }) { Text("退出", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLogout = false }) { Text("取消") }
+            }
+        )
+    }
 
     // V30：读取界面显示设置。`collectAsState` 的 initial 用与原版一致的默认值
     // （账号按钮默认显示、后缀标签默认隐藏），避免首帧闪一下再变。
@@ -172,7 +216,7 @@ fun MainScreen(
                     onOpenRecycle = onOpenRecycle,
                     onOpenSettings = onOpenSettings,
                     onOpenAbout = onOpenAbout,
-                    onLogout = onLogout,
+                    onLogout = doLogout,
                     // V30：账号入口按钮开关（对齐原版 show_account_button）。
                     // 关掉后"我的"页不显示账号切换入口——单账号用户没有切换需求，
                     // 这块区域对他是纯噪音。

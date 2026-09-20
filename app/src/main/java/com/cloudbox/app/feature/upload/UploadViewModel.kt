@@ -133,12 +133,40 @@ class UploadViewModel @Inject constructor(
             failedReasons.clear()
             abortedFiles = 0
             abortedReasons.clear()
-            // 本次会话中已完成批（SUCCEEDED）的失败名单与文件数一并并入，进度从正确基数续算
-            activeSession.filter { it.state.isFinished }.forEach { info ->
+
+            // ⚠️ 阶段 1 —— 先把【已完成批】的账全部记完，再做别的任何事。
+            //
+            //   这里曾经是本类最隐蔽的一处"假成功"（同一类问题第五次出现）：
+            //   L137-148 如实把 FAILED/CANCELLED 批累加进 abortedFiles，
+            //   紧接着 L154-155 又 `abortedFiles = 0; abortedReasons.clear()`，
+            //   于是中断记录**在裁决之前就被抹掉**。而 checkAllFinished() 把
+            //   aborted 当作**正确性输入**（`okCount = total - failed - aborted`，
+            //   且 `failed.isEmpty() && aborted == 0` → 报"全部上传成功"）。
+            //
+            //   复现：选 20 个文件（4 批），第 1 批跑到一半进程被杀 → 重开 App，
+            //   init 接管会话 → 第 2~4 批成功 → 界面报「全部上传成功（20 个）」，
+            //   而云端只有 15 个。这个路径用户不会察觉，因为它出现在
+            //   "用户自己也没盯着看"的进程重启之后。
+            //
+            //   顺带把 globalTotal 的口径也统一：**分母必须等于云端可能存在的
+            //   最大文件数**。CANCELLED 批是"用户主动取消，本来就不打算传"，
+            //   既不进 aborted（不算中断）也不进 total（不算预期），三处一致，
+            //   否则 initialFinished / 进度条 / okCount 会各按各的口径算。
+            val expected = activeSession.filter { it.state != WorkInfo.State.CANCELLED }
+            globalTotal = expected.sumOf { batchSizeOf(it) }
+
+            var finishedBatches = 0
+            var finishedFiles = 0
+            expected.filter { it.state.isFinished }.forEach { info ->
+                finishedBatches++
+                finishedFiles += batchSizeOf(info)
                 if (info.state == WorkInfo.State.SUCCEEDED) {
                     info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
                         ?.split("\n")?.filter { it.isNotBlank() }
                         ?.let { failedAccumulator.addAll(it) }
+                    info.outputData.getString(UploadWorker.KEY_FAILED_MESSAGE)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { failedReasons.add(it) }
                 } else {
                     // FAILED/CANCELLED 同样是"没传上去"，必须与 observeWorks 口径一致，
                     // 否则恢复会话时又会把中断的文件算成成功。
@@ -146,20 +174,26 @@ class UploadViewModel @Inject constructor(
                     abortedReasons.add("上传任务被中断（超过 10 分钟或进程被回收）")
                 }
             }
-            val initialFinished = activeSession
-                .filter { it.state == WorkInfo.State.SUCCEEDED }
-                .sumOf { batchSizeOf(it) }
-            globalTotal = activeSession.filter { it.state != WorkInfo.State.CANCELLED }.sumOf { batchSizeOf(it) }
 
-            abortedFiles = 0
-            abortedReasons.clear()
+            // ⚠️ 阶段 2 —— 只有在【补入在途批】之后，才谈得上"是否已全部终态"，
+            //   也只有"已全部终态"才能立刻裁决。
+            //
+            //   旧实现无条件设置 uploading=true，而不检查是否还有在途批。
+            //   若进程恰好在"最后一批已终态、下一批已被系统取消"的窄窗口被杀，
+            //   重启后 active 为空 → 无任何观察者 → checkAllFinished() 永不触发
+            //   → uploading 永久卡在 true，进度条再也不消失（只能杀进程重开）。
+            if (active.isEmpty()) {
+                checkAllFinished()
+                return@launch
+            }
+
             _uiState.update {
                 it.copy(
-                    uploading = true, progress = initialFinished,
+                    uploading = true, progress = finishedFiles,
                     total = globalTotal, message = null, hasFailure = false
                 )
             }
-            observeWorks(currentWorkIds, active.map { batchSizeOf(it) }, initialFinished)
+            observeWorks(currentWorkIds, active.map { batchSizeOf(it) }, finishedFiles, finishedBatches)
         }
     }
 
@@ -284,6 +318,7 @@ class UploadViewModel @Inject constructor(
                     currentFile = ""
                 )
             }
+            // 全新会话：没有"已完成批"，normalize 后数组与批次一一对应（见上方调用点）
             observeWorks(currentWorkIds, batches.map { it.size })
         }
     }
@@ -298,13 +333,36 @@ class UploadViewModel @Inject constructor(
      */
     fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
 
-    /** 观察各批次：RUNNING 更新全局进度，终态累计完成数并收集失败名单 */
+    /**
+     * 观察各批次：RUNNING 更新全局进度，终态累计完成数并收集失败名单。
+     *
+     * @param mergedFinishedBatches 会话恢复时，**已完成批**的数量（这些批已并入
+     *        [abortedFiles] / [failedAccumulator]，将来不会再有终态回调）。
+     *
+     *        为什么必须有这个参数：`checkAllFinished()` 的判据是
+     *        "`workStates` 覆盖全部已完成批"。但在途批的**第一个回调可能就要裁决**
+     *        （例如只剩最后 1 批、且它一上来就是终态）。若 `workStates` 此时只装得下
+     *        在途批，`workStates.size` 永远小于"已完成批数 + 在途批数"，
+     *        判据恒为假 → **上传结束后永不裁决**：界面卡在"上传中…"，
+     *        直到用户切走再切回（重建 ViewModel，getWorkInfoByIdFlow 立刻发终态）
+     *        才补上那句提示。上传本身是成功的，所以这不是数据错误，
+     *        但"传完了却一直显示在传"是明确的体验缺陷。
+     *
+     *        旧实现传的 `initialFinished` 是**文件数**，而判据要的是**批次数**，
+     *        两者在 `BATCH_SIZE != 1` 时必然不等 —— 所以不能复用那个值。
+     */
     private fun observeWorks(
         workIds: List<UUID>,
         batchSizes: List<Int>,
-        initialFinished: Int = 0
+        initialFinished: Int = 0,
+        mergedFinishedBatches: Int = 0
     ) {
         var finishedCount = initialFinished // 已完成批次累计的文件数（批间串行，无并发写）
+        // 防御：workIds 与 batchSizes 必须等长，否则尾部批次的阶段判定会取到兜底值 1。
+        // 目前调用点都保证等长，但这是"静默算错数"的高危形状（错 1 个文件就能把
+        // 一句"中断 1 个"变成"全部上传成功"），所以把它变成一个不可能发生的形状。
+        val sizes = if (batchSizes.size == workIds.size) batchSizes
+        else batchSizes + List((workIds.size - batchSizes.size).coerceAtLeast(0)) { 1 }
         workIds.forEachIndexed { idx, workId ->
             viewModelScope.launch {
                 workManager.getWorkInfoByIdFlow(workId).collect { info ->
@@ -339,15 +397,15 @@ class UploadViewModel @Inject constructor(
                         //    大文件/多文件超时被系统掐断 → FAILED → 空 outputData → 假成功。
                         //    现在把这两种终态单独记账，绝不混进成功数里。
                         if (info.state != WorkInfo.State.SUCCEEDED) {
-                            abortedFiles += batchSizes.getOrElse(idx) { 1 }
+                            abortedFiles += sizes.getOrElse(idx) { 1 }
                             abortedReasons += when (info.state) {
                                 WorkInfo.State.CANCELLED -> "上传任务被取消"
                                 else -> "上传任务被中断（单个文件超过 10 分钟，或进程被系统回收）"
                             }
-                            checkAllFinished()
+                            checkAllFinished(mergedFinishedBatches)
                             return@collect
                         }
-                        finishedCount += batchSizes.getOrElse(idx) { 1 }
+                        finishedCount += sizes.getOrElse(idx) { 1 }
                         // N2(V3)：Worker 一律 success，失败名单走 outputData
                         info.outputData.getString(UploadWorker.KEY_FAILED_FILES)
                             ?.split("\n")
@@ -356,7 +414,7 @@ class UploadViewModel @Inject constructor(
                         info.outputData.getString(UploadWorker.KEY_FAILED_MESSAGE)
                             ?.takeIf { it.isNotBlank() }
                             ?.let { failedReasons.add(it) }
-                        checkAllFinished()
+                        checkAllFinished(mergedFinishedBatches)
                     }
                 }
             }
@@ -370,8 +428,14 @@ class UploadViewModel @Inject constructor(
      * （`上传完成，N 个失败：…`），用户看到"上传完成"就以为文件上去了，
      * 于是出现"App 显示成功、云端却没有"的经典误判。
      * 现在按"失败数量占比"改成三种**语义互斥**的文案，失败时不出现"完成/成功"字样。
+     *
+     * @param mergedFinishedBatches 会话恢复时已完成批的数量（这些批不会再有终态回调，
+     *        也不在 [workStates] 里）。见 [observeWorks] 的同名参数说明。
      */
-    private fun checkAllFinished() {
+    private fun checkAllFinished(mergedFinishedBatches: Int = 0) {
+        // 判据：workStates 覆盖"已完成批 + 本次观察的在途批"，才说明全部批次都已终态。
+        // 少了 mergedFinishedBatches 这一项，判据在会话恢复场景恒为假 —— 见 [observeWorks]。
+        if (workStates.size < mergedFinishedBatches + currentWorkIds.size) return
         if (currentWorkIds.any { it !in workStates }) return
         // 裁决入日志：这是"秒成功"唯一能自证的地方。
         // 只要看到 total 与各 id 状态，就能判断是"真的都传完了"还是"Worker 根本没跑"。

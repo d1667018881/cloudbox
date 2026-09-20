@@ -61,11 +61,31 @@ class AccountSecureStore @Inject constructor(
             .remove("$PREFIX_COOKIES$uid")
             .remove("$PREFIX_ACTIVE$uid")
             .remove("$PREFIX_CLOUD_UID$uid")
+            .remove("$PREFIX_REJECTED$uid")
         // #8 修复：只有删除的是【当前账号】时才清 currentUid；
         // 旧实现无条件 remove，导致删除非当前账号 B 时把正在使用的账号 A 也登出
         if (currentUid() == uid) editor.remove(KEY_CURRENT_UID)
         editor.apply()
     }
+
+    // ---------- 静默重登被拒（密码已变更等） ----------
+
+    /**
+     * 记录"服务端明确拒绝了这个账号的保存密码"。
+     *
+     * 为什么需要落盘：自动重登发生在 Application 启动、UI 尚未展示时，
+     * 结果没人接。若只记在内存，下次冷启动还会拿同一份过期密码再试一遍，
+     * 形成"每次启动都失败一次"的隐性重试循环。记下来，让 UI 能说清缘由，
+     * 也方便用户在设置页看到"该账号密码已失效"。
+     */
+    fun markRejected(uid: String, reason: String) =
+        prefs.edit().putString("$PREFIX_REJECTED$uid", reason).apply()
+
+    /** 取静默重登被拒的原因（未拒绝过则 null） */
+    fun rejectedReason(uid: String): String? = prefs.getString("$PREFIX_REJECTED$uid", null)
+
+    /** 清除被拒标记（用户重新登录成功后调用） */
+    fun clearRejected(uid: String) = prefs.edit().remove("$PREFIX_REJECTED$uid").apply()
 
     // ---------- 当前账号 ----------
 
@@ -121,7 +141,8 @@ class AccountSecureStore @Inject constructor(
 
     fun accountInfo(uid: String): AccountInfo = AccountInfo(
         uid = uid,
-        lastActiveAt = lastActiveAt(uid)
+        lastActiveAt = lastActiveAt(uid),
+        staleReason = rejectedReason(uid)
     )
 
     companion object {
@@ -132,5 +153,6 @@ class AccountSecureStore @Inject constructor(
         private const val PREFIX_COOKIES = "cookies_"
         private const val PREFIX_ACTIVE = "active_at_"
         private const val PREFIX_CLOUD_UID = "cloud_uid_"
+        private const val PREFIX_REJECTED = "rejected_"
     }
 }

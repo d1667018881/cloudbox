@@ -62,6 +62,27 @@ class WebViewUploadActivity : ComponentActivity() {
     @Inject lateinit var uploadRepository: UploadRepository
     @Inject lateinit var cookieJar: CookiePersistenceJar
 
+    /** 返回值：网页上传结束后，调用方据此决定是否刷新列表 */
+    private fun finishOk() {
+        setResult(RESULT_OK)
+        finish()
+    }
+
+    /**
+     * 系统返回键 / 手势统一走 [finishOk]。
+     *
+     * 为什么必须拦截：工具栏的返回箭头给了 RESULT_OK，系统返回键默认给 RESULT_CANCELED，
+     * 两条路返回码不一致。当前调用方忽略 resultCode 所以还看不出问题，
+     * 但只要将来有人开始读它，"用返回键退出 → 列表不刷新"就会变成一个难查的间歇缺陷。
+     * 与其留着一颗这样的雷，不如让两条路完全等价。
+     *
+     * @Suppress("DEPRECATION") 仅覆写以统一结果码，未使用废弃 API 的返回值
+     */
+    @Deprecated("统一返回码：见方法注释")
+    override fun onBackPressed() {
+        finishOk()
+    }
+
     /** 网页 <input type=file> 的回调（Compose 无法直接接收，暂存为字段） */
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val REQUEST_SELECT_FILE = 1001
@@ -84,10 +105,7 @@ class WebViewUploadActivity : ComponentActivity() {
                             TopAppBar(
                                 title = { Text(title) },
                                 navigationIcon = {
-                                    IconButton(onClick = {
-                                        setResult(RESULT_OK)
-                                        finish()
-                                    }) {
+                                    IconButton(onClick = { finishOk() }) {
                                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                                     }
                                 }

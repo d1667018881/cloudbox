@@ -82,6 +82,8 @@ class AuthRepositoryImpl @Inject constructor(
                         fetchCloudUid(uid)
                         if (rememberPwd) accountStore.savePassword(uid, pwd)
                         accountStore.touchActive(uid)
+                        // 登录成功 = 保存的密码对得上，清掉此前"被服务端拒绝"的标记
+                        accountStore.clearRejected(uid)
                         _currentAccount.value = outcome.info
                         LoginResult.Success(outcome.info)
                     }
@@ -207,6 +209,7 @@ class AuthRepositoryImpl @Inject constructor(
                             fetchCloudUid(uid)
                             if (rememberPwd) accountStore.savePassword(uid, pwd)
                             accountStore.touchActive(uid)
+                            accountStore.clearRejected(uid)
                             val info = accountStore.accountInfo(uid)
                             _currentAccount.value = info
                             LoginResult.Success(info)
@@ -344,6 +347,7 @@ class AuthRepositoryImpl @Inject constructor(
             }
             accountStore.saveUid(uid)
             accountStore.setCurrentUid(uid)
+            accountStore.clearRejected(uid)
             cookieJar.switchAccount(uid)
             // 直接把导入的 Cookie 文本落盘（不走 Cookie.parse，保持原样）
             accountStore.saveCookies(uid, lines)
@@ -362,12 +366,39 @@ class AuthRepositoryImpl @Inject constructor(
         return true
     }
 
+    /**
+     * 退出登录：清除该账号的**全部凭证与槽位**。
+     *
+     * ⚠️ 这里曾经是"退出登录退不出去"的根源，两个缺陷叠加：
+     *
+     * 1. **Cookie 没清**。旧实现只调 `removeUid(uid)`（删槽位记录），
+     *    却从未调用 `cookieJar.clearAll()`。内存里的 phpdisk_info/ylogin
+     *    只要还在，任何一次请求都会把它带上去，服务端依然认你是登录态。
+     *    （注册表被删，钥匙还在兜里。）
+     *
+     * 2. **切槽位切了个空**。`removeUid` 已经删掉 `pwd_<uid>` / `cookies_<uid>`，
+     *    此后再 `cookieJar.switchAccount(uid)` 只会从加密存储里**恢复出空集**，
+     *    却把 `currentUid` 重新指向这个已删除的账号 —— 于是 UI 侧
+     *    `currentAccount` 不为 null，登录页的"已登录→跳主页"逻辑立刻把用户弹回去。
+     *    表现为"闪一下登录页又进主页"。
+     *
+     * 修复后的顺序很关键，三步都不能省：
+     *   ① 先清空**当前视角**的内存 Cookie 并落盘（此时 currentUid 还在，能定位到槽位）
+     *   ② 再删槽位（连同 pwd / cookies / active_at / cloud_uid 一并 remove）
+     *   ③ 最后把视角切到"剩下的任意一个账号"，没有账号则切到 null
+     *
+     * 注：这里**不**请求服务端登出接口。App 内退出只求"本机不再持有凭证"，
+     * 多发一个网络请求反而会在离线时导致退出失败——不如把本地清干净，
+     * 代价只是服务端那条会话记录会自然过期。
+     */
     override suspend fun logout(uid: String) {
-        accountStore.removeUid(uid)
-        if (accountStore.currentUid() == null) {
-            cookieJar.switchAccount(null)
-            _currentAccount.value = null
+        if (accountStore.currentUid() == uid) {
+            cookieJar.clearAll()          // ① 清内存 Cookie + 抹掉该槽位的加密记录
         }
+        accountStore.removeUid(uid)       // ② 删账号槽位（含密码、Cookie、云 uid、活跃时间）
+        val next = accountStore.currentUid()  // removeUid 命中当前账号时会一并清掉它
+        cookieJar.switchAccount(next)     // ③ 切到剩余账号（或 null）
+        _currentAccount.value = next?.let { accountStore.accountInfo(it) }
     }
 
     override suspend fun ensureSession(): AccountInfo? = withContext(Dispatchers.IO) {
@@ -385,8 +416,22 @@ class AuthRepositoryImpl @Inject constructor(
         if (current.autoRelogin) {
             val pwd = accountStore.loadPassword(uid)
             if (!pwd.isNullOrEmpty()) {
-                val result = login(uid, pwd, rememberPwd = true)
-                if (result is LoginResult.Success) return@withContext result.account
+                when (val result = login(uid, pwd, rememberPwd = true)) {
+                    is LoginResult.Success -> return@withContext result.account
+                    // ⚠️ 服务端**明确拒绝**（"没有用户"/"密码错误"）时不能静默吞掉。
+                    //
+                    //   这正是"改了密码之后账号退不出去"的成因：旧实现在这里
+                    //   `if (result is Success) return ...` 之后就直接往下走，
+                    //   LoginResult.Failure 连日志都不打。而 [login] 内部已经做了
+                    //   槽位预绑定 `setCurrentUid(uid)`，失败时 [rollbackTo] 又因为
+                    //   prevUid == uid 而**不撤销那个绑定** —— 于是：
+                    //   账号在服务端已被拒绝，本地槽位却被重新激活，
+                    //   currentAccount 仍不为 null，UI 认为"已登录"，
+                    //   用户点退出 → 下一次冷启动又被这条链路重新拉回来。
+                    //
+                    //   记住这次拒绝，[removeUid] 会顺手带它一起清掉。
+                    is LoginResult.Failure -> accountStore.markRejected(uid, result.reason)
+                }
             }
         }
         // 无法静默重登：清掉过期 Cookie，返回 null 让 UI 提示重新登录

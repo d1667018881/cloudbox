@@ -40,8 +40,29 @@ class LoginViewModel @Inject constructor(
             // 用 collect 而不是 first() 才能在其完成后自动跳转主页。
             authRepository.currentAccount.collect { account ->
                 if (account != null) {
-                    _uiState.update { it.copy(alreadyLoggedIn = true) }
-                    onLoginSuccess?.invoke()
+                    // ⚠️ 账号仍然存在、但**凭证已被服务端拒绝**（典型场景：在官网改了密码，
+                    //    而 App 的 Cookie 还没到期）。此时绝不能当"已登录"跳主页 ——
+                    //    旧实现就是这么做的，用户看到的现象正是"闪一下登录页又进去了"，
+                    //    而进去之后任何操作都会失败，用户完全无法自救。
+                    //
+                    //    现在：把账号名预填进输入框（减少重复输入），把服务端的原话
+                    //    显示出来（"没有用户"/"密码错误"），并把焦点留在登录页。
+                    val stale = account.staleReason
+                    if (stale.isNullOrBlank()) {
+                        _uiState.update { it.copy(alreadyLoggedIn = true) }
+                        onLoginSuccess?.invoke()
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                uid = it.uid.ifBlank { account.uid },
+                                alreadyLoggedIn = false,
+                                error = "账号「${account.uid}」的登录状态已失效：$stale。请重新输入密码登录。"
+                            )
+                        }
+                        // 顺带清掉那个已失效的槽位：它的 Cookie 已无意义，
+                        // 留着只会让"当前账号"指向一个不可用的身份。
+                        authRepository.logout(account.uid)
+                    }
                 }
             }
         }
