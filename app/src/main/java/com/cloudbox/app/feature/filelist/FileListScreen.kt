@@ -85,6 +85,10 @@ fun FileListScreen(
     onShareConsumed: () -> Unit = {},
     /** 分享进来的链接交由此回调处理（跳到解析页） */
     onOpenSharedLink: (String) -> Unit = {},
+    /** 由「全盘搜索」跳进来时：直接打开该目录（null = 正常从根目录进入） */
+    initialFolderId: Long? = null,
+    /** 初始目录名（面包屑显示用；搜索跳转时未必知道真实名） */
+    initialFolderName: String = "",
     viewModel: FileListViewModel = hiltViewModel(),
     uploadViewModel: com.cloudbox.app.feature.upload.UploadViewModel = hiltViewModel()
 ) {
@@ -155,6 +159,13 @@ fun FileListScreen(
     ) {
         // 网页里传完后返回，刷新当前目录
         viewModel.refresh()
+    }
+
+    // 从「全盘搜索」跳进来时直达目标目录（folderStack 从根开始，enterFolder 会压栈）
+    LaunchedEffect(Unit) {
+        initialFolderId?.let { id ->
+            if (id != -1L) viewModel.enterFolder(id, initialFolderName.ifBlank { "搜索结果" })
+        }
     }
 
     // 上传会话结束（含部分失败）→ 刷新当前目录（V5：修复"上传成功但列表不更新"）

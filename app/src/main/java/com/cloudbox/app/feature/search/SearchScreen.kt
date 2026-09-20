@@ -1,5 +1,6 @@
 package com.cloudbox.app.feature.search
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,10 +46,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
+    /** 点击「文件夹」结果 → 打开该文件夹 */
+    onOpenFolder: (Long, String) -> Unit = { _, _ -> },
+    /** 点击「文件」结果 → 打开其所在目录 */
+    onOpenFileInParent: (Long) -> Unit = { _ -> },
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+
+    // 首次进入若索引为空，自动同步一次（否则搜什么都是空结果）
+    LaunchedEffect(Unit) { viewModel.ensureIndexed() }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -107,7 +115,19 @@ fun SearchScreen(
                 LazyColumn(Modifier.fillMaxWidth()) {
                     items(state.results, key = { it.id }) { file ->
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // 文件夹 → 进它自己；文件 → 进它所在目录
+                                    if (file.isFolder) {
+                                        onOpenFolder(file.id, file.name)
+                                    } else if (file.parentId != -2L) {
+                                        onOpenFileInParent(file.parentId)
+                                    } else {
+                                        viewModel.showMessage("该项所在目录未知，请回主页浏览")
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(

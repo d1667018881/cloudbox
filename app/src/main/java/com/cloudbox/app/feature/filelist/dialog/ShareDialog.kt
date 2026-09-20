@@ -48,8 +48,19 @@ fun ShareDialog(
     /** 保存二维码后的提示（成功/失败原因） */
     var savedTip by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(share.shareUrl) {
-        qr = QrCodeUtil.generate(share.shareUrl)
+    /**
+     * 二维码内容：与原版「蓝云」一致 —— 分享链接**带上提取码**（`<url>?pass=<pwd>`）。
+     * 旧实现只编码裸链接，带码分享扫码后还要手动输入提取码。
+     * 无提取码时保持裸链接（与原版一致，不强加 ?pass=）。
+     */
+    val qrContent = if (share.onof == "1" && share.pwd.isNotBlank()) {
+        "${share.shareUrl}?pass=${share.pwd}"
+    } else {
+        share.shareUrl
+    }
+
+    LaunchedEffect(qrContent) {
+        qr = QrCodeUtil.generate(qrContent)
     }
 
     AlertDialog(

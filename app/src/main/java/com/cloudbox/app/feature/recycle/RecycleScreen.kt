@@ -35,7 +35,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -54,6 +56,10 @@ fun RecycleScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    /** 清空回收站二次确认（不可逆） */
+    var confirmClear by remember { mutableStateOf(false) }
+    /** 单条「彻底删除」的确认目标 */
+    var deleteTarget by remember { mutableStateOf<CloudFile?>(null) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -72,7 +78,7 @@ fun RecycleScreen(
                 },
                 actions = {
                     TextButton(onClick = viewModel::restoreAll) { Text("恢复全部") }
-                    TextButton(onClick = viewModel::clearAll) { Text("清空") }
+                    TextButton(onClick = { confirmClear = true }) { Text("清空") }
                 }
             )
         }
@@ -85,7 +91,7 @@ fun RecycleScreen(
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(state.items.folders + state.items.files, key = { "${it.isFolder}_${it.id}" }) { file ->
-                        RecycleItemRow(file, viewModel)
+                        RecycleItemRow(file, viewModel, onRequestDelete = { deleteTarget = it })
                         HorizontalDivider()
                     }
                 }
@@ -155,10 +161,52 @@ fun RecycleScreen(
             }
         )
     }
+
+    // 清空回收站：不可逆（原版 recycle.lua 也有「清空回收站弹窗」）。
+    // 旧实现点「清空」直接删，误触一下就全没了。
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空回收站") },
+            text = { Text("将永久删除回收站内的全部文件与文件夹，操作不可撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    viewModel.clearAll()
+                }) { Text("永久删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 单条「彻底删除」同样不可逆，先确认
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("彻底删除") },
+            text = { Text("将永久删除「${target.name}」，操作不可撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteTarget = null
+                    viewModel.deleteComplete(target)
+                }) { Text("永久删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            }
+        )
+    }
 }
 
 @Composable
-private fun RecycleItemRow(file: CloudFile, viewModel: RecycleViewModel) {
+private fun RecycleItemRow(
+    file: CloudFile,
+    viewModel: RecycleViewModel,
+    /** 「彻底删除」前先交给上层弹确认（不可逆操作不在行内直接执行） */
+    onRequestDelete: (CloudFile) -> Unit
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -180,7 +228,7 @@ private fun RecycleItemRow(file: CloudFile, viewModel: RecycleViewModel) {
         IconButton(onClick = { viewModel.restore(file) }) {
             Icon(Icons.Filled.Restore, "恢复", tint = MaterialTheme.colorScheme.primary)
         }
-        IconButton(onClick = { viewModel.deleteComplete(file) }) {
+        IconButton(onClick = { onRequestDelete(file) }) {
             Icon(Icons.Filled.DeleteForever, "彻底删除", tint = MaterialTheme.colorScheme.error)
         }
     }

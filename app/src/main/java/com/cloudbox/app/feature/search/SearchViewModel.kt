@@ -59,5 +59,20 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 进入搜索页时调用：索引为空则先跑一次全盘同步。
+     *
+     * 旧实现只在手动点右上角刷新时才同步 —— 首次搜索必然是空结果，
+     * 用户看到的表象是「搜索能搜但不能用」，实际是压根没有索引。
+     */
+    fun ensureIndexed() {
+        viewModelScope.launch {
+            if (searchRepository.isSynced()) return@launch
+            syncAll()
+        }
+    }
+
+    fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
+
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 }

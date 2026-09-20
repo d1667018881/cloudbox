@@ -345,6 +345,7 @@ class AuthRepositoryImpl @Inject constructor(
             if (lines.isEmpty()) {
                 return@withContext LoginResult.Failure("剪贴板中没有找到 phpdisk_info 或 ylogin")
             }
+            // 先落盘：探测请求要带上这些 Cookie 才发得出去
             accountStore.saveUid(uid)
             accountStore.setCurrentUid(uid)
             accountStore.clearRejected(uid)
@@ -353,6 +354,19 @@ class AuthRepositoryImpl @Inject constructor(
             accountStore.saveCookies(uid, lines)
             cookieJar.switchAccount(uid) // 重新加载
             fetchCloudUid(uid) // Cookie 导入路径同样要拿数字 uid（否则 doupload 缺 ?uid=）
+
+            // 校验登录态：用 task=47 目录列表探一次。
+            // 旧实现「存了就算成功」，于是剪贴板里随便一段含 phpdisk_info= 的文本
+            // 都能让 App 进主页（假登录），之后每个请求都 401 / 被风控当游客。
+            // 真失效的 Cookie 会拿到 HTML 登录页或 zt!=1，这里必须拦住并回滚。
+            val probe = runCatching { apiClient.apiService.getDirList(folderId = -1L) }
+            if (!probe.isSuccess || probe.getOrNull()?.zt != 1) {
+                cookieJar.clearAll()
+                accountStore.removeUid(uid)
+                _currentAccount.value = accountStore.currentUid()?.let { accountStore.accountInfo(it) }
+                return@withContext LoginResult.Failure("Cookie 无效或已失效，请重新登录后重新获取 phpdisk_info")
+            }
+
             val info = accountStore.accountInfo(uid)
             _currentAccount.value = info
             LoginResult.Success(info)

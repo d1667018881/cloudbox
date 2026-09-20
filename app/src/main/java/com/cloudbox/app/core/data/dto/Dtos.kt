@@ -142,10 +142,18 @@ data class CommonResponse(
      * 用 Any? 而非 String?：实测部分接口失败时 info 是数字 0 或数组，
      * 声明成 String 会让 Gson 抛 JsonSyntaxException，反而盖掉 zt 判定。
      */
-    @SerializedName("info") val info: Any? = null
+    @SerializedName("info") val info: Any? = null,
+    /**
+     * 部分接口在 text 里回传结构化结果 —— 例如 task=2 新建文件夹会返回新文件夹 id。
+     * 用 Any? 承接（同本文件顶部约定），避免形态漂移时 Gson 反序列化抛异常。
+     */
+    @SerializedName("text") val text: Any? = null
 ) {
     /** info 转字符串；非字符串形态一律返回 null */
     val infoText: String? get() = (info as? String)?.takeIf { it.isNotBlank() }
+
+    /** text 里的 id（兼容数字与数字字符串）；无则 null */
+    val textId: Long? get() = (text as? Number)?.toLong() ?: text?.toString()?.toLongOrNull()
 }
 
 /**

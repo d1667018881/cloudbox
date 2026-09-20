@@ -49,6 +49,8 @@ object Routes {
     const val DOMAIN_CONFIG = "domain_config"
     const val RESOLVE = "resolve?link={link}"
     const val SEARCH = "search"
+    /** 搜索结果的落地页：直接打开某个目录（folderName 仅用于面包屑显示） */
+    const val FILELIST = "filelist?folderId={folderId}&folderName={folderName}"
     const val DOWNLOAD = "download"
     const val FAVORITES = "favorites"
     const val RECYCLE = "recycle"
@@ -160,7 +162,44 @@ class MainActivity : ComponentActivity() {
                             ResolveScreen(onBack = { navController.popBackStack() }, initialLink = link)
                         }
                         composable(Routes.SEARCH) {
-                            SearchScreen(onBack = { navController.popBackStack() })
+                            SearchScreen(
+                                onBack = { navController.popBackStack() },
+                                // 点搜索结果 → 落到对应目录（文件夹本身 / 文件所在目录）。
+                                // 旧实现结果行没有 onClick，搜出来只能看不能进 —— 这就是
+                                // 「搜索能搜不能用」的直接原因。
+                                onOpenFolder = { id, name ->
+                                    navController.navigate(
+                                        Routes.FILELIST
+                                            .replace("{folderId}", id.toString())
+                                            .replace("{folderName}", Uri.encode(name))
+                                    )
+                                },
+                                onOpenFileInParent = { parentId ->
+                                    navController.navigate(
+                                        Routes.FILELIST
+                                            .replace("{folderId}", parentId.toString())
+                                            .replace("{folderName}", "")
+                                    )
+                                }
+                            )
+                        }
+                        // 搜索结果的落地页：直接打开指定目录的浏览页
+                        composable(
+                            Routes.FILELIST,
+                            arguments = listOf(
+                                navArgument("folderId") { type = NavType.LongType; defaultValue = -1L },
+                                navArgument("folderName") { type = NavType.StringType; defaultValue = "" }
+                            )
+                        ) { entry ->
+                            com.cloudbox.app.feature.filelist.FileListScreen(
+                                onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                                onOpenRecycle = { navController.navigate(Routes.RECYCLE) },
+                                onOpenSharedLink = { link ->
+                                    navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link)))
+                                },
+                                initialFolderId = entry.arguments?.getLong("folderId"),
+                                initialFolderName = entry.arguments?.getString("folderName").orEmpty()
+                            )
                         }
                         composable(Routes.DOWNLOAD) {
                             DownloadScreen(onBack = { navController.popBackStack() })

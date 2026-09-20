@@ -132,7 +132,12 @@ class FileRepositoryImpl @Inject constructor(
                 val before = api.getAllFolders().folders.map { it.folderId to it.folderName }
                 val resp = api.createFolder(parentId = parentId, folderName = name)
                 if (resp.zt != 1) throw ApiError.Business(resp.zt, "新建文件夹失败")
-                // task=2 不返回 id，用前后文件夹列表差异定位新文件夹（LanZouCloud-API 同款策略）
+                // 优先用服务端在 text 里回传的新文件夹 id —— 原版「蓝云」
+                // home_func.lua「新建文件夹」就是直接用响应 text 作 id。
+                // 比"两次全量求差集"可靠：差集遇同名文件夹会取错，且要多打两次 getAllFolders。
+                resp.textId?.let { return@runCatching it }
+                // 兜底：服务端未回传 text 时，退回前后文件夹列表差异定位
+                // （before 快照已在 create 调用之前取好，见上文 #7 修复）
                 val after = api.getAllFolders().folders.map { it.folderId to it.folderName }
                 after.filter { it.second == name && it !in before }.firstOrNull()?.first
             }
@@ -142,7 +147,12 @@ class FileRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             runCatching {
                 val resp = if (file.isFolder) {
-                    api.renameDir(folderId = file.id, folderName = newName)
+                    // ⚠️ task=4 是**整体覆盖**：只传新名字会把文件夹「简介」清空
+                    // （旧实现的静默数据损毁 bug，代码自己的注释也承认 task=4 是覆盖式）。
+                    // 先读回原描述，再和新名字一起提交 —— 与原版「蓝云」
+                    // home_file.lua「文件夹修改资料」一致（name 与 des 同时提交）。
+                    val desc = getDirDesc(file.id).getOrDefault("")
+                    api.renameDir(folderId = file.id, folderName = newName, folderDescription = desc)
                 } else {
                     api.renameFile(fileId = file.id, fileName = newName)
                 }

@@ -8,6 +8,7 @@ import android.os.Environment
 import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.core.data.local.db.AppDatabase
 import com.cloudbox.app.core.data.local.db.DownloadRecordEntity
+import com.cloudbox.app.core.data.remote.CookiePersistenceJar
 import com.cloudbox.app.core.domain.model.DownloadTask
 import com.cloudbox.app.core.domain.repository.DownloadRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -15,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,11 +29,21 @@ import javax.inject.Singleton
  *
  * 注意：DownloadManager 的请求头需要在 enqueue 时通过
  * addRequestHeader("User-Agent", ...) 显式设置——它不走 OkHttp 拦截器。
+ *
+ * ⚠️ 为什么还要显式带上 Cookie（2026-09 修复「下载到几 KB 网页」）：
+ * 直链解析走的是 OkHttp（带 [CookiePersistenceJar]），而真正下载用的是系统
+ * DownloadManager —— 它是**另一套 HTTP 栈**，读不到 OkHttp 的 CookieJar。
+ * 风控命中时服务端会返回一页 acw_sc__v2 挑战 HTML 而不是文件，于是用户下到
+ * 一个几 KB 的网页。原版「蓝云」是把全量 Cookie 灌进系统 WebView 的
+ * CookieManager 再下载（`webview.lua` / `home_func.lua` 引导下载），
+ * 这里用等价做法：enqueue 时把 OkHttp jar 中匹配该直链 URL 的 Cookie
+ * 直接作为 `Cookie` 请求头带给 DownloadManager。
  */
 @Singleton
 class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val db: AppDatabase
+    private val db: AppDatabase,
+    private val cookieJar: CookiePersistenceJar
 ) : DownloadRepository {
 
     private val downloadManager: DownloadManager
@@ -50,7 +62,7 @@ class DownloadRepositoryImpl @Inject constructor(
         accountUid: String
     ): Long = withContext(Dispatchers.IO) {
         val safeName = sanitizeFileName(fileName)
-        val request = buildRequest(url, safeName, referer, mimeType)
+        val request = buildRequest(url, safeName, referer, mimeType, cookieHeaderFor(url))
         val id = downloadManager.enqueue(request)
         db.downloadRecordDao().insert(
             DownloadRecordEntity(
@@ -83,7 +95,7 @@ class DownloadRepositoryImpl @Inject constructor(
     override suspend fun resume(downloadId: Long) = withContext(Dispatchers.IO) {
         val record = db.downloadRecordDao().getByDownloadId(downloadId) ?: return@withContext
         if (!record.paused) return@withContext
-        val request = buildRequest(record.url, record.fileName, record.referer, record.mimeType)
+        val request = buildRequest(record.url, record.fileName, record.referer, record.mimeType, cookieHeaderFor(record.url))
         val newId = downloadManager.enqueue(request)
         // 把旧记录的 downloadId 更新为新任务 id，同时清掉 paused 标记
         db.downloadRecordDao().updateDownloadId(downloadId, newId)
@@ -167,7 +179,8 @@ class DownloadRepositoryImpl @Inject constructor(
         url: String,
         fileName: String,
         referer: String?,
-        mimeType: String?
+        mimeType: String?,
+        cookieHeader: String?
     ): DownloadManager.Request {
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(fileName)
@@ -180,9 +193,26 @@ class DownloadRepositoryImpl @Inject constructor(
             // 桌面 UA + Referer：否则 403（需求规格 8 节）
             .addRequestHeader("User-Agent", AppConstants.DESKTOP_UA)
         referer?.let { request.addRequestHeader("Referer", it) }
+        // Cookie：DownloadManager 读不到 OkHttp 的 CookieJar，必须显式带，
+        // 否则风控命中时下到的是 acw_sc__v2 挑战 HTML（详见类注释与 [cookieHeaderFor]）。
+        cookieHeader?.takeIf { it.isNotBlank() }?.let { request.addRequestHeader("Cookie", it) }
         mimeType?.let { request.setMimeType(it) }
         return request
     }
+
+    /**
+     * 取该下载 URL 应携带的 Cookie 头（来自 OkHttp 的 [CookiePersistenceJar]）。
+     *
+     * 直链解析阶段把 acw_sc__v2 等挑战 cookie 写进了 [CookiePersistenceJar]，
+     * 其 domain 是直链 host；这里按 URL 精确匹配取出，保证「下载」那一跳与
+     * 「解析」那一跳携带同一份凭证。匹配不到返回 null（不额外加头）。
+     */
+    private fun cookieHeaderFor(url: String): String? = runCatching {
+        val httpUrl = url.toHttpUrlOrNull() ?: return@runCatching null
+        val cookies = cookieJar.loadForRequest(httpUrl)
+        if (cookies.isEmpty()) null
+        else cookies.joinToString("; ") { "${it.name}=${it.value}" }
+    }.getOrNull()
 
     /** 查询 DownloadManager 真实状态；下载完成后同步真实文件名（处理同名冲突自动重命名） */
     suspend fun queryStatus(record: DownloadRecordEntity): DownloadTask {
