@@ -69,8 +69,11 @@ jobs:
       # 的守卫等于没有守卫。用 >> 追加，别用 >（会清掉 gradle 在后面写的内容）。
       - name: Pre-check (fast)
         run: |
-          echo "===== precheck =====" | tee -a build.log
-          python3 scripts/precheck.py app/src/main/java 2>&1 | tee -a build.log
+          # 一次扫全仓库，两种检查都做（括号/import 只作用于 .kt，
+          # 凭据扫描覆盖 .md 等文档 —— 历史上的口令泄露就发生在文档里）。
+          # 只传 `.` 而不是分两步：`.kt` 是仓库的子集，扫两次纯属浪费。
+          echo "===== precheck（语法 + 凭据） =====" | tee -a build.log
+          python3 scripts/precheck.py . 2>&1 | tee -a build.log
 
       - name: Build APK
         id: build
