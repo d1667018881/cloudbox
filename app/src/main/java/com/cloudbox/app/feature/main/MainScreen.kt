@@ -86,11 +86,17 @@ fun MainScreen(
     // 详见 AuthRepositoryImpl.logout 的注释（那里还修了"Cookie 根本没清"的第二层问题）。
     val scope = rememberCoroutineScope()
     var confirmLogout by remember { mutableStateOf(false) }
-    val doLogout = {
+    // ⚠️ 显式标注 `: () -> Unit` 而不是让 Kotlin 推断。
+    //    `scope.launch { ... }` 的返回值是 Job，而 lambda 的最后一句是它 ——
+    //    于是整个 lambda 会被推断成 `() -> Job`，传给 TextButton 的
+    //    `() -> Unit` 形参就会编译报错（实际踩到过：CI BUILD FAILED）。
+    //    加个显式类型，顺带也让签名一眼可读。
+    val doLogout: () -> Unit = {
         scope.launch {
             account?.uid?.let { authRepository.logout(it) }
             onLogout()
         }
+        Unit
     }
 
     // 退出登录不可撤销（会清掉该账号保存的密码与 Cookie，下次要重新输入），
