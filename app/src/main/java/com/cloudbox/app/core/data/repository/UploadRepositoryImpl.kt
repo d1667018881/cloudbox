@@ -1,5 +1,6 @@
 package com.cloudbox.app.core.data.repository
 
+import com.cloudbox.app.BuildConfig
 import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.common.SplitZipUtil
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
@@ -96,14 +97,10 @@ class UploadRepositoryImpl @Inject constructor(
                     )
                 }
 
-                // ② 后缀伪装总开关在设置页（默认开）：关闭时即使传了 spoofSuffix=true 也不改名
+                // ② 命名：后缀伪装（可关）+ 插入上传工具版本号。规则见 [applyUploadName]。
+                //    顺序不能反 —— 版本号先就位，`.zip` 最后追加，否则下载端还原不出原名。
                 val effSpoof = spoofSuffix && settingsStore.suffixSpoofEnabled.first()
-                val uploadName = if (effSpoof && needsSpoof(file)) {
-                    // 蓝奏云不接受 exe/apk 等格式，改名 .zip 上传，下载时还原
-                    "${file.name}.zip"
-                } else {
-                    file.name
-                }
+                val uploadName = applyUploadName(file, effSpoof)
 
                 // ③ 扩展名前置校验
                 //
@@ -416,5 +413,68 @@ class UploadRepositoryImpl @Inject constructor(
         val custom = com.cloudbox.app.common.SpoofSuffixUtil
             .parse(settingsStore.spoofSuffixList.first())
         return ext in custom
+    }
+
+    /**
+     * 决定这次上传在云端**叫什么名字**。用户要求：文件名里带上传软件的版本号。
+     *
+     * 命名规则：
+     *
+     * | 原始名 | 扩展名需伪装 | 云端文件名 |
+     * |---|---|---|
+     * | `Foo.apk` | 是 | `Foo-v0.1.157.apk.zip` |
+     * | `Foo.png` | 否 | `Foo-v0.1.157.png` |
+     * | `云匣-1.2.3.apk` | 是 | `云匣-1.2.3-v0.1.157.apk.zip` |
+     *
+     * ─────────────────────────────────────────────────────────────
+     * ⚠️ 为什么版本号插在**最后一个点之前**，而不是前缀/后缀
+     * ─────────────────────────────────────────────────────────────
+     * - 直接追加（`Foo.apk-v0.1.157`）会让**扩展名不再是最后一个后缀**。
+     *   蓝奏云只按最后的扩展名判断能否上传（实测：无扩展名一律回
+     *   `{"zt":0,"info":"不能上传.格式的文件"}`），等于亲手制造一个被拒传的文件。
+     * - 前缀（`v0.1.157-Foo.apk`）没这个问题，但破坏按名排序，
+     *   也让"这文件原来叫什么"变得难认。所以选"插在扩展名前"。
+     *
+     * ─────────────────────────────────────────────────────────────
+     * ⚠️ 与后缀伪装的顺序：**先插版本号，再追加 .zip**
+     * ─────────────────────────────────────────────────────────────
+     * 伪装的规则是 `原名 + ".zip"`，而还原依赖"去掉 `.zip` 就是原名"这条
+     * 等价关系。顺序一旦反过来，还原出来的名字就和上传前不一致了。
+     * 所以版本号必须先就位，`.zip` 永远最后追加。
+     *
+     * 另外：原始名自带版本号时（`云匣-1.2.3.apk`）**原样保留**，不去重 ——
+     * 那是"被传文件的版本"，与"上传工具的版本"是两回事，都能提供信息，
+     * 合并掉反而丢失事实。
+     *
+     * 版本号取 `BuildConfig.VERSION_NAME`（CI 注入，形如 `0.1.157`），
+     * 不用 `PackageManager`：那要 Context、还可能抛异常；BuildConfig 是编译期
+     * 常量，取不到就是编译不过，不给运行时留隐患。
+     */
+    private suspend fun applyUploadName(file: File, spoof: Boolean): String {
+        val suffixed = if (spoof && needsSpoof(file)) {
+            // 蓝奏云不接受 exe/apk 等格式，改名 .zip 上传，下载时还原
+            "${file.name}.zip"
+        } else {
+            file.name
+        }
+        return insertVersionBeforeExtension(suffixed, BuildConfig.VERSION_NAME)
+    }
+
+    /**
+     * 把版本号插到**最后一个扩展名之前**；没有可用扩展名时追加在末尾。
+     *
+     * 单独抽成纯函数是为了能验证它 —— 边界比看上去多：无扩展名、以点开头
+     * （`.gitignore`，前导点是隐藏文件标记而非扩展名）、以点结尾（`foo.`）、
+     * 文件名含多个点、版本号为空。任何一个算错都会产出非法文件名。
+     */
+    private fun insertVersionBeforeExtension(fileName: String, version: String): String {
+        if (version.isBlank()) return fileName
+        val dot = fileName.lastIndexOf('.')
+        // dot <= 0 同时覆盖 dot == -1（`Makefile`）与 dot == 0（`.gitignore`）
+        if (dot <= 0) return "$fileName-v$version"
+        val stem = fileName.substring(0, dot)
+        val ext = fileName.substring(dot + 1)
+        // `foo.` 这种以点结尾的：ext 为空，插进去会得到 `foo-v1..`，不如直接追加
+        return if (ext.isEmpty()) "$fileName-v$version" else "$stem-v$version.$ext"
     }
 }
