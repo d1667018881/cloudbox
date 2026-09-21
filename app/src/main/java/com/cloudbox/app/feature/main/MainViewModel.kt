@@ -21,6 +21,10 @@ class MainViewModel @Inject constructor(
     val authRepository: AuthRepository,
     /** V30：主界面读取界面显示设置（show_account_button / show_file_type_label） */
     val settingsStore: SettingsStore,
+    /** V33：主界面"关于"入口的红点来源 */
+    val updateStatusStore: com.cloudbox.app.core.data.update.UpdateStatusStore,
+    /** V33：主界面公告入口的红点来源 */
+    val announcementStatusStore: com.cloudbox.app.core.data.announcement.AnnouncementStatusStore,
     private val directLinkRepository: DirectLinkRepository,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {

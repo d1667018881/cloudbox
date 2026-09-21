@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 可共享路径白名单（供应用自更新安装 APK）。
+  只开 cacheDir/updates/ —— 更新包就下在这里，不暴露其它目录。
+-->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

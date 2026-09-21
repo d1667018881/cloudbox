@@ -54,7 +54,34 @@ object DownloadHelper {
         }
     }
 
-    private fun openApk(context: Context, uri: Uri) {
+    /**
+     * 安装磁盘上的 APK 文件（自更新用）。
+     *
+     * 走自建 FileProvider（authority = `<包名>.fileprovider`，见 AndroidManifest 与
+     * res/xml/file_paths.xml）换出 content:// URI —— 直接把 `file://` 交给安装器
+     * 在 Android 7+ 会抛 FileUriExposedException。自更新包下载到 cacheDir/updates/，
+     * 该路径已在 file_paths.xml 中声明。
+     */
+    fun installApkFromFile(context: Context, file: java.io.File) {
+        if (!file.exists()) {
+            Toast.makeText(context, "安装包不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = runCatching {
+            androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+        }.getOrNull()
+        if (uri == null) {
+            Toast.makeText(context, "无法准备安装包", Toast.LENGTH_SHORT).show()
+            return
+        }
+        openApk(context, uri)
+    }
+
+    fun openApk(context: Context, uri: Uri) {
         // Android 8+：安装未知应用需要 REQUEST_INSTALL_PACKAGES + 用户授权
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()

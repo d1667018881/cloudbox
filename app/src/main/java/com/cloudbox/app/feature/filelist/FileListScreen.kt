@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -40,6 +41,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -79,6 +82,10 @@ import kotlinx.coroutines.launch
 fun FileListScreen(
     onOpenSearch: () -> Unit,
     onOpenRecycle: () -> Unit,
+    /** 顶栏「公告」入口（自建公告系统） */
+    onOpenAnnouncement: () -> Unit = {},
+    /** 公告未读红点（由上层从 AnnouncementStatusStore 传入） */
+    announcementUnread: Boolean = false,
     /** 从其他 App 分享进来的文件/链接（未消费时非空） */
     pendingShare: com.cloudbox.app.common.ShareIntentHandler.SharedContent? = null,
     /** 分享内容已被消费，通知上层清空，避免旋转屏幕/重组时重复触发 */
@@ -277,6 +284,12 @@ fun FileListScreen(
                     },
                     actions = {
                         if (!state.selectionMode) {
+                            // 公告入口（自建）+ 未读红点
+                            IconButton(onClick = onOpenAnnouncement) {
+                                BadgedBox(badge = { if (announcementUnread) Badge() }) {
+                                    Icon(Icons.Filled.Email, "公告")
+                                }
+                            }
                             IconButton(onClick = onOpenSearch) { Icon(Icons.Filled.Search, "搜索") }
                             // 排序：当前目录内客户端排序（不动服务端数据）
                             Box {

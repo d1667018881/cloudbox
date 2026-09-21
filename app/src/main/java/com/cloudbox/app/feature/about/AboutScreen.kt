@@ -35,6 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import com.cloudbox.app.common.DownloadHelper
 import com.cloudbox.app.core.domain.model.UpdateLogEntry
 
 /**
@@ -96,6 +100,7 @@ fun AboutScreen(
             )
 
             Spacer(Modifier.height(16.dp))
+            val installContext = LocalContext.current
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -111,9 +116,60 @@ fun AboutScreen(
                     Text(
                         r,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (r.contains("有新版本")) MaterialTheme.colorScheme.primary
+                        color = if (r.contains("发现新版本")) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            // 检测到更新：展示版本说明 + 下载 / 进度 / 安装
+            state.update?.let { update ->
+                Spacer(Modifier.height(12.dp))
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            "新版本 ${update.versionName}",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (!update.publishedAt.isNullOrBlank()) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                update.publishedAt,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (update.releaseNotes.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(update.releaseNotes, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        val downloaded = state.downloadedFile
+                        when {
+                            downloaded != null -> Button(
+                                onClick = { DownloadHelper.installApkFromFile(installContext, downloaded) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("安装") }
+
+                            state.downloading -> {
+                                LinearProgressIndicator(
+                                    progress = state.progress / 100f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "下载中 ${state.progress}%",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            else -> Button(
+                                onClick = viewModel::download,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("下载更新") }
+                        }
+                    }
                 }
             }
 

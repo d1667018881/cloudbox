@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -61,6 +63,8 @@ fun MainScreen(
     onOpenFavorites: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenAccount: () -> Unit,
+    onOpenAnnouncement: () -> Unit,
     onOpenResolve: (String?) -> Unit,
     onLogout: () -> Unit,
     /** 从其他 App 分享进来的文件/链接（未消费时非空），透传给网盘页消费 */
@@ -150,6 +154,9 @@ fun MainScreen(
     // 剪贴板检测到分享链接 → 弹窗：解析（跳解析页）/ 获取直链（原地解析并复制）/ 忽略
     val mainViewModel: MainViewModel = hiltViewModel()
     val context = LocalContext.current
+    // V33：红点数据源（更新 / 公告），由启动检查写入
+    val updateAvailable by mainViewModel.updateStatusStore.available.collectAsState()
+    val announcementUnread by mainViewModel.announcementStatusStore.unread.collectAsState()
     if (pendingLink != null) {
         AlertDialog(
             onDismissRequest = { clipboardWatcher.dismiss() },
@@ -209,6 +216,8 @@ fun MainScreen(
                 0 -> FileListScreen(
                     onOpenSearch = onOpenSearch,
                     onOpenRecycle = onOpenRecycle,
+                    onOpenAnnouncement = onOpenAnnouncement,
+                    announcementUnread = announcementUnread,
                     // 外部分享进来的文件/链接：由网盘页消费（文件直接传当前目录）
                     pendingShare = pendingShare,
                     onShareConsumed = onShareConsumed,
@@ -222,12 +231,15 @@ fun MainScreen(
                     onOpenRecycle = onOpenRecycle,
                     onOpenSettings = onOpenSettings,
                     onOpenAbout = onOpenAbout,
+                    onOpenAccount = onOpenAccount,
                     onLogout = doLogout,
                     // V30：账号入口按钮开关（对齐原版 show_account_button）。
                     // 关掉后"我的"页不显示账号切换入口——单账号用户没有切换需求，
                     // 这块区域对他是纯噪音。
                     showAccountButton = showAccountButton,
-                    showFileTypeLabel = showFileTypeLabel
+                    showFileTypeLabel = showFileTypeLabel,
+                    // V33：关于入口的更新红点
+                    updateAvailable = updateAvailable != null
                 )
             }
         }
@@ -242,30 +254,34 @@ private fun MeTab(
     onOpenRecycle: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenAccount: () -> Unit,
     onLogout: () -> Unit,
     /** V30：是否显示账号入口（原版 show_account_button） */
     showAccountButton: Boolean = true,
     /** V30：是否在条目上显示类型标签（原版 show_file_type_label） */
-    showFileTypeLabel: Boolean = false
+    showFileTypeLabel: Boolean = false,
+    /** V33：关于入口是否有更新（红点） */
+    updateAvailable: Boolean = false
 ) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         if (showAccountButton) {
             Text("当前账号：$accountName", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(16.dp))
         }
+        MeEntry("账号信息", onOpenAccount)
         MeEntry("下载管理", onOpenDownload)
         MeEntry("收藏夹" + if (showFileTypeLabel) "（文件夹可检查更新）" else "", onOpenFavorites)
         MeEntry("回收站", onOpenRecycle)
         MeEntry("设置", onOpenSettings)
-        // 关于页（对齐原版 about.lua）：版本号 / 检查更新 / 更新日志
-        MeEntry("关于", onOpenAbout)
+        // 关于页（对齐原版 about.lua）：版本号 / 检查更新
+        MeEntry("关于", onOpenAbout, badge = updateAvailable)
         Spacer(Modifier.height(24.dp))
         TextButton(onClick = onLogout) { Text("退出登录", color = MaterialTheme.colorScheme.error) }
     }
 }
 
 @Composable
-private fun MeEntry(title: String, onClick: () -> Unit) {
+private fun MeEntry(title: String, onClick: () -> Unit, badge: Boolean = false) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -274,5 +290,9 @@ private fun MeEntry(title: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
+        if (badge) {
+            Spacer(Modifier.width(8.dp))
+            Badge()
+        }
     }
 }

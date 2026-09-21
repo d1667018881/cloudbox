@@ -43,6 +43,9 @@ class SettingsStore @Inject constructor(private val context: Context) {
     // ---- V31（对齐原版「自动加载页面剩余内容」） ----
     private val keyAutoLoad = booleanPreferencesKey("auto_load")
 
+    // ---- V33：公告已读 id（自建公告系统，见 Announcement） ----
+    private val keyLastReadAnnouncementId = stringPreferencesKey("last_read_announcement_id")
+
     /** 当前 UA：未自定义时返回默认桌面 UA（伪装关键） */
     val userAgent: Flow<String> = context.settingsDataStore.data.map {
         it[keyUserAgent] ?: AppConstants.DESKTOP_UA
@@ -175,6 +178,20 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setAutoLoad(enabled: Boolean) =
         edit { p -> p[keyAutoLoad] = enabled }
+
+    /**
+     * 最近一次已读公告的 id（空串 = 从未读过）。
+     *
+     * ⚠️ 刻意**不**纳入 [snapshotAll]/[applySnapshot] 的备份范围：已读状态是
+     * "本机看到哪了"的本地视角，换机后重新亮一次红点比"恢复备份后永远不再提示"
+     * 更符合直觉。
+     */
+    val lastReadAnnouncementId: Flow<String> = context.settingsDataStore.data.map {
+        it[keyLastReadAnnouncementId] ?: ""
+    }
+
+    suspend fun setLastReadAnnouncementId(id: String) =
+        edit { p -> p[keyLastReadAnnouncementId] = id }
 
     // 注：曾经有过 preferWebUpload（上传通道开关），2026-09-09 移除。
     // 上传一律走 App 原生直传——原版 App 就是这么做的，设置页的「上传通道自检」

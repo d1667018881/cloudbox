@@ -318,6 +318,19 @@ interface LanzouApiService {
         @Field("shownames") shownames: String
     ): CommonResponse
 
+    // ==================== 账户概览（原版「获取用户信息」） ====================
+
+    /**
+     * 账户概览 HTML（原版 home_func.lua:2038 的 `myfile.php?item=1&v2`）。
+     *
+     * 为什么把 query 直接写进 @GET：原版末尾的 `v2` 是**裸参数**（没有 `=`），
+     * 用 @Query 会被拼成 `v2=`，未必等价。写死在路径里最保真。
+     * 响应是 HTML（非 JSON），故返回 ResponseBody 自行解析（见 UserProfileHtmlParser）。
+     * 走管理域（LanzouDomainInterceptor：`.php` → diskMain）。
+     */
+    @GET("myfile.php?item=1&v2")
+    suspend fun getUserProfile(): Response<ResponseBody>
+
     /** 通用 GET（分享页/iframe 页/重定向探测），不经过 Retrofit 转换器 */
     @Streaming
     @GET

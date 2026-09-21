@@ -3,17 +3,17 @@ package com.cloudbox.app.feature.about
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.BuildConfig
+import com.cloudbox.app.core.data.update.UpdateStatusStore
+import com.cloudbox.app.core.domain.model.AppUpdate
 import com.cloudbox.app.core.domain.model.UpdateLogEntry
+import com.cloudbox.app.core.domain.repository.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.File
 import javax.inject.Inject
 
 data class AboutUiState(
@@ -21,11 +21,21 @@ data class AboutUiState(
     val versionCode: Int = 0,
     val checking: Boolean = false,
     val updateResult: String? = null,
+    /** 检测到的新版本；null = 无更新或未检查 */
+    val update: AppUpdate? = null,
+    val downloading: Boolean = false,
+    /** 下载进度 0..100 */
+    val progress: Int = 0,
+    /** 下载好的安装包（就绪后可安装） */
+    val downloadedFile: File? = null,
     val message: String? = null
 )
 
 @HiltViewModel
-class AboutViewModel @Inject constructor() : ViewModel() {
+class AboutViewModel @Inject constructor(
+    private val updateRepository: UpdateRepository,
+    private val updateStatusStore: UpdateStatusStore
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
         AboutUiState(
@@ -36,55 +46,64 @@ class AboutViewModel @Inject constructor() : ViewModel() {
     val uiState: StateFlow<AboutUiState> = _uiState.asStateFlow()
 
     /**
-     * 检查更新：拉 GitHub Releases 最新 tag 与本地版本比对。
+     * 检查更新。
      *
-     * ⚠️ 为什么"检查失败"不报错只说一句：本 App 的核心功能（网盘/上传/解析）
-     * 完全不依赖这个网络请求。它失败（DNS 被劫持、GitHub 不可达、
-     * 仓库还没发过 Release）都是常态，弹错误只会让用户误以为 App 坏了。
-     * 所以一律降级成中性文案。
+     * 与旧实现的关键差别：
+     * ① 用**数字版号**比较（旧实现比 tag 字符串，判不出 0.1.130 与 0.1.131 的新旧）；
+     * ② 拿到 APK 直链后可下载安装（旧实现只显示一句文案）；
+     * ③ 「检查失败」与「已是最新」严格区分，不再把失败说成最新。
+     *
+     * 检查结果同步写入 [UpdateStatusStore]，供"关于"入口的红点使用。
      */
     fun checkUpdate() {
         if (_uiState.value.checking) return
-        _uiState.update { it.copy(checking = true, updateResult = null) }
+        _uiState.update { it.copy(checking = true, updateResult = null, downloadedFile = null) }
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { fetchLatestTag() }
-            _uiState.update { it.copy(checking = false, updateResult = result) }
+            updateRepository.checkUpdate().fold(
+                onSuccess = { update ->
+                    updateStatusStore.set(update)
+                    _uiState.update {
+                        it.copy(
+                            checking = false,
+                            update = update,
+                            updateResult = if (update == null) {
+                                "已是最新版本（${BuildConfig.VERSION_NAME}）"
+                            } else {
+                                "发现新版本 ${update.versionName}"
+                            }
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            checking = false,
+                            updateResult = "检查失败（${e.message ?: "网络不可达"}，不影响正常使用）"
+                        )
+                    }
+                }
+            )
         }
     }
 
-    private fun fetchLatestTag(): String {
-        val url = URL("https://api.github.com/repos/d1667018881/cloudbox/releases/latest")
-        // ⚠️ HttpURLConnection **不实现 Closeable**，所以不能用 `use { }`
-        //    （Kotlin 的 use 要求 Closeable/AutoCloseable，编译器会报
-        //    "Argument type mismatch: actual type is 'java.io.Closeable?'"）。
-        //    它自己的释放方式是 disconnect()，用 try/finally 保证调用。
-        val conn = runCatching {
-            (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 8_000
-                readTimeout = 8_000
-                setRequestProperty("Accept", "application/vnd.github+json")
-            }
-        }.getOrElse {
-            return "检查失败（网络不可达，不影响正常使用）"
-        }
-        return try {
-            if (conn.responseCode != 200) {
-                "检查失败（HTTP ${conn.responseCode}）"
-            } else {
-                val body = conn.inputStream.bufferedReader().readText()
-                // 直接用 org.json（Android 平台自带），避免为一个字段引入 Gson
-                val tag = org.json.JSONObject(body).optString("tag_name", "")
-                when {
-                    tag.isBlank() -> "检查失败（没有可用的版本信息）"
-                    tag.trimStart('v') == BuildConfig.VERSION_NAME -> "已是最新版本（$tag）"
-                    else -> "有新版本：$tag（当前 ${BuildConfig.VERSION_NAME}）"
+    /** 下载更新包（进度写入 state.progress），成功后 downloadedFile 就绪可安装 */
+    fun download() {
+        val update = _uiState.value.update ?: return
+        if (_uiState.value.downloading) return
+        _uiState.update { it.copy(downloading = true, progress = 0, message = null) }
+        viewModelScope.launch {
+            updateRepository.download(update) { pct ->
+                _uiState.update { it.copy(progress = pct) }
+            }.fold(
+                onSuccess = { file ->
+                    _uiState.update {
+                        it.copy(downloading = false, downloadedFile = file, message = "下载完成，点「安装」继续")
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(downloading = false, message = "下载失败：${e.message}") }
                 }
-            }
-        } catch (e: Exception) {
-            "检查失败（网络不可达，不影响正常使用）"
-        } finally {
-            runCatching { conn.disconnect() }
+            )
         }
     }
 

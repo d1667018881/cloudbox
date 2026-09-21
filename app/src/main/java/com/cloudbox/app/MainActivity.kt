@@ -24,7 +24,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.cloudbox.app.common.ClipboardLinkWatcher
 import com.cloudbox.app.common.ShareIntentHandler
+import com.cloudbox.app.core.data.announcement.AnnouncementStatusStore
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
+import com.cloudbox.app.core.data.update.UpdateStatusStore
+import com.cloudbox.app.core.domain.repository.AnnouncementRepository
+import com.cloudbox.app.core.domain.repository.UpdateRepository
 import com.cloudbox.app.feature.download.DownloadScreen
 import com.cloudbox.app.feature.favorites.FavoritesScreen
 import com.cloudbox.app.feature.domain.DomainConfigScreen
@@ -40,6 +44,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** 导航路由常量 */
@@ -56,6 +61,10 @@ object Routes {
     const val RECYCLE = "recycle"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
+    /** 账号面板（原版 account.lua 的「管理账号」） */
+    const val ACCOUNT = "account"
+    /** 公告（自建，替代原版已停运的第三方公告页） */
+    const val ANNOUNCEMENT = "announcement"
 }
 
 @AndroidEntryPoint
@@ -63,6 +72,10 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var clipboardWatcher: ClipboardLinkWatcher
     @Inject lateinit var settingsStore: SettingsStore
+    @Inject lateinit var updateRepository: UpdateRepository
+    @Inject lateinit var announcementRepository: AnnouncementRepository
+    @Inject lateinit var updateStatusStore: UpdateStatusStore
+    @Inject lateinit var announcementStatusStore: AnnouncementStatusStore
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -87,6 +100,8 @@ class MainActivity : ComponentActivity() {
         intent?.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
         // 从其他 App 分享文件/链接进来（ACTION_SEND / ACTION_SEND_MULTIPLE）
         handleShareIntent(intent)
+        // V33：后台检查更新与公告（红点数据源），失败静默，不影响主流程
+        checkUpdateAndAnnouncements()
         // Android 13+ 动态请求通知权限（下载完成/上传进度通知需要）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             when {
@@ -136,6 +151,8 @@ class MainActivity : ComponentActivity() {
                                 onOpenFavorites = { navController.navigate(Routes.FAVORITES) },
                                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                                 onOpenAbout = { navController.navigate(Routes.ABOUT) },
+                                onOpenAccount = { navController.navigate(Routes.ACCOUNT) },
+                                onOpenAnnouncement = { navController.navigate(Routes.ANNOUNCEMENT) },
                                 onOpenResolve = { link ->
                                     // 路由参数必须 URL 编码（分享链接含 : / 等特殊字符）
                                     navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link ?: "")))
@@ -194,6 +211,7 @@ class MainActivity : ComponentActivity() {
                             com.cloudbox.app.feature.filelist.FileListScreen(
                                 onOpenSearch = { navController.navigate(Routes.SEARCH) },
                                 onOpenRecycle = { navController.navigate(Routes.RECYCLE) },
+                                onOpenAnnouncement = { navController.navigate(Routes.ANNOUNCEMENT) },
                                 onOpenSharedLink = { link ->
                                     navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link)))
                                 },
@@ -233,10 +251,39 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+                        composable(Routes.ACCOUNT) {
+                            com.cloudbox.app.feature.account.AccountScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Routes.ANNOUNCEMENT) {
+                            com.cloudbox.app.feature.announcement.AnnouncementScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
             }
             } // 结束 CompositionLocalProvider（应用内语言）
+        }
+    }
+
+    /**
+     * 启动后台检查「更新」与「公告」，结果写入两个 StatusStore 供红点显示。
+     *
+     * 用 appScope（IO）而非 lifecycleScope：这两件事与界面无关，Activity 重建/销毁
+     * 不应打断；失败一律静默（红点不显示即可），绝不影响主流程。
+     */
+    private fun checkUpdateAndAnnouncements() {
+        appScope.launch {
+            updateRepository.checkUpdate().onSuccess { updateStatusStore.set(it) }
+        }
+        appScope.launch {
+            announcementRepository.fetch().onSuccess { list ->
+                val latest = list.maxByOrNull { it.date.orEmpty() }
+                val lastRead = announcementRepository.lastReadId()
+                announcementStatusStore.setUnread(latest != null && latest.id != lastRead)
+            }
         }
     }
 
