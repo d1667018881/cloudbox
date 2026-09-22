@@ -14,8 +14,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -26,8 +30,10 @@ import com.cloudbox.app.common.ClipboardLinkWatcher
 import com.cloudbox.app.common.ShareIntentHandler
 import com.cloudbox.app.core.data.announcement.AnnouncementStatusStore
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
+import com.cloudbox.app.core.data.remote.CookiePersistenceJar
 import com.cloudbox.app.core.data.update.UpdateStatusStore
 import com.cloudbox.app.core.domain.repository.AnnouncementRepository
+import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.UpdateRepository
 import com.cloudbox.app.feature.download.DownloadScreen
 import com.cloudbox.app.feature.favorites.FavoritesScreen
@@ -44,6 +50,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -74,6 +81,8 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var clipboardWatcher: ClipboardLinkWatcher
     @Inject lateinit var settingsStore: SettingsStore
+    @Inject lateinit var authRepository: AuthRepository
+    @Inject lateinit var cookieJar: CookiePersistenceJar
     @Inject lateinit var updateRepository: UpdateRepository
     @Inject lateinit var announcementRepository: AnnouncementRepository
     @Inject lateinit var updateStatusStore: UpdateStatusStore
@@ -134,10 +143,27 @@ class MainActivity : ComponentActivity() {
             ) {
             CloudBoxTheme(darkMode = darkMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    // 冷启动免二次登录：起始页按「是否有可用的已恢复登录态」决定。
+                    // 判定是纯本地的 —— AuthRepositoryImpl.init 在构造时已把上次账号的
+                    // Cookie 槽位恢复进内存，这里只读一下，不发网络；真过期由 CloudBoxApp
+                    // 的后台 ensureSession() 静默重登兜底，兜不住时各页面的 CookieExpired
+                    // 处理会把人送回登录页。
+                    var startRoute by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(Unit) {
+                        val hasAccount = runCatching {
+                            authRepository.currentAccount.first()
+                        }.getOrNull() != null
+                        val loggedIn = runCatching { cookieJar.isLoggedIn() }.getOrDefault(false)
+                        startRoute = if (hasAccount && loggedIn) Routes.MAIN else Routes.LOGIN
+                    }
+                    val resolvedStart = startRoute
+                    if (resolvedStart == null) {
+                        // 判定只花毫秒级；这段时间留白，避免先闪一下登录页
+                    } else {
                     val navController = rememberNavController()
                     NavHost(
                         navController = navController,
-                        startDestination = Routes.LOGIN
+                        startDestination = resolvedStart
                     ) {
                         composable(Routes.LOGIN) {
                             LoginScreen(
@@ -274,6 +300,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                    } // 结束 if/else（起始页判定）
                 }
             }
             } // 结束 CompositionLocalProvider（应用内语言）

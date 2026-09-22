@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Environment
 import com.cloudbox.app.common.AppConstants
+import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.data.local.db.AppDatabase
 import com.cloudbox.app.core.data.local.db.DownloadRecordEntity
 import com.cloudbox.app.core.data.remote.CookiePersistenceJar
@@ -14,6 +15,7 @@ import com.cloudbox.app.core.domain.repository.DownloadRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -43,7 +45,8 @@ import javax.inject.Singleton
 class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: AppDatabase,
-    private val cookieJar: CookiePersistenceJar
+    private val cookieJar: CookiePersistenceJar,
+    private val settingsStore: SettingsStore
 ) : DownloadRepository {
 
     private val downloadManager: DownloadManager
@@ -61,7 +64,7 @@ class DownloadRepositoryImpl @Inject constructor(
         mimeType: String?,
         accountUid: String
     ): Long = withContext(Dispatchers.IO) {
-        val safeName = sanitizeFileName(fileName)
+        val safeName = sanitizeFileName(restoreSpoofedName(fileName))
         val request = buildRequest(url, safeName, referer, mimeType, cookieHeaderFor(url))
         val id = downloadManager.enqueue(request)
         db.downloadRecordDao().insert(
@@ -162,6 +165,26 @@ class DownloadRepositoryImpl @Inject constructor(
                 db.downloadRecordDao().updateFileName(downloadId, safe)
             }
         }
+
+    /**
+     * 下载端「后缀伪装还原」。
+     *
+     * 上传侧把服务端不收的格式追加 `.zip` 再传（见 UploadRepositoryImpl），
+     * 但旧实现下载端**没有对应的还原** —— 用户下回来的是 `xxx.apk.zip`，
+     * 点开装不了，得自己去文件管理器改名。这里按同一份后缀白名单还原
+     * （见 [com.cloudbox.app.common.SpoofSuffixUtil.restoreSpoofedName]）。
+     *
+     * 只读后缀列表、**不看「后缀伪装」总开关**：还原本地文件名与「上传时要不要
+     * 伪装」是两件事 —— 用户即使关掉伪装，历史文件仍可能叫 `x.zip`。
+     * 读失败一律返回原名（宁可名字难看，也不能把文件名改错）。
+     */
+    private suspend fun restoreSpoofedName(fileName: String): String = runCatching {
+        val raw = settingsStore.spoofSuffixList.first()
+        com.cloudbox.app.common.SpoofSuffixUtil.restoreSpoofedName(
+            fileName,
+            com.cloudbox.app.common.SpoofSuffixUtil.parse(raw)
+        )
+    }.getOrDefault(fileName)
 
     /** 文件名消毒：移除路径分隔符、控制字符、连续点号，防止路径穿越与 IllegalArgumentException */
     private fun sanitizeFileName(name: String): String {

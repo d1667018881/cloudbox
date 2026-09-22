@@ -49,4 +49,29 @@ object SpoofSuffixUtil {
 
     /** 规范化成存盘格式（逗号分隔、去重、排序） */
     fun normalize(raw: String): String = parse(raw).sorted().joinToString(",")
+
+    /**
+     * 下载端还原：把上传时被伪装成 `.zip` 的文件名还原回原名。
+     *
+     * 上传侧规则是 `原名 + ".zip"`（见 UploadRepositoryImpl；apk 还会先插版本号，
+     * 于是 `Foo.apk` → `Foo-v0.1.157.apk.zip`），所以反向只需两步：
+     * 去掉末尾 `.zip`，再看剩下部分是否以「需要伪装的扩展名」结尾。
+     *
+     * ⚠️ 为什么必须带后缀白名单校验，而不是见 `.zip` 就剥：
+     * 用户上传的**真压缩包** `photos.zip` 去掉后缀只剩 `photos`（没有扩展名）
+     * → 不会命中；`archive.zip.zip` 去掉后是 `archive.zip`，扩展名 `zip` 不在
+     * 默认伪装列表里 → 同样保持原样。只有 `xxx.apk.zip` 这种「还原后确实是
+     * 一个会被服务端拦截的格式」才动，避免把正常文件名改坏。
+     *
+     * @param enabledSuffixes 已规范化的伪装后缀集合（见 [parse]）
+     */
+    fun restoreSpoofedName(fileName: String, enabledSuffixes: Set<String>): String {
+        if (!fileName.endsWith(".zip", ignoreCase = true)) return fileName
+        val stem = fileName.substring(0, fileName.length - 4)
+        val dot = stem.lastIndexOf('.')
+        // dot <= 0：没有扩展名（`photos.zip`）或以点开头（`.apk.zip`）——都不是伪装产物
+        if (dot <= 0 || dot == stem.length - 1) return fileName
+        val ext = stem.substring(dot + 1).lowercase()
+        return if (ext in enabledSuffixes) stem else fileName
+    }
 }
