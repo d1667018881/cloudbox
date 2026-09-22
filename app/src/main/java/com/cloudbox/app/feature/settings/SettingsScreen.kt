@@ -180,7 +180,7 @@ fun SettingsScreen(
                     Modifier.weight(1f).clickable { spoofDialog = true }
                 ) {
                     Text("上传后缀伪装", style = MaterialTheme.typography.bodyLarge)
-                    Text("以下格式自动改名为 .zip 上传，下载时还原（点击编辑列表）",
+                    Text("开启后，下列格式上传时改名为 .zip，下载时自动还原。默认关闭（点击编辑列表）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("当前：${state.spoofSuffixList}",

@@ -63,8 +63,23 @@ class SettingsStore @Inject constructor(private val context: Context) {
         it[keyUserAgent] ?: AppConstants.DESKTOP_UA
     }
 
+    /**
+     * 上传前是否把「不支持格式」改名成 `.zip`。
+     *
+     * ⚠️ 默认 **关闭**（2026-09-23 修正，此前默认开启是错的）：
+     * - 原版 `update_log.lua` 1.2.4.0 写得很清楚：「由于官方封堵，上传不支持文件
+     *   修改后缀为 .zip，**且此功能默认关闭**」—— 原版就是默认关，
+     *   这里当初"对齐原版"对反了。
+     * - 更关键：「apk/exe 会被服务端拒」这个前提**从未被实测证明**。代码里唯一的
+     *   实测记录是「**无扩展名**的文件被拒」，被过度推广成了「这些可执行格式都被
+     *   拒」；实际 APK 是能直接上传成功的。
+     *
+     * 默认关闭的好处：上传保持原名，不再平白多出 `-v0.1.x.apk.zip` 这种又长、
+     * 又要改回来才能用的名字。真碰上服务端回 `不能上传.格式的文件` 时，
+     * 再到设置页打开这个开关即可（后缀列表也可编辑）。
+     */
     val suffixSpoofEnabled: Flow<Boolean> = context.settingsDataStore.data.map {
-        it[keySuffixSpoof] ?: true // 默认开启：不支持格式伪装为 .zip 上传
+        it[keySuffixSpoof] ?: false
     }
 
     /**

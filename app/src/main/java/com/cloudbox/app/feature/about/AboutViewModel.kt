@@ -124,6 +124,12 @@ class AboutViewModel @Inject constructor(
          */
         val UPDATE_LOG: List<UpdateLogEntry> = listOf(
             UpdateLogEntry(
+                "v0.1.174",
+                listOf(
+                    "调整：「上传后缀伪装」改为默认关闭 —— 上传 APK / EXE 等不再被改名成 .zip"
+                )
+            ),
+            UpdateLogEntry(
                 "v0.1.172",
                 listOf(
                     "新增「星标文件夹」：聚合自盘常用目录（侧栏入口，支持备注、按名称排序）",

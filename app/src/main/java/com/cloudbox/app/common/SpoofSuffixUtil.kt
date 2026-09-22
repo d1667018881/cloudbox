@@ -18,7 +18,16 @@ package com.cloudbox.app.common
  */
 object SpoofSuffixUtil {
 
-    /** 默认伪装列表（对齐原版 + 实测被拦的常见可执行格式） */
+    /**
+     * 默认伪装候选列表。
+     *
+     * ⚠️ 这些格式**不是**"实测被服务端拦"的 —— 那是个没有证据的推断。全项目唯一
+     * 的实测记录是「**无扩展名**的文件被拒」（服务端回 `不能上传.格式的文件`），
+     * 推到具体扩展名上并不成立（实际 APK 可以直接上传成功）。
+     *
+     * 它们的定位只是"万一真被拒，可以先从这几个试起"的候选；而且整个伪装功能
+     * **默认关闭**（见 [com.cloudbox.app.core.data.local.datastore.SettingsStore.suffixSpoofEnabled]）。
+     */
     val DEFAULT_SUFFIXES = listOf("exe", "apk", "msi", "bat", "sh", "dll", "jar")
 
     /** 默认列表的存储形式（逗号分隔，便于 DataStore 存字符串） */
