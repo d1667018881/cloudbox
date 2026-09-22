@@ -101,7 +101,14 @@ data class SettingsUiState(
     /** 剪贴板分享链识别 */
     val getClipboard: Boolean = true,
     /** 删除二次确认 */
-    val deleteConfirm: Boolean = true
+    val deleteConfirm: Boolean = true,
+    // ==================== V33：备份增强 ====================
+    /** 生成好的备份码（非空时 UI 弹窗展示 + 可复制） */
+    val backupCode: String? = null,
+    /** 恢复预览用到的密码（加密备份码需要，confirmRestore 复用） */
+    val restorePassword: String? = null,
+    /** 增量恢复：保留现有收藏，只追加备份里的条目 */
+    val mergeRestore: Boolean = false
 )
 
 /** 恢复预览（UI 层副本，不直接暴露 Repository 的 data class，避免 UI 依赖数据层类型） */
@@ -555,6 +562,58 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * 生成「备份码」（可复制 / 分享的文本形式）。
+     * password 为空 → 明文 JSON 文本；非空 → 加密成 `CBOX1:` 串（见 BackupCrypto）。
+     */
+    fun buildBackupCode(password: String?) {
+        if (_uiState.value.dataBusy) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(dataBusy = true, backupCode = null) }
+            runCatching {
+                val (json, _) = dataBackupRepository.buildBackupJson(appVersionName())
+                dataBackupRepository.buildBackupToken(json, password)
+            }.onSuccess { code ->
+                _uiState.update { it.copy(dataBusy = false, backupCode = code) }
+            }.onFailure { e ->
+                _uiState.update { it.copy(dataBusy = false, message = "生成备份码失败：${e.readableMessage()}") }
+            }
+        }
+    }
+
+    fun dismissBackupCode() = _uiState.update { it.copy(backupCode = null) }
+
+    /** 从粘贴的备份码恢复：只解析 + 预览，不写库 */
+    fun prepareRestoreFromCode(token: String, password: String?) {
+        if (_uiState.value.dataBusy) return
+        val text = token.trim()
+        if (text.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(dataBusy = true) }
+            dataBackupRepository.inspect(text, password).onSuccess { p ->
+                _uiState.update {
+                    it.copy(
+                        dataBusy = false,
+                        pendingRestoreJson = text,
+                        restorePassword = password,
+                        restorePreview = RestorePreviewUi(
+                            favoriteCount = p.favoriteCount,
+                            settingCount = p.settingCount,
+                            backupTime = p.backupTime,
+                            backupAppVersion = p.backupAppVersion,
+                            isEmpty = p.isEmpty
+                        )
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update { it.copy(dataBusy = false, message = "备份码无效：${e.readableMessage()}") }
+            }
+        }
+    }
+
+    /** 预览弹窗里的「增量添加」复选框 */
+    fun setMergeRestore(merge: Boolean) = _uiState.update { it.copy(mergeRestore = merge) }
+
+    /**
      * 用户从系统文件选择器选好备份文件后调用：只读取 + 解析，**不写库**。
      *
      * 恢复是破坏性的（会清空现有收藏），必须让用户先看到"这份备份是几号的、
@@ -574,6 +633,7 @@ class SettingsViewModel @Inject constructor(
                     it.copy(
                         dataBusy = false,
                         pendingRestoreJson = text,
+                        restorePassword = null,
                         restorePreview = RestorePreviewUi(
                             favoriteCount = p.favoriteCount,
                             settingCount = p.settingCount,
@@ -591,14 +651,23 @@ class SettingsViewModel @Inject constructor(
 
     /** 用户在预览弹窗里点了「确认恢复」 */
     fun confirmRestore() {
-        val json = _uiState.value.pendingRestoreJson ?: return
+        val token = _uiState.value.pendingRestoreJson ?: return
         val preview = _uiState.value.restorePreview ?: return
         if (_uiState.value.dataBusy) return
+        val password = _uiState.value.restorePassword
+        val merge = _uiState.value.mergeRestore
         viewModelScope.launch {
-            _uiState.update { it.copy(dataBusy = true, restorePreview = null, pendingRestoreJson = null) }
+            _uiState.update {
+                it.copy(dataBusy = true, restorePreview = null, pendingRestoreJson = null, restorePassword = null)
+            }
             // 空备份：把用户的"确认"当作显式授权（预览弹窗已经用红字警告过）。
             // 非空备份走默认的 false，多一层保险。
-            dataBackupRepository.restore(json, allowEmptyFavorites = preview.isEmpty)
+            dataBackupRepository.restore(
+                token = token,
+                allowEmptyFavorites = preview.isEmpty,
+                password = password,
+                mergeFavorites = merge
+            )
                 .onSuccess { s ->
                     // 恢复期间设置项被替换，界面上的开关值必须重新读一遍，
                     // 否则用户会看到"设置页显示的还是旧值，但实际已经是备份里的值"。

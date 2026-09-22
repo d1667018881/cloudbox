@@ -94,6 +94,15 @@ fun SettingsScreen(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(viewModel::importIconPack) }
 
+    // V33：备份码 / 增量恢复
+    var showBackupCodeInput by remember { mutableStateOf(false) }
+    var backupCodePassword by remember { mutableStateOf("") }
+    var showRestoreCodeInput by remember { mutableStateOf(false) }
+    var restoreCodeText by remember { mutableStateOf("") }
+    var restoreCodePassword by remember { mutableStateOf("") }
+    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+
     // 恢复数据的文件选择器。用 OpenDocument 而不是 GetContent：
     // 前者返回的 uri 在 Activity 重建后依然可读（系统会给持久读权限），
     // 后者只在本次会话内有效，旋转屏幕后再读会 SecurityException。
@@ -474,6 +483,14 @@ fun SettingsScreen(
                 onClick = viewModel::backupData
             )
             DataActionRow(
+                title = "生成备份码",
+                subtitle = "生成一段可复制 / 分享的文本（可用密码加密）。" +
+                    "适合把配置快速粘到另一台设备。",
+                buttonText = "生成",
+                enabled = !state.dataBusy,
+                onClick = { backupCodePassword = ""; showBackupCodeInput = true }
+            )
+            DataActionRow(
                 title = "恢复数据",
                 subtitle = "从备份文件恢复收藏夹与设置。会先清空现有收藏，" +
                     "所以选完文件后会让您再确认一次。",
@@ -484,6 +501,18 @@ fun SettingsScreen(
                 // 用户在文件选择器里**看不见自己的备份文件**。
                 // 文件对不对由 prepareRestore 解析时判断，这里放开更实用。
                 onClick = { restorePicker.launch(arrayOf("*/*")) }
+            )
+            DataActionRow(
+                title = "粘贴备份码恢复",
+                subtitle = "粘贴一段备份码（加密码需输入密码）。" +
+                    "会先预览再确认，可选「增量添加」保留现有收藏。",
+                buttonText = "粘贴",
+                enabled = !state.dataBusy,
+                onClick = {
+                    restoreCodeText = ""
+                    restoreCodePassword = ""
+                    showRestoreCodeInput = true
+                }
             )
             DataActionRow(
                 title = "清除缓存",
@@ -752,6 +781,21 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "增量添加（保留现有收藏，只追加新条目）",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = state.mergeRestore,
+                                onCheckedChange = viewModel::setMergeRestore
+                            )
+                        }
                     }
                 }
             },
@@ -764,6 +808,105 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = viewModel::dismissRestorePreview) { Text("取消") }
             }
+        )
+    }
+
+    // ---------- V33：生成备份码（输入可选密码） ----------
+    if (showBackupCodeInput) {
+        AlertDialog(
+            onDismissRequest = { showBackupCodeInput = false },
+            title = { Text("生成备份码") },
+            text = {
+                Column {
+                    Text(
+                        "备份码是一段可复制 / 分享的文本。填密码则加密（推荐），留空则为明文。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = backupCodePassword,
+                        onValueChange = { backupCodePassword = it },
+                        label = { Text("密码（可留空）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.buildBackupCode(backupCodePassword.ifBlank { null })
+                    showBackupCodeInput = false
+                }) { Text("生成") }
+            },
+            dismissButton = { TextButton(onClick = { showBackupCodeInput = false }) { Text("取消") } }
+        )
+    }
+
+    // ---------- V33：展示生成的备份码 ----------
+    state.backupCode?.let { code ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissBackupCode,
+            title = { Text("备份码已生成") },
+            text = {
+                Column {
+                    Text(
+                        "复制并妥善保存。加密的备份码必须用相同密码才能恢复，密码丢失将无法恢复。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(code, style = MaterialTheme.typography.bodySmall, maxLines = 8)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText("cloudbox_backup_code", code)
+                    )
+                }) { Text("复制") }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissBackupCode) { Text("关闭") } }
+        )
+    }
+
+    // ---------- V33：粘贴备份码恢复 ----------
+    if (showRestoreCodeInput) {
+        AlertDialog(
+            onDismissRequest = { showRestoreCodeInput = false },
+            title = { Text("粘贴备份码") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = restoreCodeText,
+                        onValueChange = { restoreCodeText = it },
+                        label = { Text("备份码") },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = restoreCodePassword,
+                        onValueChange = { restoreCodePassword = it },
+                        label = { Text("密码（明文码留空）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = restoreCodeText.isNotBlank(),
+                    onClick = {
+                        viewModel.prepareRestoreFromCode(
+                            restoreCodeText,
+                            restoreCodePassword.ifBlank { null }
+                        )
+                        showRestoreCodeInput = false
+                    }
+                ) { Text("下一步") }
+            },
+            dismissButton = { TextButton(onClick = { showRestoreCodeInput = false }) { Text("取消") } }
         )
     }
 

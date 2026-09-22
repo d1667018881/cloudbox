@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
 import androidx.work.WorkManager
+import com.cloudbox.app.core.data.local.crypto.BackupCrypto
 import com.cloudbox.app.core.data.local.db.AppDatabase
 import com.cloudbox.app.core.data.local.db.FavoriteShareEntity
 import com.cloudbox.app.core.data.local.datastore.DomainConfigStore
@@ -175,8 +176,28 @@ class DataBackupRepository @Inject constructor(
      * 必须先让用户看到"这份备份是什么时候的、有多少条"再确认，
      * 而不是选完文件直接覆盖。
      */
-    fun inspect(json: String): Result<RestorePreview> = runCatching {
-        val root = JSONObject(json)
+    /**
+     * 生成「备份码」：不给密码时返回明文 JSON 原文；给了密码则加密成 `CBOX1:` 串
+     * （见 [BackupCrypto]）。加密后的码可直接复制 / 分享，密码不随码携带。
+     */
+    fun buildBackupToken(json: String, password: String?): String =
+        if (password.isNullOrEmpty()) json else BackupCrypto.encrypt(json, password)
+
+    /**
+     * 把「备份码 / 备份文件文本」统一解析成明文 JSON。
+     * 加密串（`CBOX1:` 前缀）必须提供正确密码，否则抛异常。
+     */
+    private fun resolveJson(token: String, password: String?): String =
+        if (BackupCrypto.isEncryptedToken(token)) {
+            val pwd = password.orEmpty()
+            if (pwd.isEmpty()) throw IllegalArgumentException("这是加密备份码，请输入密码")
+            BackupCrypto.decrypt(token, pwd)
+        } else {
+            token
+        }
+
+    fun inspect(token: String, password: String? = null): Result<RestorePreview> = runCatching {
+        val root = JSONObject(resolveJson(token, password))
         if (root.optString("kind") != KIND_TAG) {
             throw IllegalArgumentException("这不是云匣的备份文件")
         }
@@ -238,12 +259,16 @@ class DataBackupRepository @Inject constructor(
      * @return 恢复摘要
      */
     suspend fun restore(
-        json: String,
-        allowEmptyFavorites: Boolean = false
+        token: String,
+        allowEmptyFavorites: Boolean = false,
+        /** 加密备份码的解密密码；非加密文本忽略 */
+        password: String? = null,
+        /** true = 增量：保留现有收藏，把备份里的条目按 shareUrl 去重后追加 */
+        mergeFavorites: Boolean = false
     ): Result<RestoreSummary> =
         runCatching {
-            val preview = inspect(json).getOrThrow()
-            val root = JSONObject(json)
+            val preview = inspect(token, password).getOrThrow()
+            val root = JSONObject(resolveJson(token, password))
             val favArr = root.optJSONArray("favorites") ?: JSONArray()
 
             // 空备份保护：收藏与设置都是空的，说明这份备份没有可恢复的内容。
@@ -273,9 +298,20 @@ class DataBackupRepository @Inject constructor(
                     )
                 }
             }
-            db.withTransaction {
-                db.favoriteShareDao().clearAll()
-                db.favoriteShareDao().insertAll(items)
+            val writtenFavorites = if (mergeFavorites) {
+                // 增量恢复（对齐原版 func.lua 的「增量添加开关」）：保留现有收藏，
+                // 按 shareUrl 去重后追加备份里的条目，**不再 clearAll**。
+                val existing = db.favoriteShareDao().getAllOnce().map { it.shareUrl }.toSet()
+                val toInsert = items.filter { it.shareUrl !in existing }
+                if (toInsert.isNotEmpty()) db.favoriteShareDao().insertAll(toInsert)
+                toInsert.size
+            } else {
+                // 整体替换（放在事务里，中途失败不会留下半套数据）
+                db.withTransaction {
+                    db.favoriteShareDao().clearAll()
+                    db.favoriteShareDao().insertAll(items)
+                }
+                items.size
             }
 
             // 设置：按 key 覆盖
@@ -293,7 +329,7 @@ class DataBackupRepository @Inject constructor(
             }
 
             RestoreSummary(
-                favoriteCount = items.size,
+                favoriteCount = writtenFavorites,
                 backupTime = preview.backupTime,
                 backupAppVersion = preview.backupAppVersion
             )
