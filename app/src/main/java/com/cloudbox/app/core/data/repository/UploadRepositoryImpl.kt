@@ -104,11 +104,16 @@ class UploadRepositoryImpl @Inject constructor(
 
                 // ③ 扩展名前置校验
                 //
-                // 蓝奏云**按扩展名决定能不能上传**，实测（2026-09-12）送一个
-                // 没有扩展名的文件上去，服务端回：
-                //     {"zt":0,"info":"不能上传.格式的文件"}
-                // 与文件内容、大小、MIME 都无关。本地先挡一道，把原因说清楚，
-                // 比让服务端回一句语焉不详的中文有用得多。
+                // 本地先挡一道，把原因说清楚，比让服务端回一句语焉不详的中文有用得多。
+                //
+                // ⚠️ 证据边界（2026-09-23 校正）：
+                //    目前**只实测过**「送一个**没有扩展名**的文件上去，服务端回
+                //    {"zt":0,"info":"不能上传.格式的文件"}」这一个样本。
+                //    此前注释据此写成「蓝奏云按扩展名决定能不能上传」，并进一步断言
+                //    「与文件内容/大小/MIME 都无关」—— 那是**从单个样本外推出的机制性
+                //    结论**，从未验证过。
+                //    不要再拿它推断「某个扩展名一定被拒」：apk 就是反例（用户实测可
+                //    正常上传），当初正是这条推断导致把「后缀伪装」设成了默认开启。
                 if (!uploadName.contains('.') || uploadName.endsWith('.')) {
                     return@runCatching UploadResult(
                         uploadName, null, false,
@@ -418,15 +423,21 @@ class UploadRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 决定这次上传在云端**叫什么名字**。用户要求：文件名里带上传软件的版本号。
+     * 决定这次上传在云端**叫什么名字**。
+     *
+     * 两条规则（2026-09-23 按老板要求校正）：
+     * 1. 版本号**只加在软件安装包（.apk）上**。此前是所有文件都插，把图片/文档
+     *    也一并改了名，属于过度施加 —— 老板要的是"软件带上版本号"。
+     * 2. 后缀伪装**默认关闭**（见 [com.cloudbox.app.core.data.local.datastore.SettingsStore.suffixSpoofEnabled]）。
      *
      * 命名规则：
      *
-     * | 原始名 | 扩展名需伪装 | 云端文件名 |
-     * |---|---|---|
-     * | `Foo.apk` | 是 | `Foo-v0.1.157.apk.zip` |
-     * | `Foo.png` | 否 | `Foo-v0.1.157.png` |
-     * | `云匣-1.2.3.apk` | 是 | `云匣-1.2.3-v0.1.157.apk.zip` |
+     * | 原始名 | 云端文件名 |
+     * |---|---|
+     * | `Foo.apk` | `Foo-v0.1.174.apk` |
+     * | `Foo.png` | `Foo.png`（非软件，不动） |
+     * | `云匣-1.2.3.apk` | `云匣-1.2.3-v0.1.174.apk` |
+     * | `Foo.apk`（且手动开了伪装） | `Foo-v0.1.174.apk.zip` |
      *
      * ─────────────────────────────────────────────────────────────
      * ⚠️ 为什么版本号插在**最后一个点之前**，而不是前缀/后缀
@@ -453,14 +464,26 @@ class UploadRepositoryImpl @Inject constructor(
      * 常量，取不到就是编译不过，不给运行时留隐患。
      */
     private suspend fun applyUploadName(file: File, spoof: Boolean): String {
-        val suffixed = if (spoof && needsSpoof(file)) {
-            // 蓝奏云不接受 exe/apk 等格式，改名 .zip 上传，下载时还原
-            "${file.name}.zip"
+        // ⚠️ 这里此前写着「蓝奏云不接受 exe/apk 等格式」—— 该说法没有证据支持
+        //    （详见 needsSpoof 的注释），已删除。是否改名完全由用户开关 + 配置列表决定。
+        val suffixed = if (spoof && needsSpoof(file)) "${file.name}.zip" else file.name
+        // 版本号**只加在软件安装包上**：老板要的是"软件带上版本号"，不是所有文件都插
+        //（此前给图片/文档也插了 `-v0.1.x`，属于过度施加，已收敛）。
+        return if (isSoftwarePackage(file)) {
+            insertVersionBeforeExtension(suffixed, BuildConfig.VERSION_NAME)
         } else {
-            file.name
+            suffixed
         }
-        return insertVersionBeforeExtension(suffixed, BuildConfig.VERSION_NAME)
     }
+
+    /**
+     * 是否是需要标记版本的「软件安装包」。
+     *
+     * 目前只认 `.apk`。单独抽成函数是为了以后要扩到别的格式时只改这一处 ——
+     * 但**扩之前先确认需求**，别再像「后缀伪装默认开启」那样自作主张扩大范围。
+     */
+    private fun isSoftwarePackage(file: File): Boolean =
+        file.extension.equals("apk", ignoreCase = true)
 
     /**
      * 把版本号插到**最后一个扩展名之前**；没有可用扩展名时追加在末尾。

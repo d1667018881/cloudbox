@@ -27,7 +27,11 @@ import javax.inject.Inject
 /** 设置页 UI 状态 */
 data class SettingsUiState(
     val userAgent: String = AppConstants.DESKTOP_UA,
-    val suffixSpoof: Boolean = true,
+    /**
+     * 上传后缀伪装开关。默认 **false**，须与 SettingsStore.suffixSpoofEnabled 的默认值
+     * 保持一致 —— 此前这里残留着旧值 true，导致进设置页的首帧会短暂显示成"开"。
+     */
+    val suffixSpoof: Boolean = false,
     /** 需要伪装的上传后缀（逗号分隔） */
     val spoofSuffixList: String = com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_RAW,
     val thirdPartyResolver: String = "",

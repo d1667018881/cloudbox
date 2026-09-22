@@ -126,7 +126,8 @@ class AboutViewModel @Inject constructor(
             UpdateLogEntry(
                 "v0.1.174",
                 listOf(
-                    "调整：「上传后缀伪装」改为默认关闭 —— 上传 APK / EXE 等不再被改名成 .zip"
+                    "调整：「上传后缀伪装」改为默认关闭 —— 上传 APK / EXE 等不再被改名成 .zip",
+                    "调整：版本号只加在软件安装包（.apk）上，其它文件保持原名"
                 )
             ),
             UpdateLogEntry(
