@@ -13,6 +13,7 @@ import com.cloudbox.app.core.data.repository.FileRepositoryImpl
 import com.cloudbox.app.core.data.repository.ProfileRepositoryImpl
 import com.cloudbox.app.core.data.repository.SearchRepositoryImpl
 import com.cloudbox.app.core.data.repository.ShareRepositoryImpl
+import com.cloudbox.app.core.data.repository.StarredFolderRepositoryImpl
 import com.cloudbox.app.core.data.repository.UpdateRepositoryImpl
 import com.cloudbox.app.core.data.repository.UploadRepositoryImpl
 import com.cloudbox.app.core.data.repository.UserProfileRepositoryImpl
@@ -25,6 +26,7 @@ import com.cloudbox.app.core.domain.repository.FileRepository
 import com.cloudbox.app.core.domain.repository.ProfileRepository
 import com.cloudbox.app.core.domain.repository.SearchRepository
 import com.cloudbox.app.core.domain.repository.ShareRepository
+import com.cloudbox.app.core.domain.repository.StarredFolderRepository
 import com.cloudbox.app.core.domain.repository.UpdateRepository
 import com.cloudbox.app.core.domain.repository.UploadRepository
 import com.cloudbox.app.core.domain.repository.UserProfileRepository
@@ -120,4 +122,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindAnnouncementRepository(impl: AnnouncementRepositoryImpl): AnnouncementRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindStarredFolderRepository(impl: StarredFolderRepositoryImpl): StarredFolderRepository
 }

@@ -473,7 +473,11 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            GridItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) { menuFile = it }
+                            GridItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) {
+                                menuFile = it
+                                // 顺手查一次星标状态，菜单项文案据此切换
+                                viewModel.refreshStarredState(it)
+                            }
                         }
                         // V31：列表加载到底时自动请求下一页（对齐原版「自动加载页面剩余内容」）
                         if (state.hasMore) {
@@ -483,7 +487,11 @@ fun FileListScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            ListItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) { menuFile = it }
+                            ListItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) {
+                                menuFile = it
+                                // 顺手查一次星标状态，菜单项文案据此切换
+                                viewModel.refreshStarredState(it)
+                            }
                             HorizontalDivider()
                         }
                         // V31：同上。原版没有"加载更多"按钮，滚动到底自动续拉；
@@ -646,6 +654,15 @@ fun FileListScreen(
                         MenuAction("重命名") {
                             menuFile = null
                             renameTarget = file
+                        }
+                    }
+                    // 星标文件夹（对齐原版「添加星标 / 取消星标」，只对文件夹有意义）
+                    if (file.isFolder) {
+                        MenuAction(
+                            if (state.menuStarred) "从星标文件夹移除" else "添加到星标文件夹"
+                        ) {
+                            menuFile = null
+                            viewModel.toggleStar(file)
                         }
                     }
                     MenuAction(if (file.isFolder) "设置文件夹提取码" else "设置提取码") {
@@ -965,8 +982,13 @@ private fun ListItem(
         }
         if (selected) {
             Icon(Icons.Filled.Check, "已选", tint = MaterialTheme.colorScheme.primary)
-        } else if (!file.isFolder) {
-            // 右侧"⋯"：同一点击行为，给不想猜"点一下会发生什么"的用户一个显式入口
+        } else {
+            // 右侧"⋯"：同一点击行为，给不想猜"点一下会发生什么"的用户一个显式入口。
+            //
+            // ⚠️ 文件夹也必须给这个按钮。旧实现写成 `else if (!file.isFolder)`，
+            //    等于把文件夹的操作菜单整体藏了起来 —— 点击文件夹是「进入目录」、
+            //    长按是「进入多选」，于是"设置文件夹提取码 / 修改资料 / 查看分享链接与
+            //    提取码 / 添加到星标文件夹"这些菜单项**用户根本无法触达**（死代码）。
             IconButton(onClick = { onOpenMenu(file) }) {
                 Icon(Icons.Filled.MoreVert, "更多操作", Modifier.size(18.dp))
             }

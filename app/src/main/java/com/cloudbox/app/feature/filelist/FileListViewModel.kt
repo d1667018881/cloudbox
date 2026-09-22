@@ -8,6 +8,7 @@ import com.cloudbox.app.core.domain.model.ShareInfo
 import com.cloudbox.app.core.domain.repository.DirectLinkRepository
 import com.cloudbox.app.core.domain.repository.DownloadRepository
 import com.cloudbox.app.core.domain.repository.FileRepository
+import com.cloudbox.app.core.domain.repository.StarredFolderRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +40,14 @@ data class FileListUiState(
     val descDraft: String = "",
     /** 正在读取原描述（读取期间弹窗仍显示，输入框给个加载态） */
     val descLoading: Boolean = false,
+    /**
+     * 当前打开菜单的那个文件夹是否已被星标。
+     *
+     * 菜单项文案要在这两者之间切换（「添加到星标文件夹」/「从星标文件夹移除」），
+     * 而查询是异步的：状态放这里由 ViewModel 查完回填，UI 只读结果，避免在
+     * Composable 里发起查询。
+     */
+    val menuStarred: Boolean = false,
     val message: String? = null
 ) {
     val currentFolderId: Long get() = folderStack.last().first
@@ -91,7 +100,9 @@ class FileListViewModel @Inject constructor(
     /** V30：网盘页需要读取 show_file_type_label（是否显示类型标签） */
     val settingsStore: SettingsStore,
     private val directLinkRepository: DirectLinkRepository,
-    private val downloadRepository: DownloadRepository
+    private val downloadRepository: DownloadRepository,
+    /** 星标文件夹（自盘常用目录聚合，对齐原版） */
+    private val starredFolderRepository: StarredFolderRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FileListUiState())
@@ -577,6 +588,45 @@ class FileListViewModel @Inject constructor(
 
     /** 由 UI 层触发一条一次性提示（如"已复制文件名"） */
     fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
+
+    // ==================== 星标文件夹（对齐原版） ====================
+
+    /** 菜单打开时查一次该文件夹的星标状态，供菜单项文案切换 */
+    fun refreshStarredState(file: CloudFile) {
+        if (!file.isFolder) {
+            _uiState.update { it.copy(menuStarred = false) }
+            return
+        }
+        viewModelScope.launch {
+            val uid = fileRepository.currentUid() ?: return@launch
+            val on = runCatching { starredFolderRepository.isStarred(uid, file.id) }
+                .getOrDefault(false)
+            _uiState.update { it.copy(menuStarred = on) }
+        }
+    }
+
+    /** 添加 / 取消星标（一个入口两态切换，避免 UI 侧再判一次） */
+    fun toggleStar(file: CloudFile) {
+        if (!file.isFolder) return
+        viewModelScope.launch {
+            val uid = fileRepository.currentUid()
+            if (uid.isNullOrBlank()) {
+                showMessage("未登录，无法使用星标")
+                return@launch
+            }
+            val on = runCatching { starredFolderRepository.isStarred(uid, file.id) }
+                .getOrDefault(false)
+            if (on) {
+                starredFolderRepository.unstar(uid, file.id)
+                _uiState.update { it.copy(menuStarred = false) }
+                showMessage("已从星标文件夹移除")
+            } else {
+                starredFolderRepository.star(uid, file.id, file.name)
+                _uiState.update { it.copy(menuStarred = true) }
+                showMessage("已添加到星标文件夹")
+            }
+        }
+    }
 
     // ==================== 单文件操作 ====================
 

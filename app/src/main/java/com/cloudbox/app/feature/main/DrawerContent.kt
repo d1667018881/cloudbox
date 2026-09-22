@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
@@ -43,6 +44,7 @@ fun MainDrawerContent(
     onOpenFullLoad: () -> Unit,
     onOpenDownload: () -> Unit,
     onOpenFavorites: () -> Unit,
+    onOpenStarred: () -> Unit,
     onOpenRecycle: () -> Unit,
     onOpenAccount: () -> Unit,
     onOpenAnnouncement: () -> Unit,
@@ -65,6 +67,7 @@ fun MainDrawerContent(
         DrawerEntry("查看全盘文件", Icons.Filled.List, onClick = { onClose(); onOpenFullLoad() })
         DrawerEntry("下载管理", Icons.Filled.Download, onClick = { onClose(); onOpenDownload() })
         DrawerEntry("收藏夹", Icons.Filled.Star, onClick = { onClose(); onOpenFavorites() })
+        DrawerEntry("星标文件夹", Icons.Filled.Bookmark, onClick = { onClose(); onOpenStarred() })
         DrawerEntry("回收站", Icons.Filled.Delete, onClick = { onClose(); onOpenRecycle() })
         DrawerEntry(
             "公告",

@@ -46,6 +46,32 @@ private val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/**
+ * v6 → v7：新增 `starred_folders` 表（星标文件夹，对齐原版）。
+ *
+ * ⚠️ 这条**必须**显式写：`fallbackToDestructiveMigration` 在找不到匹配迁移时
+ * 会销毁并重建整个数据库 —— 那不只清掉星标，还会连带清掉用户的**收藏夹与
+ * 下载记录**。新增一张空表本身无损，没有理由让用户付这个代价。
+ *
+ * 列定义必须与 Room 由 [com.cloudbox.app.core.data.local.db.StarredFolderEntity]
+ * 生成的 schema 完全一致（类型、NOT NULL、复合主键顺序），否则 Room 启动校验
+ * 会报 "Migration didn't properly handle"。
+ */
+private val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `starred_folders` (" +
+                "`accountUid` TEXT NOT NULL, " +
+                "`folderId` INTEGER NOT NULL, " +
+                "`name` TEXT NOT NULL, " +
+                "`remark` TEXT NOT NULL, " +
+                "`sortOrder` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountUid`, `folderId`))"
+        )
+    }
+}
+
 /** Room 数据库提供者 */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -55,7 +81,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "cloudbox.db")
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
-            .fallbackToDestructiveMigration() // 其余 schema 变更直接重建；收藏夹已单独保护
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .fallbackToDestructiveMigration() // 其余 schema 变更直接重建；收藏夹/星标已单独保护
             .build()
 }

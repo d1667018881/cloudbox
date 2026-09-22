@@ -65,6 +65,8 @@ object Routes {
     const val FILELIST = "filelist?folderId={folderId}&folderName={folderName}"
     const val DOWNLOAD = "download"
     const val FAVORITES = "favorites"
+    /** 星标文件夹（自盘常用目录聚合，对齐原版） */
+    const val STARRED = "starred"
     const val RECYCLE = "recycle"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
@@ -181,6 +183,8 @@ class MainActivity : ComponentActivity() {
                                 onOpenRecycle = { navController.navigate(Routes.RECYCLE) },
                                 onOpenDownload = { navController.navigate(Routes.DOWNLOAD) },
                                 onOpenFavorites = { navController.navigate(Routes.FAVORITES) },
+                                // 星标文件夹（自盘聚合）——入口与收藏夹并列
+                                onOpenStarred = { navController.navigate(Routes.STARRED) },
                                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                                 onOpenAbout = { navController.navigate(Routes.ABOUT) },
                                 onOpenAccount = { navController.navigate(Routes.ACCOUNT) },
@@ -265,6 +269,19 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.RECYCLE) {
                             RecycleScreen(onBack = { navController.popBackStack() })
+                        }
+                        composable(Routes.STARRED) {
+                            com.cloudbox.app.feature.starred.StarredFoldersScreen(
+                                onBack = { navController.popBackStack() },
+                                // 点星标项 → 打开对应目录（复用搜索结果的落地页路由）
+                                onOpenFolder = { id, name ->
+                                    navController.navigate(
+                                        Routes.FILELIST
+                                            .replace("{folderId}", id.toString())
+                                            .replace("{folderName}", Uri.encode(name))
+                                    )
+                                }
+                            )
                         }
                         composable(Routes.SETTINGS) {
                             SettingsScreen(

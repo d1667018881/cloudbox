@@ -7,6 +7,7 @@ import com.cloudbox.app.core.data.remote.LanzouApiClient
 import com.cloudbox.app.core.domain.model.AccountInfo
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.LoginResult
+import com.cloudbox.app.core.domain.repository.StarredFolderRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,7 +50,9 @@ import javax.inject.Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val apiClient: LanzouApiClient,
     private val accountStore: AccountSecureStore,
-    private val cookieJar: CookiePersistenceJar
+    private val cookieJar: CookiePersistenceJar,
+    /** 星标文件夹：退出登录时要一并清掉该账号的星标数据（对齐原版） */
+    private val starredFolderRepository: StarredFolderRepository
 ) : AuthRepository {
 
     private val _currentAccount = MutableStateFlow<AccountInfo?>(null)
@@ -410,6 +413,10 @@ class AuthRepositoryImpl @Inject constructor(
             cookieJar.clearAll()          // ① 清内存 Cookie + 抹掉该槽位的加密记录
         }
         accountStore.removeUid(uid)       // ② 删账号槽位（含密码、Cookie、云 uid、活跃时间）
+        // ②' 星标文件夹也一并清掉（对齐原版「退出登录将会删除该账号的星标文件夹数据」）。
+        //     必须用该账号自己的 uid 清：此刻 currentUid 可能已经切到别的账号了。
+        //     单独 runCatching：清星标失败不该阻断"退出登录"这个主流程。
+        runCatching { starredFolderRepository.clearForAccount(uid) }
         val next = accountStore.currentUid()  // removeUid 命中当前账号时会一并清掉它
         cookieJar.switchAccount(next)     // ③ 切到剩余账号（或 null）
         _currentAccount.value = next?.let { accountStore.accountInfo(it) }
