@@ -89,6 +89,11 @@ fun SettingsScreen(
     // 数据管理（V32）
     var resetConfirm by remember { mutableStateOf(false) }
 
+    // V33：图标包 zip 选择器（OpenDocument，重建后仍可读）
+    val iconPackPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(viewModel::importIconPack) }
+
     // 恢复数据的文件选择器。用 OpenDocument 而不是 GetContent：
     // 前者返回的 uri 在 Activity 重建后依然可读（系统会给持久读权限），
     // 后者只在本次会话内有效，旋转屏幕后再读会 SecurityException。
@@ -305,6 +310,114 @@ fun SettingsScreen(
                     checked = state.autoLoad,
                     onCheckedChange = viewModel::saveAutoLoad
                 )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("显示简介与密码标记", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "在条目上叠加显示「有简介 / 有提取码」标记",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.showDescTag, onCheckedChange = viewModel::saveShowDescTag)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("文件标题双行显示", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "长文件名折成两行，不再截断",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.twoLineTitle, onCheckedChange = viewModel::saveTwoLineTitle)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("剪贴板识别分享链", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "复制蓝奏云链接后回到 App 自动提示解析",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.getClipboard, onCheckedChange = viewModel::saveGetClipboard)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("删除二次确认", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "删除文件 / 文件夹前先确认一次",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.deleteConfirm, onCheckedChange = viewModel::saveDeleteConfirm)
+            }
+            HorizontalDivider()
+
+            // ==================== 图标包（对齐原版 customize_settings.lua） ====================
+            SectionTitle("图标包")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("当前图标包", style = MaterialTheme.typography.bodyLarge)
+                    val current = state.iconPacks.find { it.path == state.iconPackPath }?.name ?: "内置图标"
+                    Text(
+                        current,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Button(onClick = {
+                    iconPackPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                }) { Text("导入") }
+            }
+            state.iconPacks.forEach { pack ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        Modifier.weight(1f).clickable { viewModel.switchIconPack(pack.path) }
+                    ) {
+                        Text(pack.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "${pack.displayVersion}${if (pack.author.isNotBlank()) " · ${pack.author}" else ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (state.iconPackPath == pack.path) {
+                        Text(
+                            "使用中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    TextButton(onClick = { viewModel.deleteIconPack(pack.path) }) { Text("删除") }
+                }
+            }
+            if (state.iconPackPath.isNotEmpty()) {
+                TextButton(
+                    onClick = { viewModel.switchIconPack("") },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) { Text("恢复内置图标") }
             }
             HorizontalDivider()
 

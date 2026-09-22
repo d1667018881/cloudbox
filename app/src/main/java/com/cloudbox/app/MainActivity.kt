@@ -98,6 +98,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // 启动剪贴板链接监听（需求规格 9 节）
         clipboardWatcher.start(appScope)
+        // V33：订阅「剪贴板识别」开关（原版 get_clipboard），关掉后不再弹识别框
+        appScope.launch {
+            settingsStore.getClipboard.collect { clipboardWatcher.setEnabled(it) }
+        }
         // #17：外部链接唤起（intent-filter 已限 lanzou 系 host），转交剪贴板弹窗机制
         intent?.data?.toString()?.let { clipboardWatcher.notifyLink(it) }
         // 从其他 App 分享文件/链接进来（ACTION_SEND / ACTION_SEND_MULTIPLE）

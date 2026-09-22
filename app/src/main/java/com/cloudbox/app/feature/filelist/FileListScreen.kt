@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
@@ -108,6 +107,11 @@ fun FileListScreen(
         .collectAsState(initial = true)
     // V31：自动加载剩余内容（对齐原版 auto_load「自动加载页面剩余内容」）
     val autoLoad by viewModel.settingsStore.autoLoad.collectAsState(initial = true)
+    // V33：图标包 / 简介标记 / 双行标题 / 删除确认
+    val iconPackPath by viewModel.settingsStore.iconPackPath.collectAsState(initial = "")
+    val showDescTag by viewModel.settingsStore.showDescTag.collectAsState(initial = true)
+    val twoLineTitle by viewModel.settingsStore.twoLineTitle.collectAsState(initial = false)
+    val deleteConfirmPref by viewModel.settingsStore.deleteConfirm.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
     // 「从已安装应用上传」拷 APK 时要挂协程（几十 MB，不能占主线程）
@@ -469,7 +473,7 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            GridItem(file, state, viewModel, showFileTypeLabel) { menuFile = it }
+                            GridItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) { menuFile = it }
                         }
                         // V31：列表加载到底时自动请求下一页（对齐原版「自动加载页面剩余内容」）
                         if (state.hasMore) {
@@ -479,7 +483,7 @@ fun FileListScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            ListItem(file, state, viewModel, showFileTypeLabel) { menuFile = it }
+                            ListItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) { menuFile = it }
                             HorizontalDivider()
                         }
                         // V31：同上。原版没有"加载更多"按钮，滚动到底自动续拉；
@@ -905,6 +909,12 @@ private fun ListItem(
     viewModel: FileListViewModel,
     /** V30：是否显示文件类型标签（对齐原版 show_file_type_label） */
     showFileTypeLabel: Boolean = true,
+    /** V33：当前图标包目录（空串 = 内置图标） */
+    iconPackPath: String = "",
+    /** V33：显示简介/密码标记（对齐原版 show_desc_tag） */
+    showDescTag: Boolean = true,
+    /** V33：标题双行显示（对齐原版 two_line_title） */
+    twoLineTitle: Boolean = false,
     onOpenMenu: (CloudFile) -> Unit
 ) {
     val selected = file.id in state.selected
@@ -929,16 +939,22 @@ private fun ListItem(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            if (file.isFolder) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
-            null,
+        FileIcon(
+            file = file,
+            iconPackPath = iconPackPath,
+            modifier = Modifier.size(24.dp),
             tint = if (file.isFolder) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = if (twoLineTitle) 2 else 1)
             if (!file.isFolder && file.size != null) {
-                Text("${file.size}  ·  ${file.time ?: ""}${if (file.onof == "1") "  ·  🔒" else ""}",
+                // V33：简介/密码标记（对齐原版 show_desc_tag）
+                val marks = buildString {
+                    if (showDescTag && file.onof == "1") append("  ·  🔒")
+                    if (showDescTag && file.isDes == "1") append("  ·  📝")
+                }
+                Text("${file.size}  ·  ${file.time ?: ""}$marks",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -989,6 +1005,12 @@ private fun GridItem(
     viewModel: FileListViewModel,
     /** V30：是否显示文件类型标签 */
     showFileTypeLabel: Boolean = true,
+    /** V33：当前图标包目录（空串 = 内置图标） */
+    iconPackPath: String = "",
+    /** V33：显示简介/密码标记（网格项暂未渲染标记，保留参数以与列表项一致） */
+    @Suppress("UNUSED_PARAMETER") showDescTag: Boolean = true,
+    /** V33：标题双行（网格项固定单行，保留参数以与列表项一致） */
+    @Suppress("UNUSED_PARAMETER") twoLineTitle: Boolean = false,
     onOpenMenu: (CloudFile) -> Unit
 ) {
     val selected = file.id in state.selected
@@ -1009,9 +1031,9 @@ private fun GridItem(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box {
-            Icon(
-                if (file.isFolder) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
-                null,
+            FileIcon(
+                file = file,
+                iconPackPath = iconPackPath,
                 modifier = Modifier.size(48.dp),
                 tint = if (file.isFolder) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             )

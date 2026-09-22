@@ -46,6 +46,18 @@ class SettingsStore @Inject constructor(private val context: Context) {
     // ---- V33：公告已读 id（自建公告系统，见 Announcement） ----
     private val keyLastReadAnnouncementId = stringPreferencesKey("last_read_announcement_id")
 
+    // ---- V33（第三批）：图标包 + 补充设置项 ----
+    /** 当前使用的图标包目录（空串 = 用内置 Material 图标）。对齐原版 icon_pack_path */
+    private val keyIconPackPath = stringPreferencesKey("icon_pack_path")
+    /** 列表里显示「简介 / 密码」标记。对齐原版 show_desc_tag（默认开） */
+    private val keyShowDescTag = booleanPreferencesKey("show_desc_tag")
+    /** 文件标题双行显示。对齐原版 two_line_title（默认关） */
+    private val keyTwoLineTitle = booleanPreferencesKey("two_line_title")
+    /** 剪贴板分享链识别。对齐原版 get_clipboard（默认开） */
+    private val keyGetClipboard = booleanPreferencesKey("get_clipboard")
+    /** 删除二次确认。对齐原版 delete_secondary_confirmation（默认开） */
+    private val keyDeleteConfirm = booleanPreferencesKey("delete_secondary_confirmation")
+
     /** 当前 UA：未自定义时返回默认桌面 UA（伪装关键） */
     val userAgent: Flow<String> = context.settingsDataStore.data.map {
         it[keyUserAgent] ?: AppConstants.DESKTOP_UA
@@ -192,6 +204,43 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setLastReadAnnouncementId(id: String) =
         edit { p -> p[keyLastReadAnnouncementId] = id }
+
+    // ---- V33（第三批）：图标包 + 补充设置项 ----
+
+    /** 当前图标包目录（空串 = 内置 Material 图标） */
+    val iconPackPath: Flow<String> = context.settingsDataStore.data.map {
+        it[keyIconPackPath] ?: ""
+    }
+
+    suspend fun setIconPackPath(path: String) = edit { p -> p[keyIconPackPath] = path }
+
+    /** 列表显示简介/密码标记（原版 show_desc_tag，默认开） */
+    val showDescTag: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyShowDescTag] ?: true
+    }
+
+    suspend fun setShowDescTag(enabled: Boolean) = edit { p -> p[keyShowDescTag] = enabled }
+
+    /** 文件标题双行显示（原版 two_line_title，默认关） */
+    val twoLineTitle: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyTwoLineTitle] ?: false
+    }
+
+    suspend fun setTwoLineTitle(enabled: Boolean) = edit { p -> p[keyTwoLineTitle] = enabled }
+
+    /** 剪贴板分享链识别（原版 get_clipboard，默认开） */
+    val getClipboard: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyGetClipboard] ?: true
+    }
+
+    suspend fun setGetClipboard(enabled: Boolean) = edit { p -> p[keyGetClipboard] = enabled }
+
+    /** 删除二次确认（原版 delete_secondary_confirmation，默认开） */
+    val deleteConfirm: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyDeleteConfirm] ?: true
+    }
+
+    suspend fun setDeleteConfirm(enabled: Boolean) = edit { p -> p[keyDeleteConfirm] = enabled }
 
     // 注：曾经有过 preferWebUpload（上传通道开关），2026-09-09 移除。
     // 上传一律走 App 原生直传——原版 App 就是这么做的，设置页的「上传通道自检」

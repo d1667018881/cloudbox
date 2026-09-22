@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
+import com.cloudbox.app.core.data.local.iconpack.IconPackStore
 import com.cloudbox.app.core.data.repository.DataBackupRepository
 import com.cloudbox.app.core.domain.model.AccountInfo
+import com.cloudbox.app.core.domain.model.IconPack
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.core.domain.repository.ProfileRepository
 import com.cloudbox.app.core.domain.repository.ProfileResult
@@ -86,7 +88,20 @@ data class SettingsUiState(
      */
     val uaInput: String = "",
     /** 同 [uaInput]，见其注释 */
-    val resolverInput: String = ""
+    val resolverInput: String = "",
+    // ==================== V33（第三批） ====================
+    /** 已导入的图标包列表 */
+    val iconPacks: List<IconPack> = emptyList(),
+    /** 当前图标包目录（空串 = 内置 Material 图标） */
+    val iconPackPath: String = "",
+    /** 列表显示「简介 / 密码」标记 */
+    val showDescTag: Boolean = true,
+    /** 文件标题双行显示 */
+    val twoLineTitle: Boolean = false,
+    /** 剪贴板分享链识别 */
+    val getClipboard: Boolean = true,
+    /** 删除二次确认 */
+    val deleteConfirm: Boolean = true
 )
 
 /** 恢复预览（UI 层副本，不直接暴露 Repository 的 data class，避免 UI 依赖数据层类型） */
@@ -105,7 +120,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
     private val profileRepository: ProfileRepository,
-    private val dataBackupRepository: DataBackupRepository
+    private val dataBackupRepository: DataBackupRepository,
+    private val iconPackStore: IconPackStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -124,6 +140,11 @@ class SettingsViewModel @Inject constructor(
             val showAccountBtn = settingsStore.showAccountButton.first()
             val autoCheckDays = settingsStore.autoCheckFavoritesDays.first()
             val autoLoadPref = settingsStore.autoLoad.first()
+            val iconPack = settingsStore.iconPackPath.first()
+            val showDesc = settingsStore.showDescTag.first()
+            val twoLine = settingsStore.twoLineTitle.first()
+            val clipboardPref = settingsStore.getClipboard.first()
+            val deleteConfirmPref = settingsStore.deleteConfirm.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
@@ -135,7 +156,13 @@ class SettingsViewModel @Inject constructor(
                     autoCheckFavoritesDays = autoCheckDays,
                     autoLoad = autoLoadPref,
                     uaInput = ua,
-                    resolverInput = resolver
+                    resolverInput = resolver,
+                    iconPackPath = iconPack,
+                    showDescTag = showDesc,
+                    twoLineTitle = twoLine,
+                    getClipboard = clipboardPref,
+                    deleteConfirm = deleteConfirmPref,
+                    iconPacks = iconPackStore.listPacks()
                 )
             }
         }
@@ -269,6 +296,98 @@ class SettingsViewModel @Inject constructor(
                     message = if (enabled) "已开启自动加载剩余内容" else "已关闭自动加载剩余内容"
                 )
             }
+        }
+    }
+
+    // ==================== V33（第三批）：补充设置项 ====================
+
+    /** 列表显示「简介 / 密码」标记（原版 show_desc_tag） */
+    fun saveShowDescTag(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setShowDescTag(enabled)
+            _uiState.update { it.copy(showDescTag = enabled) }
+        }
+    }
+
+    /** 文件标题双行显示（原版 two_line_title） */
+    fun saveTwoLineTitle(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setTwoLineTitle(enabled)
+            _uiState.update { it.copy(twoLineTitle = enabled) }
+        }
+    }
+
+    /** 剪贴板分享链识别（原版 get_clipboard） */
+    fun saveGetClipboard(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setGetClipboard(enabled)
+            _uiState.update { it.copy(getClipboard = enabled) }
+        }
+    }
+
+    /** 删除二次确认（原版 delete_secondary_confirmation） */
+    fun saveDeleteConfirm(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setDeleteConfirm(enabled)
+            _uiState.update { it.copy(deleteConfirm = enabled) }
+        }
+    }
+
+    // ==================== V33：图标包 ====================
+
+    /** 导入 zip 图标包（解压到 icon_pack/，校验 info.json） */
+    fun importIconPack(uri: android.net.Uri) {
+        viewModelScope.launch {
+            iconPackStore.importZip(uri)
+                .onSuccess { pack ->
+                    _uiState.update {
+                        it.copy(
+                            iconPacks = iconPackStore.listPacks(),
+                            message = "已导入图标包「${pack.name}」"
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { it.copy(message = "导入失败：${e.message}") }
+                }
+        }
+    }
+
+    /** 切换图标包（path 为空串 = 恢复内置图标） */
+    fun switchIconPack(path: String) {
+        viewModelScope.launch {
+            settingsStore.setIconPackPath(path)
+            _uiState.update {
+                it.copy(
+                    iconPackPath = path,
+                    message = if (path.isEmpty()) "已恢复内置图标" else "已切换图标包"
+                )
+            }
+        }
+    }
+
+    /** 删除图标包；若正被使用则回退内置图标 */
+    fun deleteIconPack(path: String) {
+        viewModelScope.launch {
+            iconPackStore.deletePack(path)
+                .onSuccess {
+                    val fallback = if (_uiState.value.iconPackPath == path) {
+                        settingsStore.setIconPackPath("")
+                        ""
+                    } else {
+                        _uiState.value.iconPackPath
+                    }
+                    _uiState.update {
+                        it.copy(
+                            iconPacks = iconPackStore.listPacks(),
+                            iconPackPath = fallback,
+                            message = "已删除图标包"
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { it.copy(message = "删除失败：${e.message}") }
+                }
         }
     }
 

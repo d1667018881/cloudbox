@@ -37,6 +37,18 @@ class ClipboardLinkWatcher @Inject constructor(
     private var pollJob: Job? = null
     private var listenerRegistered = false
 
+    /**
+     * 剪贴板识别开关（原版 `get_clipboard`）。
+     *
+     * 由 MainActivity 订阅 SettingsStore.getClipboard 后写入 ——
+     * 本类是纯监听器，不持有 SettingsStore（避免为读一个布尔值引入 DataStore 依赖链）。
+     */
+    private var enabled: Boolean = true
+
+    fun setEnabled(value: Boolean) {
+        enabled = value
+    }
+
     private val clipboard: ClipboardManager
         get() = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -97,6 +109,7 @@ class ClipboardLinkWatcher @Inject constructor(
     }
 
     private fun checkClipboard() {
+        if (!enabled) return
         val text = runCatching {
             clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
         }.getOrNull() ?: return
