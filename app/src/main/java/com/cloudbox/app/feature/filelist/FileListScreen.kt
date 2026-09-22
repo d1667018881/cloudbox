@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -86,6 +87,8 @@ fun FileListScreen(
     onOpenAnnouncement: () -> Unit = {},
     /** 公告未读红点（由上层从 AnnouncementStatusStore 传入） */
     announcementUnread: Boolean = false,
+    /** 打开侧栏抽屉（根目录时顶栏左侧显示菜单按钮；null = 不显示） */
+    onOpenDrawer: (() -> Unit)? = null,
     /** 从其他 App 分享进来的文件/链接（未消费时非空） */
     pendingShare: com.cloudbox.app.common.ShareIntentHandler.SharedContent? = null,
     /** 分享内容已被消费，通知上层清空，避免旋转屏幕/重组时重复触发 */
@@ -276,10 +279,16 @@ fun FileListScreen(
                         }
                     },
                     navigationIcon = {
-                        if (state.selectionMode) {
-                            IconButton(onClick = viewModel::exitSelection) { Icon(Icons.Filled.Close, "取消选择") }
-                        } else {
-                            IconButton(onClick = { viewModel.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+                        when {
+                            state.selectionMode ->
+                                IconButton(onClick = viewModel::exitSelection) { Icon(Icons.Filled.Close, "取消选择") }
+
+                            // 根目录且有抽屉时：左侧给菜单按钮（对齐原版首页的侧栏入口）
+                            onOpenDrawer != null && state.folderStack.size <= 1 ->
+                                IconButton(onClick = onOpenDrawer) { Icon(Icons.Filled.Menu, "菜单") }
+
+                            else ->
+                                IconButton(onClick = { viewModel.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                         }
                     },
                     actions = {

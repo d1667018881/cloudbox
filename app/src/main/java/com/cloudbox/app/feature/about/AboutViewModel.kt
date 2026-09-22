@@ -147,5 +147,47 @@ class AboutViewModel @Inject constructor(
                 )
             )
         )
+
+        /**
+         * 常见问题（对齐原版 about.lua 的「常见问题」入口）。
+         *
+         * 原版是跳转兔小巢 FAQ 页（已停运），这里改为内置文本：内容围绕
+         * 本 App 的真实使用场景（下载/上传/解析/登录），比外链更有用。
+         */
+        val FAQ: List<Pair<String, String>> = listOf(
+            "下载下来的文件只有几 KB，打不开？" to
+                "这是下载请求未携带登录 Cookie、被服务端风控返回了挑战页的表现。" +
+                "当前版本已把解析阶段的 Cookie 一并交给下载器（详见 DownloadRepositoryImpl 注释），" +
+                "若仍出现，请先在「设置 → 网络与解析」确认域名可用，再重试。",
+            "分享链接解析失败？" to
+                "蓝奏云域名会漂移。请到「设置 → 域名配置」做一次连通性测试，或开启远程域名配置。" +
+                "带提取码的链接请连同提取码一起粘贴。",
+            "上传的文件名被加了 .zip 后缀？" to
+                "这是对不支持格式（如 exe/apk）的伪装，服务端才允许上传。" +
+                "在「设置 → 文件与上传」可关闭或调整需要伪装的后缀；下载端会按原后缀还原。",
+            "提示「未登录或登录已过期」？" to
+                "Cookie 有效期约 20 天。到登录页重新登录即可；本 App 也会在临期时自动尝试静默重登。",
+            "一定要开「安装未知应用」权限吗？" to
+                "只有应用自更新下载安装新版本时才需要。其余功能不受影响。"
+        )
+
+        /**
+         * 开源许可（对齐原版 about.lua 的「许可」入口）。
+         * 列出本 App 直接依赖的主要开源库及其许可协议。
+         */
+        val LICENSES: List<Pair<String, String>> = listOf(
+            "AndroidX / Jetpack Compose" to "Apache License 2.0",
+            "Kotlin & Coroutines" to "Apache License 2.0",
+            "Hilt (Dagger)" to "Apache License 2.0",
+            "Room" to "Apache License 2.0",
+            "Retrofit / OkHttp" to "Apache License 2.0",
+            "Gson" to "Apache License 2.0",
+            "Jsoup" to "MIT License",
+            "CameraX" to "Apache License 2.0",
+            "ML Kit (Barcode Scanning)" to "Apache License 2.0",
+            "ZXing" to "Apache License 2.0",
+            "Zip4j" to "Apache License 2.0",
+            "WorkManager" to "Apache License 2.0"
+        )
     }
 }

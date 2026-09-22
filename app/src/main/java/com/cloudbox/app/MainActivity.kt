@@ -65,6 +65,8 @@ object Routes {
     const val ACCOUNT = "account"
     /** 公告（自建，替代原版已停运的第三方公告页） */
     const val ANNOUNCEMENT = "announcement"
+    /** 查看全盘文件（原版「查看全盘文件」） */
+    const val FULLLOAD = "fullload"
 }
 
 @AndroidEntryPoint
@@ -153,6 +155,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenAbout = { navController.navigate(Routes.ABOUT) },
                                 onOpenAccount = { navController.navigate(Routes.ACCOUNT) },
                                 onOpenAnnouncement = { navController.navigate(Routes.ANNOUNCEMENT) },
+                                onOpenFullLoad = { navController.navigate(Routes.FULLLOAD) },
                                 onOpenResolve = { link ->
                                     // 路由参数必须 URL 编码（分享链接含 : / 等特殊字符）
                                     navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link ?: "")))
@@ -258,6 +261,11 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.ANNOUNCEMENT) {
                             com.cloudbox.app.feature.announcement.AnnouncementScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(Routes.FULLLOAD) {
+                            com.cloudbox.app.feature.fullload.FullLoadScreen(
                                 onBack = { navController.popBackStack() }
                             )
                         }

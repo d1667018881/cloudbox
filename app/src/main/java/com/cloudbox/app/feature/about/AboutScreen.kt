@@ -14,11 +14,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -30,25 +33,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.ui.platform.LocalContext
 import com.cloudbox.app.common.DownloadHelper
 import com.cloudbox.app.core.domain.model.UpdateLogEntry
 
 /**
  * 关于页（对齐原版 `about.lua` + `update_log.lua`）。
  *
- * 原版「我的 → 关于」里有：版本号、检查更新、更新日志、反馈入口。
+ * 原版「我的 → 关于」里有：版本号、检查更新、更新日志、常见问题、许可、反馈。
  * 本页对应实现：
- * - 版本号：取 `BuildConfig.VERSION_NAME/VERSION_CODE`（CI 注入，见 build.gradle.kts）
- * - 检查更新：比对 GitHub Releases 的最新 tag（失败一律降级为中性文案）
- * - 更新日志：本项目自维护（原版 update_log.lua 内容加密，解出来只有版本号）
+ * - 版本号：取 `BuildConfig.VERSION_NAME/VERSION_CODE`（CI 注入）
+ * - 检查更新：数字版号比较 + 下载安装（GitHub Releases）
+ * - 使用帮助：常见问题（内置，原版外链的兔小巢已停运）+ 反馈入口
+ * - 法律信息：开源许可清单
+ * - 更新日志：本项目自维护
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +64,8 @@ fun AboutScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    var showFaq by remember { mutableStateOf(false) }
+    var showLicense by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -190,6 +197,27 @@ fun AboutScreen(
             }
 
             Spacer(Modifier.height(20.dp))
+            Text("使用帮助", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    AboutEntry("常见问题") { showFaq = true }
+                    AboutEntry("反馈问题") {
+                        onOpenUrl("https://github.com/d1667018881/cloudbox/issues")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Text("法律信息", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    AboutEntry("开源许可") { showLicense = true }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
             Text("更新日志", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             AboutViewModel.UPDATE_LOG.forEach { entry ->
@@ -204,6 +232,66 @@ fun AboutScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+
+    if (showFaq) {
+        AlertDialog(
+            onDismissRequest = { showFaq = false },
+            title = { Text("常见问题") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    AboutViewModel.FAQ.forEach { (q, a) ->
+                        Text(q, style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            a,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFaq = false }) { Text("关闭") } }
+        )
+    }
+
+    if (showLicense) {
+        AlertDialog(
+            onDismissRequest = { showLicense = false },
+            title = { Text("开源许可") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    AboutViewModel.LICENSES.forEach { (name, lic) ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(name, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                            Text(
+                                lic,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLicense = false }) { Text("关闭") } }
+        )
+    }
+}
+
+@Composable
+private fun AboutEntry(title: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

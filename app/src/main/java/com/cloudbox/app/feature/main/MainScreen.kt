@@ -15,13 +15,16 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -50,10 +53,9 @@ import com.cloudbox.app.feature.search.SearchViewModel
 import kotlinx.coroutines.launch
 
 /**
- * 主界面：底部导航容器（网盘 / 解析 / 我的）。
+ * 主界面：抽屉（侧栏）+ 底部导航容器（网盘 / 解析 / 我的）。
+ * 抽屉对齐原版侧滑栏；底部 tab 保留 CloudBox 既有的三页结构。
  * 同时承载剪贴板链接识别弹窗（需求规格 9 节）。
- *
- * 上传入口已合并进网盘页 FAB（见 FileListScreen），不再单列 tab。
  */
 @Composable
 fun MainScreen(
@@ -65,6 +67,7 @@ fun MainScreen(
     onOpenAbout: () -> Unit,
     onOpenAccount: () -> Unit,
     onOpenAnnouncement: () -> Unit,
+    onOpenFullLoad: () -> Unit,
     onOpenResolve: (String?) -> Unit,
     onLogout: () -> Unit,
     /** 从其他 App 分享进来的文件/链接（未消费时非空），透传给网盘页消费 */
@@ -81,20 +84,19 @@ fun MainScreen(
     // currentAccount 是 Flow（非 StateFlow），collectAsState 必须提供 initial
     val account by authRepository.currentAccount.collectAsState(initial = null)
 
-    // 「退出登录」必须**先真正注销**，再切页面。
-    //
-    // ⚠️ 旧实现的 onLogout 直接由 MainActivity 负责 navigate 到登录页，
-    // 中间**没有任何一处调用 authRepository.logout()** —— 按钮点了等于只换了个界面，
-    // Cookie 与账号槽位原封不动。登录页一挂载就观察到 currentAccount != null，
-    // 立刻又跳回主页，于是用户看到的就是"退出登录闪一下又进来了"。
-    // 详见 AuthRepositoryImpl.logout 的注释（那里还修了"Cookie 根本没清"的第二层问题）。
     val scope = rememberCoroutineScope()
-    var confirmLogout by remember { mutableStateOf(false) }
-    // ⚠️ 显式标注 `: () -> Unit` 而不是让 Kotlin 推断。
-    //    `scope.launch { ... }` 的返回值是 Job，而 lambda 的最后一句是它 ——
-    //    于是整个 lambda 会被推断成 `() -> Job`，传给 TextButton 的
-    //    `() -> Unit` 形参就会编译报错（实际踩到过：CI BUILD FAILED）。
-    //    加个显式类型，顺带也让签名一眼可读。
+    val mainViewModel: MainViewModel = hiltViewModel()
+    val context = LocalContext.current
+    // V33：红点数据源（更新 / 公告），由启动检查写入
+    val updateAvailable by mainViewModel.updateStatusStore.available.collectAsState()
+    val announcementUnread by mainViewModel.announcementStatusStore.unread.collectAsState()
+
+    // 「退出登录」必须**先真正注销**，再切页面：旧实现只换界面不清 Cookie，
+    // 登录页一挂载就观察到 currentAccount != null，又跳回主页（表现为"闪一下又进来"）。
+    // 详见 AuthRepositoryImpl.logout 的注释。
+    //
+    // ⚠️ 显式标注 `: () -> Unit`：`scope.launch{}` 返回 Job，不标注会被推断成
+    //    `() -> Job`，传给 TextButton 的 `() -> Unit` 形参就编译报错。
     val doLogout: () -> Unit = {
         scope.launch {
             account?.uid?.let { authRepository.logout(it) }
@@ -103,9 +105,10 @@ fun MainScreen(
         Unit
     }
 
-    // 退出登录不可撤销（会清掉该账号保存的密码与 Cookie，下次要重新输入），
-    // 所以先问一句。这里不是"多余的礼数"：这个按钮就在"我的"页最下方，
-    // 紧邻"关于"，误触一次的成本是重新登录 + 重新输密码。
+    var confirmLogout by remember { mutableStateOf(false) }
+    // 退出登录不可撤销（会清掉该账号保存的密码与 Cookie），所以先问一句。
+    // ⚠️ V33 修复：此前 `confirmLogout` 从来没有被置 true —— 确认框是**死代码**，
+    //    点退出是直接执行的。现在所有退出入口都先把它置 true。
     if (confirmLogout) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
@@ -128,13 +131,11 @@ fun MainScreen(
         )
     }
 
-    // V30：读取界面显示设置。`collectAsState` 的 initial 用与原版一致的默认值
-    // （账号按钮默认显示、后缀标签默认隐藏），避免首帧闪一下再变。
+    // V30：读取界面显示设置（initial 用与原版一致的默认值，避免首帧闪动）
     val showAccountButton by settingsStore.showAccountButton.collectAsState(initial = true)
     val showFileTypeLabel by settingsStore.showFileTypeLabel.collectAsState(initial = false)
 
-    // Android 10+ 从其他 App 复制链接再切回本 App 时，系统回调不会触发，
-    // 必须在每次回到前台时主动补查一次剪贴板（需求规格 9 节）
+    // Android 10+ 从其他 App 复制链接再切回本 App 时系统回调不触发，回前台时补查一次剪贴板
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -144,19 +145,14 @@ fun MainScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 后台自动同步搜索索引（需求规格 3 节：Room FTS 索引，后台自动同步）
+    // 后台自动同步搜索索引
     LaunchedEffect(Unit) {
         if (!searchViewModel.uiState.value.syncing) {
             searchViewModel.syncAll()
         }
     }
 
-    // 剪贴板检测到分享链接 → 弹窗：解析（跳解析页）/ 获取直链（原地解析并复制）/ 忽略
-    val mainViewModel: MainViewModel = hiltViewModel()
-    val context = LocalContext.current
-    // V33：红点数据源（更新 / 公告），由启动检查写入
-    val updateAvailable by mainViewModel.updateStatusStore.available.collectAsState()
-    val announcementUnread by mainViewModel.announcementStatusStore.unread.collectAsState()
+    // 剪贴板检测到分享链接 → 弹窗：解析 / 获取直链 / 忽略
     if (pendingLink != null) {
         AlertDialog(
             onDismissRequest = { clipboardWatcher.dismiss() },
@@ -182,65 +178,82 @@ fun MainScreen(
         )
     }
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.CloudUpload, null) },
-                    label = { Text("网盘") }
-                )
-                NavigationBarItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.Link, null) },
-                    label = { Text("解析") }
-                )
-                // ⚠️ 原「上传」tab 已于 2026-09-15 移除，UploadScreen.kt 也已删除
-                //    （V32 死代码清理）。理由：网盘页 FAB 已经能"传到当前目录"，
-                //    独立上传页只是多一个选目录的步骤，属于重复入口。
-                //    文件分享进来的场景由 ACTION_SEND 直接进网盘页上传。
-                //    上传能力本身完整保留在 FileListScreen + UploadViewModel。
-                NavigationBarItem(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.Person, null) },
-                    label = { Text("我的") }
-                )
-            }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            MainDrawerContent(
+                accountName = account?.uid ?: "未登录",
+                updateAvailable = updateAvailable != null,
+                announcementUnread = announcementUnread,
+                onClose = { scope.launch { drawerState.close() } },
+                onOpenFullLoad = onOpenFullLoad,
+                onOpenDownload = onOpenDownload,
+                onOpenFavorites = onOpenFavorites,
+                onOpenRecycle = onOpenRecycle,
+                onOpenAccount = onOpenAccount,
+                onOpenAnnouncement = onOpenAnnouncement,
+                onOpenSettings = onOpenSettings,
+                onOpenAbout = onOpenAbout,
+                onLogout = { confirmLogout = true }
+            )
         }
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            when (tab) {
-                0 -> FileListScreen(
-                    onOpenSearch = onOpenSearch,
-                    onOpenRecycle = onOpenRecycle,
-                    onOpenAnnouncement = onOpenAnnouncement,
-                    announcementUnread = announcementUnread,
-                    // 外部分享进来的文件/链接：由网盘页消费（文件直接传当前目录）
-                    pendingShare = pendingShare,
-                    onShareConsumed = onShareConsumed,
-                    onOpenSharedLink = { link -> onOpenResolve(link) }
-                )
-                1 -> ResolveScreen(onBack = {})
-                2 -> MeTab(
-                    accountName = account?.uid ?: "未登录",
-                    onOpenDownload = onOpenDownload,
-                    onOpenFavorites = onOpenFavorites,
-                    onOpenRecycle = onOpenRecycle,
-                    onOpenSettings = onOpenSettings,
-                    onOpenAbout = onOpenAbout,
-                    onOpenAccount = onOpenAccount,
-                    onLogout = doLogout,
-                    // V30：账号入口按钮开关（对齐原版 show_account_button）。
-                    // 关掉后"我的"页不显示账号切换入口——单账号用户没有切换需求，
-                    // 这块区域对他是纯噪音。
-                    showAccountButton = showAccountButton,
-                    showFileTypeLabel = showFileTypeLabel,
-                    // V33：关于入口的更新红点
-                    updateAvailable = updateAvailable != null
-                )
+    ) {
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        icon = { Icon(Icons.Filled.CloudUpload, null) },
+                        label = { Text("网盘") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        icon = { Icon(Icons.Filled.Link, null) },
+                        label = { Text("解析") }
+                    )
+                    // ⚠️ 原「上传」tab 已于 2026-09-15 移除（V32 死代码清理）：
+                    //    网盘页 FAB 已能"传到当前目录"，独立上传页属重复入口。
+                    NavigationBarItem(
+                        selected = tab == 2,
+                        onClick = { tab = 2 },
+                        icon = { Icon(Icons.Filled.Person, null) },
+                        label = { Text("我的") }
+                    )
+                }
+            }
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                when (tab) {
+                    0 -> FileListScreen(
+                        onOpenSearch = onOpenSearch,
+                        onOpenRecycle = onOpenRecycle,
+                        onOpenAnnouncement = onOpenAnnouncement,
+                        announcementUnread = announcementUnread,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        // 外部分享进来的文件/链接：由网盘页消费（文件直接传当前目录）
+                        pendingShare = pendingShare,
+                        onShareConsumed = onShareConsumed,
+                        onOpenSharedLink = { link -> onOpenResolve(link) }
+                    )
+                    1 -> ResolveScreen(onBack = {})
+                    2 -> MeTab(
+                        accountName = account?.uid ?: "未登录",
+                        onOpenDownload = onOpenDownload,
+                        onOpenFavorites = onOpenFavorites,
+                        onOpenRecycle = onOpenRecycle,
+                        onOpenSettings = onOpenSettings,
+                        onOpenAbout = onOpenAbout,
+                        onOpenAccount = onOpenAccount,
+                        onLogout = { confirmLogout = true },
+                        showAccountButton = showAccountButton,
+                        showFileTypeLabel = showFileTypeLabel,
+                        updateAvailable = updateAvailable != null
+                    )
+                }
             }
         }
     }
