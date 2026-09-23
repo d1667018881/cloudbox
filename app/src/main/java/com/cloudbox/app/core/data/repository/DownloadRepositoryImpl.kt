@@ -65,7 +65,11 @@ class DownloadRepositoryImpl @Inject constructor(
         accountUid: String
     ): Long = withContext(Dispatchers.IO) {
         val safeName = sanitizeFileName(restoreSpoofedName(fileName))
-        val request = buildRequest(url, safeName, referer, mimeType, cookieHeaderFor(url))
+        val request = buildRequest(
+            url, safeName, referer, mimeType, cookieHeaderFor(url),
+            subDir = downloadSubDir(),
+            showNotification = showDownloadNotification()
+        )
         val id = downloadManager.enqueue(request)
         db.downloadRecordDao().insert(
             DownloadRecordEntity(
@@ -98,7 +102,11 @@ class DownloadRepositoryImpl @Inject constructor(
     override suspend fun resume(downloadId: Long) = withContext(Dispatchers.IO) {
         val record = db.downloadRecordDao().getByDownloadId(downloadId) ?: return@withContext
         if (!record.paused) return@withContext
-        val request = buildRequest(record.url, record.fileName, record.referer, record.mimeType, cookieHeaderFor(record.url))
+        val request = buildRequest(
+            record.url, record.fileName, record.referer, record.mimeType, cookieHeaderFor(record.url),
+            subDir = downloadSubDir(),
+            showNotification = showDownloadNotification()
+        )
         val newId = downloadManager.enqueue(request)
         // 把旧记录的 downloadId 更新为新任务 id，同时清掉 paused 标记
         db.downloadRecordDao().updateDownloadId(downloadId, newId)
@@ -198,20 +206,48 @@ class DownloadRepositoryImpl @Inject constructor(
         return s
     }
 
+    /**
+     * 当前设置的下载子目录名（空串 = 直接用 Downloads 根）。
+     *
+     * 对齐原版 `download_folder`。读失败返回空串 —— 宁可下到默认位置，
+     * 也不要因为一次 DataStore 读取异常就让整个下载失败。
+     */
+    private suspend fun downloadSubDir(): String =
+        runCatching { settingsStore.downloadFolder.first() }.getOrDefault("")
+
+    /**
+     * 当前设置是否要在通知栏显示下载通知（对齐原版 `send_message`）。
+     *
+     * 读失败按"显示"处理 —— 少一条通知，比用户以为"下了没反应"要好。
+     */
+    private suspend fun showDownloadNotification(): Boolean =
+        runCatching { settingsStore.sendMessage.first() }.getOrDefault(true)
+
     private fun buildRequest(
         url: String,
         fileName: String,
         referer: String?,
         mimeType: String?,
-        cookieHeader: String?
+        cookieHeader: String?,
+        /** Downloads 下的子目录名；空串 = 直接用 Downloads 根（对齐原版 download_folder） */
+        subDir: String,
+        /** 是否显示完成通知（对齐原版 send_message） */
+        showNotification: Boolean
     ): DownloadManager.Request {
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(fileName)
             .setDescription("来自云匣")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setNotificationVisibility(
+                if (showNotification) {
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                } else {
+                    // 用户关掉了「通知栏提醒」：默默下载，不占通知栏
+                    DownloadManager.Request.VISIBILITY_HIDDEN
+                }
+            )
             .setDestinationInExternalPublicDir(
                 Environment.DIRECTORY_DOWNLOADS,
-                fileName
+                if (subDir.isBlank()) fileName else "$subDir/$fileName"
             )
             // 桌面 UA + Referer：否则 403（需求规格 8 节）
             .addRequestHeader("User-Agent", AppConstants.DESKTOP_UA)

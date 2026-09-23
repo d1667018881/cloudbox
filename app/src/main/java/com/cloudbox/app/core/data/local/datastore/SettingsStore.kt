@@ -58,6 +58,12 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /** 删除二次确认。对齐原版 delete_secondary_confirmation（默认开） */
     private val keyDeleteConfirm = booleanPreferencesKey("delete_secondary_confirmation")
 
+    // ---- V34（第五批）：下载位置与通知（对齐原版 download_folder / send_message） ----
+    /** 系统下载器保存位置：Downloads 下的子目录名（空串 = 直接用 Downloads 根） */
+    private val keyDownloadFolder = stringPreferencesKey("download_folder")
+    /** 通知栏提醒（下载/上传完成是否弹通知）。对齐原版 send_message（默认开） */
+    private val keySendMessage = booleanPreferencesKey("send_message")
+
     /** 当前 UA：未自定义时返回默认桌面 UA（伪装关键） */
     val userAgent: Flow<String> = context.settingsDataStore.data.map {
         it[keyUserAgent] ?: AppConstants.DESKTOP_UA
@@ -257,6 +263,50 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setDeleteConfirm(enabled: Boolean) = edit { p -> p[keyDeleteConfirm] = enabled }
 
+    // ---- V34（第五批）：下载位置与通知（对齐原版 download_folder / send_message） ----
+
+    /**
+     * 系统下载器的保存位置：Downloads 目录下的**子目录名**（空串 = 直接用 Downloads 根）。
+     *
+     * 对齐原版 `download_folder`（ty_core.lua:947-948 初始化为 `""`；
+     * 弹窗写入 ds_layout.lua:1132-1148；显示 ds.lua:49-53）。
+     * 原版语义：`""` = 内部存储/Download，`/LanCloud` = 内部存储/Download/LanCloud。
+     * 这里存**不带斜杠的子目录名**，由使用处拼进 DownloadManager 的目标路径。
+     *
+     * 为什么不做成"任意绝对路径"：Android 10+ 分区存储下 DownloadManager 只能写
+     * 公共 Downloads 或自家目录，让用户填任意路径只会换来一堆"下载失败"。
+     * 只给"Downloads 下的子目录"既能满足归类需求，又不会踩权限坑。
+     */
+    val downloadFolder: Flow<String> = context.settingsDataStore.data.map {
+        it[keyDownloadFolder] ?: ""
+    }
+
+    /** 保存下载子目录名（写入前消毒，见 [sanitizeFolderName]） */
+    suspend fun setDownloadFolder(name: String) =
+        edit { p -> p[keyDownloadFolder] = sanitizeFolderName(name) }
+
+    /**
+     * 通知栏提醒：下载/上传完成是否弹系统通知。
+     *
+     * 对齐原版 `send_message`（ty_core.lua:899-900 初始化为 **true**，
+     * 消息设置页的开关文案是「通知栏提醒」）。
+     */
+    val sendMessage: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keySendMessage] ?: true
+    }
+
+    suspend fun setSendMessage(enabled: Boolean) = edit { p -> p[keySendMessage] = enabled }
+
+    /**
+     * 下载子目录名消毒。
+     *
+     * 去掉路径分隔符与 `..`：这个值会被拼进 DownloadManager 的目标路径，不过滤的话
+     * `../../` 之类能把文件写到 Downloads 之外（越权写）。顺带把空白串归一成 `""`
+     * （等价于"不建子目录"）。
+     */
+    private fun sanitizeFolderName(raw: String): String =
+        raw.trim().replace(Regex("[/\\\\]"), "").replace("..", "").trim()
+
     // 注：曾经有过 preferWebUpload（上传通道开关），2026-09-09 移除。
     // 上传一律走 App 原生直传——原版 App 就是这么做的，设置页的「上传通道自检」
     // 也实测证明这条路能真正上传成功。网页上传降级为设置页的一个手动入口，
@@ -311,6 +361,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
             p[keyAutoCheckDays]?.let { put(KEY_AUTO_CHECK_DAYS, it) }
             p[keyLastAutoCheckTime]?.let { put(KEY_LAST_AUTO_CHECK_TIME, it) }
             p[keyAutoLoad]?.let { put(KEY_AUTO_LOAD, it.toString()) }
+            p[keyDownloadFolder]?.let { put(KEY_DOWNLOAD_FOLDER, it) }
+            p[keySendMessage]?.let { put(KEY_SEND_MESSAGE, it.toString()) }
         }
     }
 
@@ -334,6 +386,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
         map[KEY_AUTO_CHECK_DAYS]?.let { p[keyAutoCheckDays] = it }
         map[KEY_LAST_AUTO_CHECK_TIME]?.let { p[keyLastAutoCheckTime] = it }
         map[KEY_AUTO_LOAD]?.toLooseBool()?.let { p[keyAutoLoad] = it }
+        map[KEY_DOWNLOAD_FOLDER]?.let { p[keyDownloadFolder] = sanitizeFolderName(it) }
+        map[KEY_SEND_MESSAGE]?.toLooseBool()?.let { p[keySendMessage] = it }
     }
 
     /**
@@ -383,5 +437,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
         const val KEY_AUTO_CHECK_DAYS = "auto_check_favorites_time"
         const val KEY_LAST_AUTO_CHECK_TIME = "last_auto_check_time"
         const val KEY_AUTO_LOAD = "auto_load"
+        // V34（第五批）：下载位置与通知
+        const val KEY_DOWNLOAD_FOLDER = "download_folder"
+        const val KEY_SEND_MESSAGE = "send_message"
     }
 }

@@ -103,6 +103,16 @@ fun SettingsScreen(
     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
             as android.content.ClipboardManager
 
+    // V34（第五批）：下载保存位置 + 通知状态
+    var folderDialog by remember { mutableStateOf(false) }
+    var folderInput by remember { mutableStateOf(state.downloadFolder) }
+    LaunchedEffect(state.downloadFolder) { folderInput = state.downloadFolder }
+    // 系统是否允许本 App 发通知（用户在系统设置里关掉后为 false）。
+    // 刻意不 remember：用户可能刚从系统设置页返回，每次重组重算才能显示最新状态；
+    // areNotificationsEnabled() 只是一次轻量查询，开销可忽略。
+    val notificationsEnabled =
+        androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+
     // 恢复数据的文件选择器。用 OpenDocument 而不是 GetContent：
     // 前者返回的 uri 在 Activity 重建后依然可读（系统会给持久读权限），
     // 后者只在本次会话内有效，旋转屏幕后再读会 SecurityException。
@@ -120,6 +130,40 @@ fun SettingsScreen(
     // 打开伪装后缀对话框时，把当前配置填进输入框（只填一次，不覆盖用户正在编辑的内容）
     LaunchedEffect(spoofDialog) {
         if (spoofDialog && spoofInput.isBlank()) spoofInput = state.spoofSuffixList
+    }
+
+    // V34：下载保存位置输入（对齐原版 download_folder 弹窗）
+    if (folderDialog) {
+        AlertDialog(
+            onDismissRequest = { folderDialog = false },
+            title = { Text("下载保存位置") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = folderInput,
+                        onValueChange = { folderInput = it },
+                        label = { Text("Downloads 下的子目录名") },
+                        placeholder = { Text("留空 = 直接用 Download 目录") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "文件会保存到「内部存储/Download/子目录名」；留空则保存到「内部存储/Download」。\n" +
+                            "（受 Android 存储限制，只能选 Download 下的位置。）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.saveDownloadFolder(folderInput)
+                    folderDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { folderDialog = false }) { Text("取消") } }
+        )
     }
 
     Scaffold(
@@ -204,6 +248,43 @@ fun SettingsScreen(
                         -1L
                     ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
+            }
+            HorizontalDivider()
+
+            // ============ V34（第五批）：下载与通知（对齐原版 download_folder / send_message） ============
+            SectionTitle("下载与通知")
+            SettingRow(
+                "下载保存位置",
+                if (state.downloadFolder.isBlank()) {
+                    "内部存储/Download（默认）"
+                } else {
+                    "内部存储/Download/${state.downloadFolder}"
+                }
+            ) { folderDialog = true }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("通知栏提醒", style = MaterialTheme.typography.bodyLarge)
+                    Text("下载/上传完成时弹出系统通知（对齐原版「通知栏提醒」）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = state.sendMessage, onCheckedChange = viewModel::saveSendMessage)
+            }
+            SettingRow(
+                "管理应用通知",
+                "系统通知当前${if (notificationsEnabled) "已开启" else "已关闭"}，点击去系统设置"
+            ) {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                        ).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
             }
             HorizontalDivider()
 

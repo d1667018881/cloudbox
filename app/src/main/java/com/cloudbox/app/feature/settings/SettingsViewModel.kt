@@ -106,6 +106,11 @@ data class SettingsUiState(
     val getClipboard: Boolean = true,
     /** 删除二次确认 */
     val deleteConfirm: Boolean = true,
+    // ==================== V34（第五批）：下载位置与通知 ====================
+    /** 系统下载器保存位置：Downloads 下的子目录名（空串 = 直接用 Downloads 根） */
+    val downloadFolder: String = "",
+    /** 通知栏提醒：下载/上传完成是否弹系统通知 */
+    val sendMessage: Boolean = true,
     // ==================== V33：备份增强 ====================
     /** 生成好的备份码（非空时 UI 弹窗展示 + 可复制） */
     val backupCode: String? = null,
@@ -156,6 +161,8 @@ class SettingsViewModel @Inject constructor(
             val twoLine = settingsStore.twoLineTitle.first()
             val clipboardPref = settingsStore.getClipboard.first()
             val deleteConfirmPref = settingsStore.deleteConfirm.first()
+            val folderPref = settingsStore.downloadFolder.first()
+            val sendMsgPref = settingsStore.sendMessage.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
@@ -173,6 +180,8 @@ class SettingsViewModel @Inject constructor(
                     twoLineTitle = twoLine,
                     getClipboard = clipboardPref,
                     deleteConfirm = deleteConfirmPref,
+                    downloadFolder = folderPref,
+                    sendMessage = sendMsgPref,
                     iconPacks = iconPackStore.listPacks()
                 )
             }
@@ -219,6 +228,30 @@ class SettingsViewModel @Inject constructor(
             _uiState.update {
                 it.copy(spoofSuffixList = normalized, message = "后缀列表已保存")
             }
+        }
+    }
+
+    /** V34：保存下载子目录名（空串 = 直接用 Downloads 根） */
+    fun saveDownloadFolder(name: String) {
+        viewModelScope.launch {
+            settingsStore.setDownloadFolder(name)
+            // 回读消毒后的真实值：用户输入里的斜杠 / `..` 会被过滤掉，
+            // 必须把落盘的结果显示回去，否则列表行与实际不一致。
+            val saved = settingsStore.downloadFolder.first()
+            _uiState.update {
+                it.copy(
+                    downloadFolder = saved,
+                    message = if (saved.isBlank()) "已恢复默认下载位置" else "下载位置已保存"
+                )
+            }
+        }
+    }
+
+    /** V34：通知栏提醒开关（对齐原版 send_message） */
+    fun saveSendMessage(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setSendMessage(enabled)
+            _uiState.update { it.copy(sendMessage = enabled) }
         }
     }
 
