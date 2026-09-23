@@ -21,7 +21,7 @@ import javax.inject.Singleton
  * 域名动态重写拦截器 —— 工程要求 3 的落实点。
  *
  * 为什么必须重写 URL 而不是在 Retrofit 里写死域名：
- * 蓝奏云域名会漂移（lanzou.com → lanzoux → lanzoui → lanzoup → lanzouu → lanzouo → lanzouh…），
+ * 蓝奏云分享域会漂移（lanzous → lanzou → lanzoux → lanzoui → lanzoup …），
  * 且支持远程更新 + 用户手动覆盖。Retrofit 创建时绑定的 baseUrl 无法热更新，
  * 因此所有接口的 baseUrl 统一写占位 host（[AppConstants.PLACEHOLDER_HOST]），
  * 由本拦截器在请求发出前按"路径角色"映射到 [LanzouDomainConfig] 的当前值。

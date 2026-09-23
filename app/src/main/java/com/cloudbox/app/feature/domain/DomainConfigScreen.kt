@@ -37,8 +37,8 @@ import com.cloudbox.app.common.AppConstants
 
 /**
  * 域名配置页：手动覆盖 + 远程 URL 拉取 + 并发连通性测试。
- * 为什么这个页面重要：蓝奏云域名漂移是常态（lanzou → lanzoux → lanzoui → lanzoup
- * → lanzouu → lanzouo → lanzouh…），域名打不开时用户在此一键换域或拉远程配置。
+ * 为什么这个页面重要：蓝奏云分享域漂移是常态（lanzous → lanzou → lanzoux →
+ * lanzoui → lanzoup …），域名打不开时用户在此一键换域或拉远程配置。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

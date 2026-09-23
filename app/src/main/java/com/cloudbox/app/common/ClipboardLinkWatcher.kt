@@ -17,8 +17,8 @@ import javax.inject.Singleton
 /**
  * 剪贴板链接监听（需求规格 9 节）。
  *
- * 检测 lanzou.com / lanzoux.com / lanzoui.com / lanzoup.com / lanzouu.com
- * 等域名链接，弹窗提示"是否解析此链接"。
+ * 检测 lanzou.com / lanzoux.com / lanzoui.com / lanzoup.com 等**官方分享域**链接，
+ * 弹窗提示"是否解析此链接"。
  *
  * 实现：Android 10+ 用 OnPrimaryClipChangedListener（系统回调）；
  * Android 10 以下回调不可靠，用 2s 轮询兜底。
