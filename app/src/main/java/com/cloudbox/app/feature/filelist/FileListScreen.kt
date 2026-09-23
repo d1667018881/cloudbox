@@ -1062,6 +1062,17 @@ private fun GridItem(
             if (selected) {
                 Icon(Icons.Filled.Check, "已选", Modifier.size(20.dp).align(Alignment.TopEnd),
                     tint = MaterialTheme.colorScheme.primary)
+            } else {
+                // 网格模式也必须给「⋯」。此前只有列表模式有它，于是在网格下：
+                // 点击文件夹 = 进目录、长按 = 进多选，两条路都到不了操作菜单 ——
+                // 「设置文件夹提取码 / 修改资料 / 查看分享链接 / 添加到星标文件夹」
+                // 在网格模式下完全够不着（与列表模式修复前是同一个坑）。
+                IconButton(
+                    onClick = { onOpenMenu(file) },
+                    modifier = Modifier.align(Alignment.TopEnd).size(24.dp)
+                ) {
+                    Icon(Icons.Filled.MoreVert, "更多操作", Modifier.size(16.dp))
+                }
             }
         }
         Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 1)

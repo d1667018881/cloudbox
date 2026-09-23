@@ -22,7 +22,7 @@ import java.util.Locale
  * 原版在 `file.lua` 的「本机应用」目录里做了同一件事，字段全部照搬：
  * - `getInstalledPackages(0)` 枚举
  * - `applicationInfo.flags and FLAG_SYSTEM` 区分系统应用
- *   （对应原版设置项 `show_system_app`，见 ty_core.lua:709）
+ *   （对应原版设置项 `show_system_app`，见 ty_core.lua:995-996，默认 false）
  * - `applicationInfo.publicSourceDir` / `sourceDir` 取 APK 路径
  * - 体积按 KB/MB/GB 换算（原版 fn78）
  *

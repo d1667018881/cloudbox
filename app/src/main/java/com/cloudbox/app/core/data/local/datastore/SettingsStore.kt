@@ -117,7 +117,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /**
      * 是否在文件图标处显示文件后缀标签。
      *
-     * 对齐原版 `show_file_type_label`（ty_core.lua:809 初始化为 **true**；
+     * 对齐原版 `show_file_type_label`（ty_core.lua:1095-1096 初始化为 **true**；
      * settings/customize_settings.lua 的「格式开关」可关）。
      * 默认**开启**——与账号按钮同理，原版是"默认给你看，不想要自己关"。
      */
@@ -181,7 +181,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /**
      * 自动加载列表剩余内容（滚动到底自动续拉下一页）。
      *
-     * 对齐原版 `auto_load`（ty_core.lua:754 初始化为 **false**；
+     * 对齐原版 `auto_load`（ty_core.lua:1040-1041 初始化为 **false**；
      * settings/action_settings.lua 的开关文案是「自动加载页面剩余内容」）。
      *
      * ⚠️ 原版默认是 **关**。我们这里默认**开**，这是有意偏离，理由：
