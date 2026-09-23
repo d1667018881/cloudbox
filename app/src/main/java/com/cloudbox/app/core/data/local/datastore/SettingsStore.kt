@@ -29,7 +29,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private val keySpoofSuffixList = stringPreferencesKey("spoof_suffix_list")
     private val keyThirdPartyResolver = stringPreferencesKey("third_party_resolver_url")
     private val keyDarkMode = stringPreferencesKey("dark_mode") // system / light / dark
-    private val keyLanguage = stringPreferencesKey("app_language") // system / zh / en
     private val keyWarnMobileNetwork = booleanPreferencesKey("warn_mobile_network")
 
     // ---- V30（对齐原版 v1.3.4.9 自定义设置页 / 消息设置页） ----
@@ -103,18 +102,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     val darkMode: Flow<String> = context.settingsDataStore.data.map {
         it[keyDarkMode] ?: "system"
-    }
-
-    /**
-     * 应用内语言：system / zh / en。
-     *
-     * 原版 ty_core.lua 里的 `语言()` 函数反编译出来是恒等函数
-     * （`fn32 = function(a1) return a1 end`），也就是说那个版本的多语言
-     * 框架是空壳。所以这里不照搬，直接用 Android 标准的 per-app locale
-     * —— 系统级支持、切完立刻生效、不需要自建词表。
-     */
-    val appLanguage: Flow<String> = context.settingsDataStore.data.map {
-        it[keyLanguage] ?: "system"
     }
 
     /**
@@ -324,8 +311,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setDarkMode(mode: String) = edit { p -> p[keyDarkMode] = mode }
 
-    suspend fun setAppLanguage(lang: String) = edit { p -> p[keyLanguage] = lang }
-
     suspend fun setWarnMobileNetwork(enabled: Boolean) = edit { p -> p[keyWarnMobileNetwork] = enabled }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
@@ -354,7 +339,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
             p[keySpoofSuffixList]?.let { put(KEY_SPOOF_SUFFIX_LIST, it) }
             p[keyThirdPartyResolver]?.let { put(KEY_THIRD_PARTY_RESOLVER, it) }
             p[keyDarkMode]?.let { put(KEY_DARK_MODE, it) }
-            p[keyLanguage]?.let { put(KEY_LANGUAGE, it) }
             p[keyWarnMobileNetwork]?.let { put(KEY_WARN_MOBILE_NETWORK, it.toString()) }
             p[keyShowFileTypeLabel]?.let { put(KEY_SHOW_FILE_TYPE_LABEL, it.toString()) }
             p[keyShowAccountButton]?.let { put(KEY_SHOW_ACCOUNT_BUTTON, it.toString()) }
@@ -379,7 +363,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
         map[KEY_SPOOF_SUFFIX_LIST]?.let { p[keySpoofSuffixList] = it }
         map[KEY_THIRD_PARTY_RESOLVER]?.let { p[keyThirdPartyResolver] = it }
         map[KEY_DARK_MODE]?.let { p[keyDarkMode] = it }
-        map[KEY_LANGUAGE]?.let { p[keyLanguage] = it }
         map[KEY_WARN_MOBILE_NETWORK]?.toLooseBool()?.let { p[keyWarnMobileNetwork] = it }
         map[KEY_SHOW_FILE_TYPE_LABEL]?.toLooseBool()?.let { p[keyShowFileTypeLabel] = it }
         map[KEY_SHOW_ACCOUNT_BUTTON]?.toLooseBool()?.let { p[keyShowAccountButton] = it }
@@ -430,7 +413,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
         const val KEY_SPOOF_SUFFIX_LIST = "spoof_suffix_list"
         const val KEY_THIRD_PARTY_RESOLVER = "third_party_resolver_url"
         const val KEY_DARK_MODE = "dark_mode"
-        const val KEY_LANGUAGE = "app_language"
         const val KEY_WARN_MOBILE_NETWORK = "warn_mobile_network"
         const val KEY_SHOW_FILE_TYPE_LABEL = "show_file_type_label"
         const val KEY_SHOW_ACCOUNT_BUTTON = "show_account_button"

@@ -307,26 +307,6 @@ fun SettingsScreen(
             }
             HorizontalDivider()
 
-            // ==================== 语言 ====================
-            // 原版 ty_core.lua 的 语言() 反编译出来是恒等函数（多语言是空壳），
-            // 所以这里不照搬那套，直接用 Android 标准的 per-app locale。
-            SectionTitle("语言")
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                com.cloudbox.app.common.LocaleUtil.LANGUAGES.forEach { (code, label) ->
-                    Row(
-                        Modifier.clickable { viewModel.saveAppLanguage(code) },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = state.appLanguage == code,
-                            onClick = { viewModel.saveAppLanguage(code) }
-                        )
-                        Text(label)
-                    }
-                }
-            }
-            HorizontalDivider()
-
             // ==================== 下载行为 ====================
             SectionTitle("下载行为")
             Row(

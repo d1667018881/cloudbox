@@ -36,8 +36,6 @@ data class SettingsUiState(
     val spoofSuffixList: String = com.cloudbox.app.common.SpoofSuffixUtil.DEFAULT_RAW,
     val thirdPartyResolver: String = "",
     val darkMode: String = "system",
-    /** 应用内语言：system / zh / en */
-    val appLanguage: String = "system",
     /** 移动网络下载前提醒（默认开） */
     val warnMobileNetwork: Boolean = true,
     /**
@@ -150,7 +148,6 @@ class SettingsViewModel @Inject constructor(
             val spoofList = settingsStore.spoofSuffixList.first()
             val resolver = settingsStore.thirdPartyResolverUrl.first()
             val dark = settingsStore.darkMode.first()
-            val lang = settingsStore.appLanguage.first()
             val warnMobile = settingsStore.warnMobileNetwork.first()
             val showTypeLabel = settingsStore.showFileTypeLabel.first()
             val showAccountBtn = settingsStore.showAccountButton.first()
@@ -168,7 +165,7 @@ class SettingsViewModel @Inject constructor(
                     userAgent = ua, suffixSpoof = spoof,
                     spoofSuffixList = spoofList,
                     thirdPartyResolver = resolver, darkMode = dark,
-                    appLanguage = lang, warnMobileNetwork = warnMobile,
+                    warnMobileNetwork = warnMobile,
                     showFileTypeLabel = showTypeLabel,
                     showAccountButton = showAccountBtn,
                     autoCheckFavoritesDays = autoCheckDays,
@@ -271,24 +268,6 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setDarkMode(mode)
             _uiState.update { it.copy(darkMode = mode) }
-        }
-    }
-
-    /**
-     * 保存应用内语言。
-     *
-     * ⚠️ 提示用户"需要重启"而不是自动重建 Activity：
-     * 自动 `recreate()` 在语言变更时会走一次完整的销毁-重建，
-     * 而此时可能正好有后台任务（上传 Worker 的进度回调绑在 ViewModel 上），
-     * 重建会打断回调。让用户自己决定何时重启更稳妥，
-     * 且设置已经写盘，重启后必然生效。
-     */
-    fun saveAppLanguage(lang: String) {
-        viewModelScope.launch {
-            settingsStore.setAppLanguage(lang)
-            _uiState.update {
-                it.copy(appLanguage = lang, message = "语言已保存，重启 App 后生效")
-            }
         }
     }
 
@@ -803,7 +782,6 @@ class SettingsViewModel @Inject constructor(
                 spoofSuffixList = s.spoofSuffixList.first(),
                 thirdPartyResolver = s.thirdPartyResolverUrl.first(),
                 darkMode = s.darkMode.first(),
-                appLanguage = s.appLanguage.first(),
                 warnMobileNetwork = s.warnMobileNetwork.first(),
                 showFileTypeLabel = s.showFileTypeLabel.first(),
                 showAccountButton = s.showAccountButton.first(),

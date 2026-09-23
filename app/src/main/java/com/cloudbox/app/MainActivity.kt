@@ -132,17 +132,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             // 深色模式设置（设置页可切换：跟随系统/浅色/深色）
             val darkMode by settingsStore.darkMode.collectAsState(initial = "system")
-            // 应用内语言（设置页可切换：跟随系统/中文/English）。
-            // 用 wrap() 套一层带 Locale 的 Context，让本 Activity 重启后按新语言渲染。
-            val appLanguage by settingsStore.appLanguage.collectAsState(initial = "system")
-            val localizedContext = androidx.compose.runtime.remember(appLanguage) {
-                com.cloudbox.app.common.LocaleUtil.wrap(this@MainActivity, appLanguage)
-            }
             // 外部分享进来的内容（文件优先）；主界面挂载后会消费并触发上传
             val pendingShare by _pendingShare.collectAsState()
-            androidx.compose.runtime.CompositionLocalProvider(
-                androidx.compose.ui.platform.LocalContext provides localizedContext
-            ) {
             CloudBoxTheme(darkMode = darkMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     // 冷启动免二次登录：起始页按「是否有可用的已恢复登录态」决定。
@@ -320,7 +311,6 @@ class MainActivity : ComponentActivity() {
                     } // 结束 if/else（起始页判定）
                 }
             }
-            } // 结束 CompositionLocalProvider（应用内语言）
         }
     }
 
