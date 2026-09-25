@@ -15,7 +15,7 @@
 | 登录 | 账号密码登录 + Cookie 手动导入；多账号槽位一键切换；Cookie 过期（>18 天）静默重登 |
 | 文件列表 | 列表/网格双模式、下拉刷新、分页加载、面包屑导航、长按多选（批量删除/移动/分享） |
 | 文件管理 | 新建文件夹、重命名、删除（入回收站）、移动、设置提取码、设置描述、回收站（恢复/彻底删除/清空） |
-| 上传 | 单文件直传（100MB 上限）、超限自动分卷（95MB/卷 .zip/.z01/.z02）、WorkManager 后台队列、exe/apk 后缀伪装 |
+| 上传 | 单文件直传（100MB 上限）、超限自动分卷（95MB/卷 .zip/.z01/.z02）、WorkManager 后台队列；可选「后缀伪装」**默认关闭**（详见 AI_MAINTENANCE §38/§39） |
 | 下载 | 系统 DownloadManager、桌面 UA + Referer 防 403、APK 自动跳安装器、下载记录页 |
 | 分享 | 生成分享链接（短链）、ZXing 二维码、提取码、收藏夹（备注） |
 | 直链解析 | 分享页提取 sign → ajaxm.php → dom+/file/+url；带密码/文件夹递归/批量解析 1-3s 延时防风控；直链缓存 TTL 1h；第三方解析服务可替换 |
@@ -48,7 +48,8 @@ debug 与 release 均使用该 keystore 签名（`app/build.gradle.kts` signingC
 
 ## 域名配置
 
-蓝奏云域名历史已漂移至少六轮（lanzous → lanzou → lanzoux → lanzoui → lanzoup → lanzouu → lanzouo → lanzouh），
+蓝奏云域名历史已漂移多轮（`lanzous → lanzou → lanzoux → lanzoui → lanzoup`，均为官方轮换；
+注意 `lanzouo/lanzouh/lanzouu` 是网上流传的**假域**，实测不可用，不要填），
 域名打不开时在 **设置 → 域名配置** 中处理：
 
 - **远程配置**：发布一个 JSON 到 GitHub Gist 或任意 HTTPS 地址，格式：
@@ -58,7 +59,7 @@ debug 与 release 均使用该 keystore 签名（`app/build.gradle.kts` signingC
     "diskMain": "https://pc.woozooo.com/",
     "shareBase": "https://www.lanzou.com/",
     "uploadServer": "https://pc.woozooo.com/",
-    "fallbackDomains": ["https://www.lanzoui.com/", "https://www.lanzoup.com/", "https://www.lanzoux.com/", "https://www.lanzouo.com/", "https://www.lanzouh.com/"]
+    "fallbackDomains": ["https://www.lanzoui.com/", "https://www.lanzoup.com/", "https://www.lanzoux.com/"]
   }
   ```
   启动失败自动回落本地默认值；App 内置黑名单拦截 `lanzous.com`（已被第三方抢注，解析到不良站点）。
@@ -102,6 +103,8 @@ Kotlin · Jetpack Compose (Material 3) · MVVM + Clean Architecture · Retrofit 
 ## AI / 接手开发者入口
 
 **接手本项目前必读：[`AI_MAINTENANCE.md`](AI_MAINTENANCE.md)**
+（其中开头的「交付前必做 Checklist」是**强制项**；引用的原始证据文件——原版 APK 逆向报告、
+设置项审计、断言审计、功能对照表——都在 [`docs/README.md`](docs/README.md) 有索引）
 
 内容包括：
 - 完整目录结构与每层职责

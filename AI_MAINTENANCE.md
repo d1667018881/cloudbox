@@ -229,7 +229,8 @@ app/src/main/java/com/cloudbox/app/
 
 ### 4.1 域名动态重写（⭐⭐ 项目根基）
 
-**问题**：蓝奏云域名频繁漂移（lanzous→lanzou→lanzoux→lanzoui→lanzoup→lanzouu→lanzouo→lanzouh），
+**问题**：蓝奏云域名频繁漂移（`lanzous→lanzou→lanzoux→lanzoui→lanzoup`，**均为官方轮换**；
+`lanzouo / lanzouh / lanzouu` 是网上流传的**假域**，不在漂移序列中，详见 §39.1），
 且支持远程更新 + 用户手动覆盖。Retrofit 创建时绑定 baseUrl 无法热更新。
 
 **方案**：所有 Retrofit 请求的 baseUrl 用占位 host `lz.dynamic.invalid`
@@ -420,8 +421,7 @@ push 到 main（或 workflow_dispatch）→
   "shareBase": "https://www.lanzou.com/",
   "uploadServer": "https://pc.woozooo.com/",
   "fallbackDomains": ["https://www.lanzoui.com/", "https://www.lanzoup.com/",
-                      "https://www.lanzoux.com/", "https://www.lanzouo.com/",
-                      "https://www.lanzouh.com/"]
+                      "https://www.lanzoux.com/"]
 }
 ```
 

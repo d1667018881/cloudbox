@@ -68,7 +68,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <!-- 支持从外部链接唤起解析（#17 修复：限定 lanzou 系 host，
-                 旧实现无 host 过滤会变成全系统所有网页链接的候选打开方式） -->
+                 旧实现无 host 过滤会变成全系统所有网页链接的候选打开方式）。
+                 ⚠️ host 列表必须与 LanzouDomainConfig 的域名池保持一致：
+                 lanzouo / lanzouh / lanzouu 是假域（实测不可用），已移除；
+                 两份清单不同步时会出现「能被唤起、却解析不了」的怪体验。 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -81,12 +84,6 @@
                 <data android:scheme="https" android:host="*.lanzoup.com" />
                 <data android:scheme="https" android:host="lanzoux.com" />
                 <data android:scheme="https" android:host="*.lanzoux.com" />
-                <data android:scheme="https" android:host="lanzouo.com" />
-                <data android:scheme="https" android:host="*.lanzouo.com" />
-                <data android:scheme="https" android:host="lanzouh.com" />
-                <data android:scheme="https" android:host="*.lanzouh.com" />
-                <data android:scheme="https" android:host="lanzouu.com" />
-                <data android:scheme="https" android:host="*.lanzouu.com" />
             </intent-filter>
 
             <!-- 从其他 App「分享」单个文件到云匣。
