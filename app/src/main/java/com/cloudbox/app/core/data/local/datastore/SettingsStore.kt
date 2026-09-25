@@ -345,6 +345,12 @@ class SettingsStore @Inject constructor(private val context: Context) {
             p[keyAutoCheckDays]?.let { put(KEY_AUTO_CHECK_DAYS, it) }
             p[keyLastAutoCheckTime]?.let { put(KEY_LAST_AUTO_CHECK_TIME, it) }
             p[keyAutoLoad]?.let { put(KEY_AUTO_LOAD, it.toString()) }
+            // V40 复审补（N1）：五批移植新增设置项，此前漏备份
+            p[keyIconPackPath]?.let { put(KEY_ICON_PACK_PATH, it) }
+            p[keyShowDescTag]?.let { put(KEY_SHOW_DESC_TAG, it.toString()) }
+            p[keyTwoLineTitle]?.let { put(KEY_TWO_LINE_TITLE, it.toString()) }
+            p[keyGetClipboard]?.let { put(KEY_GET_CLIPBOARD, it.toString()) }
+            p[keyDeleteConfirm]?.let { put(KEY_DELETE_CONFIRM, it.toString()) }
             p[keyDownloadFolder]?.let { put(KEY_DOWNLOAD_FOLDER, it) }
             p[keySendMessage]?.let { put(KEY_SEND_MESSAGE, it.toString()) }
         }
@@ -369,6 +375,14 @@ class SettingsStore @Inject constructor(private val context: Context) {
         map[KEY_AUTO_CHECK_DAYS]?.let { p[keyAutoCheckDays] = it }
         map[KEY_LAST_AUTO_CHECK_TIME]?.let { p[keyLastAutoCheckTime] = it }
         map[KEY_AUTO_LOAD]?.toLooseBool()?.let { p[keyAutoLoad] = it }
+        // V40 复审补（N1）：五批移植新增设置项，此前漏还原。
+        // iconPackPath 空串即"默认图标"，直接还原（路径在本机不存在时
+        // FileIconResolver 解码失败会自动回落默认图标，无崩溃面）
+        map[KEY_ICON_PACK_PATH]?.let { p[keyIconPackPath] = it }
+        map[KEY_SHOW_DESC_TAG]?.toLooseBool()?.let { p[keyShowDescTag] = it }
+        map[KEY_TWO_LINE_TITLE]?.toLooseBool()?.let { p[keyTwoLineTitle] = it }
+        map[KEY_GET_CLIPBOARD]?.toLooseBool()?.let { p[keyGetClipboard] = it }
+        map[KEY_DELETE_CONFIRM]?.toLooseBool()?.let { p[keyDeleteConfirm] = it }
         map[KEY_DOWNLOAD_FOLDER]?.let { p[keyDownloadFolder] = sanitizeFolderName(it) }
         map[KEY_SEND_MESSAGE]?.toLooseBool()?.let { p[keySendMessage] = it }
     }
@@ -419,6 +433,13 @@ class SettingsStore @Inject constructor(private val context: Context) {
         const val KEY_AUTO_CHECK_DAYS = "auto_check_favorites_time"
         const val KEY_LAST_AUTO_CHECK_TIME = "last_auto_check_time"
         const val KEY_AUTO_LOAD = "auto_load"
+        // V40 复审补（N1）：五批移植新增的 5 个用户可见设置项当时漏进备份快照，
+        // 恢复备份后这些设置静默回到默认值 —— 正是 snapshotAll 注释警告过的坑
+        const val KEY_ICON_PACK_PATH = "icon_pack_path"
+        const val KEY_SHOW_DESC_TAG = "show_desc_tag"
+        const val KEY_TWO_LINE_TITLE = "two_line_title"
+        const val KEY_GET_CLIPBOARD = "get_clipboard"
+        const val KEY_DELETE_CONFIRM = "delete_secondary_confirmation"
         // V34（第五批）：下载位置与通知
         const val KEY_DOWNLOAD_FOLDER = "download_folder"
         const val KEY_SEND_MESSAGE = "send_message"

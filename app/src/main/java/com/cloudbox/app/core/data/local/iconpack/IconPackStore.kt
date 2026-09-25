@@ -73,6 +73,7 @@ class IconPackStore @Inject constructor(
                 ZipInputStream(input).use { zis ->
                     var entry = zis.nextEntry
                     var count = 0
+                    var totalBytes = 0L
                     while (entry != null) {
                         if (++count > MAX_ENTRIES) error("图标包条目过多，已中止")
                         val outFile = File(target, entry.name).canonicalFile
@@ -83,7 +84,20 @@ class IconPackStore @Inject constructor(
                             outFile.mkdirs()
                         } else {
                             outFile.parentFile?.mkdirs()
-                            outFile.outputStream().use { out -> zis.copyTo(out) }
+                            // V40（N3）：zis.copyTo 不看声明大小（声明值可伪造），
+                            // 按实际写出累计，超限即弃 —— 防 zip bomb 把外部存储写满
+                            outFile.outputStream().use { out ->
+                                val buf = ByteArray(DEFAULT_BUFFER_SIZE)
+                                while (true) {
+                                    val n = zis.read(buf)
+                                    if (n < 0) break
+                                    totalBytes += n
+                                    if (totalBytes > MAX_TOTAL_BYTES) {
+                                        error("图标包解压总量超过上限，已中止")
+                                    }
+                                    out.write(buf, 0, n)
+                                }
+                            }
                         }
                         zis.closeEntry()
                         entry = zis.nextEntry
@@ -134,5 +148,7 @@ class IconPackStore @Inject constructor(
         const val ROOT_DIR_NAME = "icon_pack"
         const val INFO_FILE = "info.json"
         const val MAX_ENTRIES = 2000
+        /** 解压总量上限（V40 N3）：图标包全部是几十 KB 的 PNG，50MB 已是极宽松上限 */
+        const val MAX_TOTAL_BYTES = 50L * 1024 * 1024
     }
 }

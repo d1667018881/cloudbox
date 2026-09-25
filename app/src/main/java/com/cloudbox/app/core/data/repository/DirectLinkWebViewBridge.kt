@@ -44,7 +44,9 @@ import kotlin.coroutines.resume
  * - 全程 runCatching：失败只意味着「这次过不了挑战」，绝不能让下载流程崩。
  *
  * ⚠️ 本类持有 Activity 无关的 applicationContext，不泄漏。
- *    同一时刻只允许一个挑战在跑（synchronized），避免并发建多个 WebView。
+ *    并发不设锁：同时过两个挑战会建两个 WebView（略浪费但各自独立、
+ *    CookieManager 全局可见，不损坏正确性）。V40 复审更正：本文件从未有
+ *    synchronized——早期注释把它写成"已有"与实现不符。
  */
 object DirectLinkWebViewBridge {
 

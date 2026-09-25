@@ -153,6 +153,10 @@ class FileListViewModel @Inject constructor(
                 }
             }.onFailure { e ->
                 if (seq != loadSeq) return@launch
+                // V40（N2）：append 失败必须回退 page，否则下次 loadMore 从
+                // page+2 开始请求，跳过一整页文件且无任何提示（静默丢数据）。
+                // 前提校验：只在"这次失败的确实是加载更多"时回退。
+                if (append && page > 1) page--
                 _uiState.update {
                     it.copy(loading = false, loadingMore = false, error = e.message ?: "加载失败")
                 }
