@@ -125,4 +125,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v0.1.${{ github.run_number }}"
-          gh release create "$TAG" app/build/outputs/apk/release/app-release.apk --repo "${{ github.repository }}" --title "CloudBox $TAG" --notes "Auto build APK" --latest
+
+          # ── 资产名：软件名 + 版本号（2026-09-26 用户要求，不再用 gradle 默认的
+          #    app-release.apk —— 下载到手机里一堆同名文件分不清谁是谁）。
+          #    与 release 标题/tag 同源（TAG 就是唯一版本来源），不会出现
+          #    文件名与发行版号对不上的情况。
+          APK_SRC="app/build/outputs/apk/release/app-release.apk"
+          APK_NAME="CloudBox-$TAG.apk"
+          cp "$APK_SRC" "$APK_NAME"
+
+          # ── 发行说明：直接采用本次构建对应的 commit message（约定写进这里，
+          #    接手者无需记忆）。
+          # 为什么用它：commit message 是任何 AI/人提交时都会写的东西 ——
+          # "把说明写清楚"这个责任自然落在提交上，无需换工具就失效；
+          # 也不会再出现 "Auto build APK" 这种零信息文案。
+          # 首行(%s)是简述，空行后正文(%b)是细节；顺带压缩连续空行。
+          # workflow_dispatch（无新提交）时 git log -1 指向 HEAD，同样适用。
+          NOTES=$(git log -1 --pretty=format:"%s%n%n%b" | sed '/./,$!d' | awk 'BEGIN{blank=0} /^[[:space:]]*$/{blank++; if(blank>1) next} {blank=0; print}')
+          [ -z "$NOTES" ] && NOTES="自动构建"
+
+          gh release create "$TAG" "$APK_NAME" \
+            --repo "${{ github.repository }}" \
+            --title "CloudBox $TAG" \
+            --notes "$NOTES" --latest
