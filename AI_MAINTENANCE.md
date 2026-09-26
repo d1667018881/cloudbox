@@ -3806,3 +3806,18 @@ AI 工具/人提交代码时都会写的东西 —— 「每次发版写清楚�
 技术细节：`git log -1 --pretty=format:"%s%n%n%b"` 取信息（workflow_dispatch
 无新提交时同样指向 HEAD），`sed` 去前导空行、`awk` 压连续空行；message 为空
 兜底"自动构建"。多行含特殊字符安全（变量加引号直传 gh --notes）。
+
+### 41.1 v0.1.184 实锤与修正（同日）
+
+v0.1.184 验证：资产名 `CloudBox-v0.1.184.apk` ✅，但发行说明变成了
+`"ci log run 184 (0e9f31e…)"` ❌。
+
+根因：job 里 **"Publish build log" 步骤在 Create Release 之前执行**，
+它 `git checkout -B ci-logs` + 新建 ci-bot 提交 —— Create Release 里的
+`git log -1` 取到的是**日志提交**而非真实提交。教训同 §C"复现要复刻完整
+请求构造"：单步逻辑本地验证过 ≠ 在 runner 的步骤序列里正确，**前置步骤对
+工作区 git 状态的副作用必须排查**。
+
+修正：改用 `${{ github.event.head_commit.message }}`（事件载荷的原始
+message，不受工作区 git 状态污染），经 env 传入（含引号/反引号也不被
+bash 展开），仅 workflow_dispatch（无载荷）时 fallback 到 git log -1。

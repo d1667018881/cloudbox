@@ -123,6 +123,12 @@ jobs:
       - name: Create Release
         env:
           GH_TOKEN: ${{ github.token }}
+          # 发行说明来源：事件载荷里的**原始** commit message（push 触发时必有）。
+          # 为什么不用 git log -1：本 job 的 "Publish build log" 步骤会把 HEAD
+          # 移到 ci-logs 分支并新建一个 ci-bot 提交（v0.1.184 实锤——发行说明
+          # 变成了 "ci log run 184"）。事件载荷不受工作区 git 状态污染。
+          # 经 env 传入而非内插进命令：message 含引号/反引号/$ 也不会被 bash 展开。
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           TAG="v0.1.${{ github.run_number }}"
 
@@ -134,14 +140,15 @@ jobs:
           APK_NAME="CloudBox-$TAG.apk"
           cp "$APK_SRC" "$APK_NAME"
 
-          # ── 发行说明：直接采用本次构建对应的 commit message（约定写进这里，
-          #    接手者无需记忆）。
-          # 为什么用它：commit message 是任何 AI/人提交时都会写的东西 ——
-          # "把说明写清楚"这个责任自然落在提交上，无需换工具就失效；
-          # 也不会再出现 "Auto build APK" 这种零信息文案。
-          # 首行(%s)是简述，空行后正文(%b)是细节；顺带压缩连续空行。
-          # workflow_dispatch（无新提交）时 git log -1 指向 HEAD，同样适用。
-          NOTES=$(git log -1 --pretty=format:"%s%n%n%b" | sed '/./,$!d' | awk 'BEGIN{blank=0} /^[[:space:]]*$/{blank++; if(blank>1) next} {blank=0; print}')
+          # ── 发行说明：本次构建对应的 commit message（约定见 AI_MAINTENANCE §41：
+          #    任何 AI/人提交时都会写 commit message，说明质量搭在提交纪律上，
+          #    换接手者无需记忆额外约定）。
+          # push 触发用 COMMIT_MSG（事件载荷，首选路径）；workflow_dispatch 无
+          # head_commit 时 fallback 到 git log -1（此时可能是 ci-logs 的日志
+          # 提交，可接受——dispatch 是手动补构建，说明价值本就有限）。
+          # 统一压掉前导空行与连续空行；全空兜底"自动构建"。
+          NOTES="${COMMIT_MSG:-$(git log -1 --pretty=format:"%s%n%n%b")}"
+          NOTES=$(printf '%s' "$NOTES" | sed '/./,$!d' | awk 'BEGIN{blank=0} /^[[:space:]]*$/{blank++; if(blank>1) next} {blank=0; print}')
           [ -z "$NOTES" ] && NOTES="自动构建"
 
           gh release create "$TAG" "$APK_NAME" \
