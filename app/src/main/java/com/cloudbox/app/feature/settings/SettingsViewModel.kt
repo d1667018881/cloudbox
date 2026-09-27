@@ -518,7 +518,7 @@ class SettingsViewModel @Inject constructor(
     fun changePassword(oldPwd: String, newPwd: String) {
         viewModelScope.launch {
             emitProfileResult(
-                profileRepository.changePassword(oldPwd, newPwd), "密码已修改，请用新密码重新登录"
+                profileRepository.changePassword(oldPwd, newPwd), "密码已修改（本地保存的密码已同步更新）"
             )
         }
     }

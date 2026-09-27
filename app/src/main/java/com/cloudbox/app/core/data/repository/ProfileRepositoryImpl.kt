@@ -1,5 +1,6 @@
 package com.cloudbox.app.core.data.repository
 
+import com.cloudbox.app.core.data.local.secure.AccountSecureStore
 import com.cloudbox.app.core.data.remote.LanzouApiClient
 import com.cloudbox.app.core.domain.repository.ProfileRepository
 import com.cloudbox.app.core.domain.repository.ProfileResult
@@ -22,7 +23,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class ProfileRepositoryImpl @Inject constructor(
-    private val apiClient: LanzouApiClient
+    private val apiClient: LanzouApiClient,
+    private val accountStore: AccountSecureStore
 ) : ProfileRepository {
 
     override suspend fun setPersonalLinkCode(enableCode: Boolean, code: String): ProfileResult =
@@ -40,7 +42,21 @@ class ProfileRepositoryImpl @Inject constructor(
             if (oldPwd.isBlank() || newPwd.isBlank()) return@safe failure("请输入旧密码和新密码")
             if (newPwd.length < 6) return@safe failure("新密码至少 6 位")
             val resp = apiClient.apiService.changePassword(oldPwd = oldPwd, newPwd = newPwd)
-            judge(resp.zt, resp.infoText, "旧密码不正确，或新密码不合法")
+            val result = judge(resp.zt, resp.infoText, "旧密码不正确，或新密码不合法")
+            // V41（N7）：改密成功后同步本地保存的密码。
+            // 此前不同步的后果：18 天后 Cookie 过期 → 自动重登拿旧密码去试 →
+            // 服务端拒绝 → 账号被标记 rejected 清出（§37 修复后的行为）——
+            // 用户明明开着「记住密码」，却被静默登出，只能手动重登。
+            // 同步条件收窄为「本地存的恰好是被改掉的旧密码」：存的不是旧密码
+            // 说明本地保存与本会话来源不一致（用户手工改过/多端改过），
+            // 不理解的狀态不覆盖，保持现状。
+            if (result is ProfileResult.Success) {
+                val uid = accountStore.currentUid()
+                if (uid != null && accountStore.loadPassword(uid) == oldPwd) {
+                    accountStore.savePassword(uid, newPwd)
+                }
+            }
+            result
         }
 
     override suspend fun setExternalLink(title: String, summary: String): ProfileResult =

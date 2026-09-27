@@ -154,11 +154,15 @@ fun MainScreen(
     }
 
     // 剪贴板检测到分享链接 → 弹窗：解析 / 获取直链 / 忽略
-    if (pendingLink != null) {
+    // V41（N9）：局部快照替代 if 判空 + lambda 内 `!!`——delegated state 无法
+    // 智能转换才用了 `!!`；子组合读到晚一拍快照时存在理论 NPE 面（dismiss 置
+    // null 与弹窗内容组合的交错）。快照后整棵子树只引用不可变局部值。
+    val detectedLink = pendingLink
+    if (detectedLink != null) {
         AlertDialog(
             onDismissRequest = { clipboardWatcher.dismiss() },
             title = { Text("检测到分享链接") },
-            text = { Text(pendingLink!!, maxLines = 2) },
+            text = { Text(detectedLink, maxLines = 2) },
             confirmButton = {
                 TextButton(onClick = {
                     clipboardWatcher.consume()?.let { onOpenResolve(it) }

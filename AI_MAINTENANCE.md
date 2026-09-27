@@ -3821,3 +3821,38 @@ v0.1.184 验证：资产名 `CloudBox-v0.1.184.apk` ✅，但发行说明变成�
 修正：改用 `${{ github.event.head_commit.message }}`（事件载荷的原始
 message，不受工作区 git 状态污染），经 env 传入（含引号/反引号也不被
 bash 展开），仅 workflow_dispatch（无载荷）时 fallback 到 git log -1。
+
+---
+
+## 42. V41 第二轮复审（2026-09-27，v0.1.185 基线）
+
+V40 未深读的面的补齐轮：安全存储 / 上传 Worker / 下载链 / 直链解析 /
+账号·收藏·星标·扫码·设置 UI 层 / 状态存储 / 启动链。
+
+### 42.1 本轮修复
+
+| # | 级别 | 位置 | 问题 | 修复 |
+|---|---|---|---|---|
+| N7 | 中 | ProfileRepositoryImpl.changePassword | 改密成功后本地保存的旧密码不同步 → 18 天后 Cookie 过期时自动重登拿旧密码失败 → 账号被 markRejected 清出（§37 修复后的既定行为）——开着「记住密码」的用户被静默登出 | 成功且本地存储==旧密码时更新为新密码；存储与旧密码不一致（多端改密等）不覆盖；调用点文案同步更正 |
+| N8 | 中 | AccountScreen.PasswordDialog | 改密码两个输入框明文显示（登录页有遮罩，这里漏了）——肩窥/录屏/截图泄露面 | 补 PasswordVisualTransformation + Password 键盘类型 |
+| N9 | 低 | MainScreen 剪贴板弹窗 | `if (pendingLink != null)` 判空 + lambda 内 `pendingLink!!`——delegated state 无法智能转换用的 `!!`，子组合读到晚一拍快照时理论 NPE | 局部快照 val，子树只引用不可变局部值 |
+
+### 42.2 核实无误（本轮覆盖面）
+
+- AccountSecureStore：EncryptedSharedPreferences（Keystore AES256-GCM），槽位化设计，removeUid 条件清 currentUid（#8 修复保持）✓
+- UploadWorker：空输入直接 failure、文件存在性预检、失败名单去重、Trace 全程留痕 ✓
+- 下载链：pause/cancel/clearAll 语义分明（暂停=重下有注释说明）、cookie/referer 随行、文件名消毒 ✓
+- 直链解析：缓存 TTL 1h、第三方可配置回落、acw 挑战双形态（纯算/WebView 桥）、批量随机间隔防风控 ✓
+- acquireCookieSync 的 runBlocking：仅 IO 线程调用链（注释明示禁止主线程），无 ANR 面 ✓
+- 收藏自动检查调度：逐字复刻原版判定（先写时间戳再发起），KEEP 防重复入队，关开关即取消 ✓
+- 分享进入：EXTRA_STREAM 双形态解析 + 持久授权逐个申请、异常不中断 ✓
+- 横向扫描：GlobalScope 零、runBlocking 仅 WebView 桥一处（有上下文说明）、TODO/FIXME 零 ✓
+
+### 42.3 不修项
+
+| # | 项 | 理由 |
+|---|---|---|
+| — | enqueueUpload 的 `spoof: Boolean = true` 参数恒真 | 真闸门在仓库层（effSpoof = spoofSuffix && 设置项），参数仅冗余不构成行为面；改默认值零行为差异，动调用链反引入回归风险 |
+| — | RetryInterceptor Thread.sleep | 跑在 OkHttp 工作线程，拦截器内 backoff 唯一手段，正确用法 |
+
+验收补充：改密码（账号面板）→ 输入框应显示圆点遮罩；改完继续用 18+ 天不被登出（N7 长周期行为，可选）。

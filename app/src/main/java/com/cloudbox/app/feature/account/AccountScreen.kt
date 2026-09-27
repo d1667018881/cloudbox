@@ -274,6 +274,12 @@ private fun PasswordDialog(
                     onValueChange = { oldPwd = it },
                     label = { Text("旧密码") },
                     singleLine = true,
+                    // V41（N8）：登录页有遮罩、这里却没有 —— 改密对话框输密码时
+                    // 明文可见（肩窥/录屏/截图面）。对齐 LoginScreen 的处理。
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -282,6 +288,10 @@ private fun PasswordDialog(
                     onValueChange = { newPwd = it },
                     label = { Text("新密码（至少 6 位）") },
                     singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
