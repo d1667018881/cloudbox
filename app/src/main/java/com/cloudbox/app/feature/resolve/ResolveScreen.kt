@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -172,13 +173,13 @@ private fun ResolveItemRow(
     // 在 composable 上下文中获取剪贴板实例（LocalClipboardManager 是 composable 属性）
     val clipboard = LocalClipboardManager.current
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Text(item.shareUrl, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        Text(item.shareUrl, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         val link = item.link
         when {
             link != null -> {
-                Text(link.fileName, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                Text(link.fileName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(link.url, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                    color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row {
                     IconButton(onClick = { viewModel.download(item) }) {
                         Icon(Icons.Filled.Download, "下载", tint = MaterialTheme.colorScheme.primary)

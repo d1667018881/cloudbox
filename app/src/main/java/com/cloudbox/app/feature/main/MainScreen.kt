@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.DrawerValue
@@ -162,7 +163,7 @@ fun MainScreen(
         AlertDialog(
             onDismissRequest = { clipboardWatcher.dismiss() },
             title = { Text("检测到分享链接") },
-            text = { Text(detectedLink, maxLines = 2) },
+            text = { Text(detectedLink, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             confirmButton = {
                 TextButton(onClick = {
                     clipboardWatcher.consume()?.let { onOpenResolve(it) }

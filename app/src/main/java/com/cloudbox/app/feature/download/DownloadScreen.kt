@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -209,7 +210,7 @@ fun DownloadScreen(
         val context = LocalContext.current
         AlertDialog(
             onDismissRequest = { menuTask = null },
-            title = { Text(task.fileName, maxLines = 2) },
+            title = { Text(task.fileName) },
             text = {
                 Column {
                     DownloadMenuAction("复制直链") {
@@ -282,7 +283,7 @@ private fun DownloadItem(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(task.fileName, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                Text(task.fileName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${viewModel.statusText(task.status)}   ${formatBytes(task.bytesDownloaded)}/${formatBytes(task.bytesTotal)}",
                     style = MaterialTheme.typography.bodySmall,

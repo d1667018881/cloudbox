@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -103,7 +104,7 @@ fun RecycleScreen(
     state.folderDialog?.let { dialog ->
         AlertDialog(
             onDismissRequest = { viewModel.closeFolderDialog() },
-            title = { Text(dialog.folderName, maxLines = 1) },
+            title = { Text(dialog.folderName) },
             text = {
                 Box(Modifier.fillMaxWidth().height(320.dp)) {
                     when {
@@ -142,7 +143,7 @@ fun RecycleScreen(
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Spacer(Modifier.size(8.dp))
-                                            Text(f.name, Modifier.weight(1f), maxLines = 1,
+                                            Text(f.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                                 style = MaterialTheme.typography.bodySmall)
                                             f.size?.let {
                                                 Text(it, style = MaterialTheme.typography.bodySmall,
@@ -217,7 +218,7 @@ private fun RecycleItemRow(
             tint = if (file.isFolder) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.size(12.dp))
-        Text(file.name, Modifier.weight(1f), maxLines = 1)
+        Text(file.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         // 文件夹：多一个「查看」入口（回收站里的文件夹是个黑盒）
         if (file.isFolder) {
             IconButton(onClick = { viewModel.openFolderDialog(file) }) {

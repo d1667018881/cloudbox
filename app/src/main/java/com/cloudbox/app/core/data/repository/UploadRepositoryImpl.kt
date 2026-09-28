@@ -1,6 +1,6 @@
 package com.cloudbox.app.core.data.repository
 
-import com.cloudbox.app.BuildConfig
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.cloudbox.app.common.AppConstants
 import com.cloudbox.app.common.SplitZipUtil
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
@@ -61,6 +61,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class UploadRepositoryImpl @Inject constructor(
+    @ApplicationContext private val context: android.content.Context,
     private val apiClient: LanzouApiClient,
     private val settingsStore: SettingsStore
 ) : UploadRepository {
@@ -459,9 +460,9 @@ class UploadRepositoryImpl @Inject constructor(
      * 那是"被传文件的版本"，与"上传工具的版本"是两回事，都能提供信息，
      * 合并掉反而丢失事实。
      *
-     * 版本号取 `BuildConfig.VERSION_NAME`（CI 注入，形如 `0.1.157`），
-     * 不用 `PackageManager`：那要 Context、还可能抛异常；BuildConfig 是编译期
-     * 常量，取不到就是编译不过，不给运行时留隐患。
+     * ⚠️ 2026-09-28 语义修正（V42/N11）：上面那条"保留原名里的版本"规则维持，
+     * 但追加的版本号已改为**被上传 APK 自身的 versionName**（见 applyUploadName
+     * 内注释）。KDoc 里"版本号取 BuildConfig"的旧说法已作废。
      */
     private suspend fun applyUploadName(file: File, spoof: Boolean): String {
         // ⚠️ 这里此前写着「蓝奏云不接受 exe/apk 等格式」—— 该说法没有证据支持
@@ -469,12 +470,38 @@ class UploadRepositoryImpl @Inject constructor(
         val suffixed = if (spoof && needsSpoof(file)) "${file.name}.zip" else file.name
         // 版本号**只加在软件安装包上**：老板要的是"软件带上版本号"，不是所有文件都插
         //（此前给图片/文档也插了 `-v0.1.x`，属于过度施加，已收敛）。
+        //
+        // V42（N11）语义修正：版本号 = **被上传 APK 自己的 versionName**（用户在
+        // 系统应用管理里看到的那个），不再是 cloudbox 的 BuildConfig.VERSION_NAME。
+        // 此前标注的是"上传工具版本"（如 -v0.1.187），与应用管理里看到的被传 App
+        // 版本对不上，老板按"版本不一致"报障。解析失败（损坏/非标准 APK）→
+        // 原样保留，**不回落到工具版本**——标错版本的害处大于不标。
         return if (isSoftwarePackage(file)) {
-            insertVersionBeforeExtension(suffixed, BuildConfig.VERSION_NAME)
+            val v = apkVersionOf(file)
+            when {
+                v == null -> suffixed
+                // 原文件名已带同版本（如 手动命名的 xxx-1.2.3.apk）→ 不重复追加
+                suffixed.substringBeforeLast('.')
+                    .let { it.endsWith("-$v") || it.endsWith("-v$v") } -> suffixed
+                else -> insertVersionBeforeExtension(suffixed, v)
+            }
         } else {
             suffixed
         }
     }
+
+    /**
+     * 读取被上传 APK 自身的 versionName。
+     *
+     * getPackageArchiveInfo 对任意可读 APK 路径可用（无需已安装）：
+     * 文件选择器、已装应用拷贝（InstalledAppPicker → 缓存）两条上传源都覆盖。
+     * 解析不出（损坏、被壳、非 APK 改名）返回 null，调用方保持原名。
+     */
+    private fun apkVersionOf(file: File): String? = runCatching {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            ?.versionName?.takeIf { it.isNotBlank() }
+    }.getOrNull()
 
     /**
      * 是否是需要标记版本的「软件安装包」。

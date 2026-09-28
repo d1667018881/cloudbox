@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -288,7 +289,7 @@ private fun FavoriteRow(
                 Text(
                     fav.name.ifBlank { "未命名" },
                     style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 // 更新红点（原版 open_link_history[i].update）
                 if (fav.hasUpdate) {
@@ -312,14 +313,14 @@ private fun FavoriteRow(
                 fav.shareUrl,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+                maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             if (fav.remark.isNotBlank()) {
                 Text(
                     "备注：${fav.remark}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
                 )
             }
         }

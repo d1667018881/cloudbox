@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
@@ -638,7 +639,9 @@ fun FileListScreen(
     menuFile?.let { file ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { menuFile = null },
-            title = { Text(file.name, maxLines = 2) },
+            // V42（N12）：长文件名完整显示——列表行只给省略号，这里是用户
+            // 看全名的入口，不能也截断（此前 maxLines=2 被硬切，超长名只能看到前几个字）
+            title = { Text(file.name) },
             text = {
                 Column {
                     MenuAction("查看分享链接与提取码") {
@@ -964,7 +967,7 @@ private fun ListItem(
         )
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = if (twoLineTitle) 2 else 1)
+            Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = if (twoLineTitle) 2 else 1, overflow = TextOverflow.Ellipsis)
             if (!file.isFolder && file.size != null) {
                 // V33：简介/密码标记（对齐原版 show_desc_tag）
                 val marks = buildString {
@@ -1075,7 +1078,7 @@ private fun GridItem(
                 }
             }
         }
-        Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        Text(file.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         // V30：类型标签（原版两处布局都用同一个 格式文本 控件）
         if (showFileTypeLabel) {
             file.fileType?.let { FileTypeBadge(it) }
