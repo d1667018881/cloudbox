@@ -86,6 +86,9 @@ object HtmlExtractor {
     /** iframe 页附加校验串：var ajaxdata = 'asXy';（downprocess 的 websignkey/signs） */
     private val RE_AJAXDATA = Regex("""var\s+ajaxdata\s*=\s*'([^']*)'""")
 
+    /** iframe 页 JS 下发的直链接口地址：url : '…ajaxfile.php?file=NNN'（V42/N10） */
+    private val RE_AJAX_URL = Regex("""url\s*:\s*['"]([^'"]*ajaxfile\.php\?file=\d+[^'"]*)['"]""")
+
     /** iframe 页 kdns：var kdns = 1;（页面 JS 语义：killdns 未定义时降级为 0） */
     private val RE_KDNS = Regex("""var\s+kdns\s*=\s*(\d+)""")
 
@@ -151,6 +154,18 @@ object HtmlExtractor {
 
     /** 新版附加校验串（iframe 页）：var ajaxdata = 'asXy' */
     fun extractAjaxData(html: String): String? = RE_AJAXDATA.find(html)?.groupValues?.get(1)
+
+    /**
+     * iframe 页 JS 下发的直链接口完整地址（V42/N10 新增）。
+     *
+     * 实测形态：`url : 'https://apifile.woozooo.com/ajaxfile.php?file=2425169',`
+     * 2026-09-28 实测：服务端已把直链接口迁到独立 API 域（apifile.woozooo.com），
+     * 分享页同域的老路径 /ajaxfile.php 返回 HTTP 407 —— 必须优先取页面下发的
+     * URL（域与 file 参数由服务端成对下发，自成一体），同域构造只作老页面回落。
+     * 兼容绝对 / 协议相对(//host/…) / 相对(/ajaxfile.php?…) 三种写法。
+     */
+    fun extractAjaxUrl(html: String): String? =
+        RE_AJAX_URL.find(html)?.groupValues?.get(1)
 
     /** kdns 值（iframe 页）：1 = 正常域，0 = 降级备用域 */
     fun extractKdns(html: String): Int? = RE_KDNS.find(html)?.groupValues?.get(1)?.toIntOrNull()

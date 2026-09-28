@@ -257,8 +257,22 @@ class DirectLinkRepositoryImpl @Inject constructor(
             .add("ves", "1")
         if (password.isNotBlank()) form.add("p", password)
 
-        // 直链接口与分享页同域：直接用原始域，token 与域绑定，跨域必失败
-        val ajaxUrl = "${origin.trimEnd('/')}/ajaxfile.php?file=$fid"
+        // V42（N10）：直链接口地址 —— 优先取 iframe 页 JS 下发的完整 URL。
+        //
+        // ⚠️ 2026-09-28 实测（用户真机 407 报障驱动）：服务端已把直链接口迁到
+        // 独立 API 域（apifile.woozooo.com），分享页同域的老路径 /ajaxfile.php
+        // 返回 HTTP 407（空响应体）。对照实验：同域 407 / 页面下发域 200+zt=1。
+        // 「直链接口与分享页同域」这一 V7 时代的假设已被服务端改版废除。
+        // 下发的 URL 域与 file 参数成对出现，直接整体使用；兼容协议相对(//)写法。
+        // 老页面无此 JS 字段时回落同域构造（V7 逆向时的形态）。
+        val ajaxUrlFromPage = HtmlExtractor.extractAjaxUrl(fnHtml)
+        val ajaxUrl = when {
+            ajaxUrlFromPage != null -> when {
+                ajaxUrlFromPage.startsWith("//") -> "https:$ajaxUrlFromPage"
+                else -> absolutize(ajaxUrlFromPage, origin)
+            }
+            else -> "${origin.trimEnd('/')}/ajaxfile.php?file=$fid"
+        }
         val body = okHttp.newCall(
             Request.Builder()
                 .url(ajaxUrl)

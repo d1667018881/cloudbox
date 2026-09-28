@@ -3856,3 +3856,40 @@ V40 未深读的面的补齐轮：安全存储 / 上传 Worker / 下载链 / 直
 | — | RetryInterceptor Thread.sleep | 跑在 OkHttp 工作线程，拦截器内 backoff 唯一手段，正确用法 |
 
 验收补充：改密码（账号面板）→ 输入框应显示圆点遮罩；改完继续用 18+ 天不被登出（N7 长周期行为，可选）。
+
+---
+
+## 43. V42 直链解析 407 根因定案与修复（2026-09-28，用户真机报障驱动）
+
+### 43.1 现象与误判排除
+
+用户报障（v0.1.186 真机）：解析页一直转圈、偶发提示 407，"之前本地解析能直接出直链"。
+
+先排除的假说（全部有据）：
+- App 回归：v0.1.99→v0.1.186 解析主链路无实质变更（V30 只加 ensureDownloadable 的 WebView 桥，不位于"能否解析出直链"的路径上）；WebView 桥 12s 超时无永挂；ResolveViewModel 的 resolving 无条件复位；翻页 50 页兜底无死循环
+- 本地解析环境：机房 IP + 桌面 UA curl 实测分享页/iframe/翻页接口全部 200
+
+### 43.2 根因（对照实验锤死）
+
+蓝奏云服务端把直链接口从「分享页同域」迁到独立 API 域，同域老路径 407：
+
+| 请求 | 结果 |
+|---|---|
+| POST `pan.lanzoux.com/ajaxfile.php?file=…`（App 的构造） | **HTTP 407，空响应体** |
+| POST `apifile.woozooo.com/ajaxfile.php?file=…`（页面 JS 下发） | **HTTP 200，zt=1，dom+url 直链数据完整** |
+
+证据链：单文件页 → iframe(/fn?…) 页 JS 里 `url : 'https://apifile.woozooo.com/ajaxfile.php?file=2425169'`。
+V7 时代写死的"直链接口与分享页同域"假设被服务端改版废除（"服务器拒绝文案不可信/行为漂移"模式又一例：407 Proxy Authentication Required 与代理无关，是业务风控状态码）。
+
+### 43.3 修复（最小变更）
+
+- `HtmlExtractor.extractAjaxUrl(fnHtml)` 新增：提取 iframe 页 JS 下发的直链接口完整地址，兼容绝对/协议相对(//)/相对三种写法，干扰噪声（filemoreajax 等）不误伤（四形态正则验证 5/5 + 真实页面端到端唯一匹配）
+- `DirectLinkRepositoryImpl`：ajaxUrl 优先取页面下发值（域与 file 参数成对下发自成一体），协议相对补 https；老页面无此字段回落同域构造（V7 形态兼容）
+- 表单参数（action/websignkey/signs/sign/websign/kd/ves/p）与实测成功请求完全一致，未动
+- "一直转"的时长机制 = 30s connect/read 超时 × Retry 3 次 + backoff ≈ 2 分钟/跳，属既有行为；407 修复后不再走到
+
+### 43.4 验收
+
+- 解析页粘贴单文件分享链接（可带提取码）→ 应恢复秒级出直链
+- 文件夹链接展开 → 一直走 filemoreajax（未迁移，实测 200/zt=1）不受影响
+- 若仍见 407：截一下解析页错误文案 + 链接域名形态（脱敏后）回传——那是新漂移，需再排
