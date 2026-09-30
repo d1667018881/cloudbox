@@ -7,10 +7,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,6 +92,8 @@ fun FileListScreen(
     onOpenAnnouncement: () -> Unit = {},
     /** 公告未读红点（由上层从 AnnouncementStatusStore 传入） */
     announcementUnread: Boolean = false,
+    /** V43b：顶栏「下载管理」入口（对齐蓝云顶栏唯一的右侧图标） */
+    onOpenDownload: () -> Unit = {},
     /** 打开侧栏抽屉（根目录时顶栏左侧显示菜单按钮；null = 不显示） */
     onOpenDrawer: (() -> Unit)? = null,
     /** 从其他 App 分享进来的文件/链接（未消费时非空） */
@@ -297,63 +305,83 @@ fun FileListScreen(
                     },
                     actions = {
                         if (!state.selectionMode) {
-                            // V43（2026-09-30）顶栏精简（对齐蓝云式轻顶栏）：
-                            // 高频入口（公告红点 / 搜索）保留独立图标，
-                            // 低频操作（排序 / 视图切换）收进 ⋮ 菜单 ——
-                            // 此前 4 个图标并排挤在面包屑旁，视觉臃肿。
-                            // 公告入口（自建）+ 未读红点
+                            // V43b（2026-09-30 对照蓝云截图）：顶栏只留两个图标 ——
+                            // 公告（cloudbox 自建功能，蓝云没有）+ 下载管理（蓝云同款）。
+                            // 搜索/排序/视图切换全部移入下方胶囊搜索条。
                             IconButton(onClick = onOpenAnnouncement) {
                                 BadgedBox(badge = { if (announcementUnread) Badge() }) {
                                     Icon(Icons.Filled.Email, "公告")
                                 }
                             }
-                            IconButton(onClick = onOpenSearch) { Icon(Icons.Filled.Search, "搜索") }
-                            Box {
-                                IconButton(onClick = { showSortMenu = true }) {
-                                    Icon(Icons.Filled.MoreVert, "排序与视图")
-                                }
-                                androidx.compose.material3.DropdownMenu(
-                                    expanded = showSortMenu,
-                                    onDismissRequest = { showSortMenu = false }
-                                ) {
-                                    // 排序：当前目录内客户端排序（不动服务端数据）
-                                    com.cloudbox.app.feature.filelist.SortMode.entries.forEach { mode ->
-                                        androidx.compose.material3.DropdownMenuItem(
-                                            text = { Text(mode.label) },
-                                            onClick = {
-                                                showSortMenu = false
-                                                viewModel.setSortMode(mode)
-                                            },
-                                            trailingIcon = {
-                                                if (state.sortMode == mode) {
-                                                    Icon(Icons.Filled.Check, null, Modifier.size(16.dp))
-                                                }
-                                            }
-                                        )
-                                    }
-                                    androidx.compose.material3.HorizontalDivider(
-                                        Modifier.padding(vertical = 4.dp)
-                                    )
+                            IconButton(onClick = onOpenDownload) { Icon(Icons.Filled.Download, "下载管理") }
+                        }
+                    }
+                )
+                // V43b：胶囊搜索条（对齐蓝云 home_layout 搜索控件形态）——
+                // [home 回根目录] | [排序] [视图切换] ······ [搜索文件…]
+                // 整条可点跳搜索页；左侧图标各管各的（IconButton 自消费点击）。
+                if (!state.selectionMode) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onOpenSearch() }
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { viewModel.navigateTo(0) }) {
+                            Icon(Icons.Filled.Home, "回根目录")
+                        }
+                        VerticalDivider(
+                            Modifier.padding(vertical = 10.dp).width(1.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant
+                        )
+                        Box {
+                            IconButton(onClick = { showSortMenu = true }) {
+                                Icon(Icons.AutoMirrored.Filled.Sort, "排序：${state.sortMode.label}")
+                            }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                // 排序：当前目录内客户端排序（不动服务端数据）
+                                com.cloudbox.app.feature.filelist.SortMode.entries.forEach { mode ->
                                     androidx.compose.material3.DropdownMenuItem(
-                                        text = {
-                                            Text(if (state.gridMode) "切换为列表视图" else "切换为网格视图")
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                if (state.gridMode) Icons.Filled.ViewList else Icons.Filled.GridView,
-                                                null, Modifier.size(18.dp)
-                                            )
-                                        },
+                                        text = { Text(mode.label) },
                                         onClick = {
                                             showSortMenu = false
-                                            viewModel.toggleGrid()
+                                            viewModel.setSortMode(mode)
+                                        },
+                                        trailingIcon = {
+                                            if (state.sortMode == mode) {
+                                                Icon(Icons.Filled.Check, null, Modifier.size(16.dp))
+                                            }
                                         }
                                     )
                                 }
                             }
                         }
+                        IconButton(onClick = viewModel::toggleGrid) {
+                            Icon(if (state.gridMode) Icons.Filled.ViewList else Icons.Filled.GridView, "切换视图")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            Icons.Filled.Search, null,
+                            Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "搜索文件…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(end = 16.dp, top = 12.dp, bottom = 12.dp)
+                        )
                     }
-                )
+                }
                 // 多选模式：批量操作栏
                 if (state.selectionMode) {
                     Row(

@@ -202,6 +202,7 @@ fun MainScreen(
             FileListScreen(
                 onOpenSearch = onOpenSearch,
                 onOpenRecycle = onOpenRecycle,
+                onOpenDownload = onOpenDownload,
                 onOpenAnnouncement = onOpenAnnouncement,
                 announcementUnread = announcementUnread,
                 onOpenDrawer = { scope.launch { drawerState.open() } },
