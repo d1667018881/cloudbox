@@ -3989,3 +3989,25 @@ welcome 公告）。此机制保留不动。
 - 新增胶囊搜索条（TopAppBar 下方，surfaceVariant 底 + 24dp 圆角 + 整条
   可点跳搜索页）：[home 回根目录] | [排序（下拉菜单）] [视图切换] … [🔍 搜索文件…]
 - 排序菜单保持客户端排序不动服务端；多选模式下搜索条与顶栏 actions 同步隐藏
+
+### 45.6 V43c 真机回归：搜索条撑满全屏修复（2026-09-30 晚）
+
+TA 真机装 v0.1.191 反馈"首页图标占满整个屏幕"（附截图）。VLM 对拍确认：内容区
+被一块 surfaceVariant 底的大色块盖满、左侧一条通长灰竖线、列表消失。
+
+根因（布局语义，非编译错）：M3 Scaffold 对 topBar 槽的测量约束是
+maxHeight=整屏高。V43b 新增的胶囊搜索条 Row 放在 topBar 的 Column 里且
+未钉高度，Row 内 VerticalDivider 内部默认 fillMaxHeight() → 在整屏高的
+松约束下直接取满 → 整条搜索条被撑到全屏，文件列表高度被挤成 0。
+截图里"左侧通长灰线"即被拉满的分割线本体。
+
+修复：药丸 Row 修饰符链改为 fillMaxWidth → padding(16,6) → height(48) →
+clip(24) → background → clickable → padding(4)。药丸本体恒 48dp；
+钉在外边距之后、clip 之前：圆角 24=高度一半正好全圆角，IconButton 触控
+目标不压缩；VerticalDivider 的 fillMaxHeight 被行高兜住（可见段 28dp）。
+
+教训（topBar 自定义内容防翻车规矩）：
+1. Scaffold 的 topBar 槽测量约束是 maxHeight=整屏——任何放进 topBar 的
+   自定义容器必须显式钉高度，禁止裸放 wrap 内容 + fillMaxHeight 子项
+2. 布局语义 bug 静态检查不可达（precheck 只查括号/符号残留），新增
+   topBar 自定义内容后应至少一次真机/预览验证再出包

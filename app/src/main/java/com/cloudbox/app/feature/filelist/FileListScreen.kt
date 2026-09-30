@@ -326,6 +326,13 @@ fun FileListScreen(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp)
+                            // V43c（2026-09-30 真机修复）：topBar 槽位的测量约束是
+                            // maxHeight=整屏，Row 不钉高度时 VerticalDivider 内部的
+                            // fillMaxHeight() 会把整条搜索条撑到全屏高（真机实测
+                            // 表现=大色块盖满内容区、列表被挤没）。药丸本体钉死 48dp，
+                            // 且钉在外边距之后、clip 之前——圆角 24 = 高度一半，正好
+                            // 全圆角；IconButton 触控目标也不被压缩。
+                            .height(48.dp)
                             .clip(RoundedCornerShape(24.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable { onOpenSearch() }
