@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -42,6 +43,7 @@ fun MainDrawerContent(
     announcementUnread: Boolean,
     onClose: () -> Unit,
     onOpenFullLoad: () -> Unit,
+    onOpenResolve: () -> Unit,
     onOpenDownload: () -> Unit,
     onOpenFavorites: () -> Unit,
     onOpenStarred: () -> Unit,
@@ -65,6 +67,9 @@ fun MainDrawerContent(
         HorizontalDivider()
 
         DrawerEntry("查看全盘文件", Icons.Filled.List, onClick = { onClose(); onOpenFullLoad() })
+        // V43（2026-09-30）：底部「解析」tab 拆除后入口收进侧栏，
+        // 点击单开 Routes.RESOLVE 独立页（带返回键）。
+        DrawerEntry("解析链接", Icons.Filled.Link, onClick = { onClose(); onOpenResolve() })
         DrawerEntry("下载管理", Icons.Filled.Download, onClick = { onClose(); onOpenDownload() })
         DrawerEntry("收藏夹", Icons.Filled.Star, onClick = { onClose(); onOpenFavorites() })
         DrawerEntry("星标文件夹", Icons.Filled.Bookmark, onClick = { onClose(); onOpenStarred() })

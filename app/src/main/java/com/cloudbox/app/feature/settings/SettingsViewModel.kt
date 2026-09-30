@@ -46,13 +46,6 @@ data class SettingsUiState(
      */
     val showFileTypeLabel: Boolean = false,
     /**
-     * V30：是否显示账号入口按钮。
-     *
-     * 对齐原版 `show_account_button`。默认**开**：这是 App 的主要入口之一，
-     * 关掉它用户就没有直达账号中心的路径了，属于"用户主动关闭"型开关。
-     */
-    val showAccountButton: Boolean = true,
-    /**
      * V30：收藏夹自动检查更新的间隔（天）。0 = 关闭。
      *
      * 对齐原版 `auto_check_favorites_time`（原版存的是字符串，
@@ -150,7 +143,6 @@ class SettingsViewModel @Inject constructor(
             val dark = settingsStore.darkMode.first()
             val warnMobile = settingsStore.warnMobileNetwork.first()
             val showTypeLabel = settingsStore.showFileTypeLabel.first()
-            val showAccountBtn = settingsStore.showAccountButton.first()
             val autoCheckDays = settingsStore.autoCheckFavoritesDays.first()
             val autoLoadPref = settingsStore.autoLoad.first()
             val iconPack = settingsStore.iconPackPath.first()
@@ -167,7 +159,6 @@ class SettingsViewModel @Inject constructor(
                     thirdPartyResolver = resolver, darkMode = dark,
                     warnMobileNetwork = warnMobile,
                     showFileTypeLabel = showTypeLabel,
-                    showAccountButton = showAccountBtn,
                     autoCheckFavoritesDays = autoCheckDays,
                     autoLoad = autoLoadPref,
                     uaInput = ua,
@@ -296,13 +287,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** 是否显示账号入口按钮 */
-    fun saveShowAccountButton(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsStore.setShowAccountButton(enabled)
-            _uiState.update { it.copy(showAccountButton = enabled) }
-        }
-    }
 
     /**
      * 自动加载列表剩余内容（对齐原版 auto_load）。
@@ -784,7 +768,6 @@ class SettingsViewModel @Inject constructor(
                 darkMode = s.darkMode.first(),
                 warnMobileNetwork = s.warnMobileNetwork.first(),
                 showFileTypeLabel = s.showFileTypeLabel.first(),
-                showAccountButton = s.showAccountButton.first(),
                 autoCheckFavoritesDays = s.autoCheckFavoritesDays.first(),
                 autoLoad = s.autoLoad.first(),
                 // 输入框缓存跟着刷新，注释见本函数开头

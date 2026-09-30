@@ -1,27 +1,14 @@
 package com.cloudbox.app.feature.main
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,16 +18,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.unit.dp
 import android.widget.Toast
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -49,14 +33,15 @@ import com.cloudbox.app.common.ClipboardLinkWatcher
 import com.cloudbox.app.core.data.local.datastore.SettingsStore
 import com.cloudbox.app.core.domain.repository.AuthRepository
 import com.cloudbox.app.feature.filelist.FileListScreen
-import com.cloudbox.app.feature.resolve.ResolveScreen
 import com.cloudbox.app.feature.search.SearchViewModel
 import kotlinx.coroutines.launch
 
 /**
- * 主界面：抽屉（侧栏）+ 底部导航容器（网盘 / 解析 / 我的）。
- * 抽屉对齐原版侧滑栏；底部 tab 保留 CloudBox 既有的三页结构。
- * 同时承载剪贴板链接识别弹窗（需求规格 9 节）。
+ * 主界面：抽屉（侧栏）+ 单页网盘。
+ *
+ * V43（2026-09-30）：底部三 tab 拆除——「我的」与抽屉功能 100% 重叠，
+ * 「解析」收进侧栏（点击单开 Routes.RESOLVE 独立页），只剩网盘一页后
+ * 底部导航栏无存在意义。本组件仍承载剪贴板链接识别弹窗（需求规格 9 节）。
  */
 @Composable
 fun MainScreen(
@@ -81,7 +66,6 @@ fun MainScreen(
     settingsStore: SettingsStore = hiltViewModel<MainViewModel>().settingsStore,
     searchViewModel: SearchViewModel = hiltViewModel()
 ) {
-    var tab by remember { mutableIntStateOf(0) }
     val pendingLink by clipboardWatcher.pendingLink.collectAsState()
     // currentAccount 是 Flow（非 StateFlow），collectAsState 必须提供 initial
     val account by authRepository.currentAccount.collectAsState(initial = null)
@@ -133,9 +117,9 @@ fun MainScreen(
         )
     }
 
-    // V30：读取界面显示设置（initial 用与原版一致的默认值，避免首帧闪动）
-    val showAccountButton by settingsStore.showAccountButton.collectAsState(initial = true)
-    val showFileTypeLabel by settingsStore.showFileTypeLabel.collectAsState(initial = false)
+    // V30：读取界面显示设置 —— 2026-09-30（V43）「我的」tab 移除后，
+    // showAccountButton / showFileTypeLabel 都只服务 MeTab，MainScreen 不再消费；
+    // FileListScreen 自己读 showFileTypeLabel，不受影响。
 
     // Android 10+ 从其他 App 复制链接再切回本 App 时系统回调不触发，回前台时补查一次剪贴板
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -195,6 +179,7 @@ fun MainScreen(
                 announcementUnread = announcementUnread,
                 onClose = { scope.launch { drawerState.close() } },
                 onOpenFullLoad = onOpenFullLoad,
+                onOpenResolve = { onOpenResolve(null) },
                 onOpenDownload = onOpenDownload,
                 onOpenFavorites = onOpenFavorites,
                 onOpenStarred = onOpenStarred,
@@ -207,112 +192,25 @@ fun MainScreen(
             )
         }
     ) {
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = tab == 0,
-                        onClick = { tab = 0 },
-                        icon = { Icon(Icons.Filled.CloudUpload, null) },
-                        label = { Text("网盘") }
-                    )
-                    NavigationBarItem(
-                        selected = tab == 1,
-                        onClick = { tab = 1 },
-                        icon = { Icon(Icons.Filled.Link, null) },
-                        label = { Text("解析") }
-                    )
-                    // ⚠️ 原「上传」tab 已于 2026-09-15 移除（V32 死代码清理）：
-                    //    网盘页 FAB 已能"传到当前目录"，独立上传页属重复入口。
-                    NavigationBarItem(
-                        selected = tab == 2,
-                        onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.Person, null) },
-                        label = { Text("我的") }
-                    )
-                }
-            }
-        ) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                when (tab) {
-                    0 -> FileListScreen(
-                        onOpenSearch = onOpenSearch,
-                        onOpenRecycle = onOpenRecycle,
-                        onOpenAnnouncement = onOpenAnnouncement,
-                        announcementUnread = announcementUnread,
-                        onOpenDrawer = { scope.launch { drawerState.open() } },
-                        // 外部分享进来的文件/链接：由网盘页消费（文件直接传当前目录）
-                        pendingShare = pendingShare,
-                        onShareConsumed = onShareConsumed,
-                        onOpenSharedLink = { link -> onOpenResolve(link) }
-                    )
-                    1 -> ResolveScreen(onBack = {})
-                    2 -> MeTab(
-                        accountName = account?.uid ?: "未登录",
-                        onOpenDownload = onOpenDownload,
-                        onOpenFavorites = onOpenFavorites,
-                        onOpenRecycle = onOpenRecycle,
-                        onOpenSettings = onOpenSettings,
-                        onOpenAbout = onOpenAbout,
-                        onOpenAccount = onOpenAccount,
-                        onLogout = { confirmLogout = true },
-                        showAccountButton = showAccountButton,
-                        showFileTypeLabel = showFileTypeLabel,
-                        updateAvailable = updateAvailable != null
-                    )
-                }
-            }
+    // V43（2026-09-30）：底部三 tab（网盘/解析/我的）拆掉 ——
+    // ·「我的」与抽屉功能 100% 重叠（账号/下载/收藏/回收站/设置/关于/退出全在侧栏）
+    // ·「解析」改为侧栏入口，点击单开独立页面（Routes.RESOLVE 本就存在，
+    //   剪贴板弹窗一直走它）
+    // 只剩网盘一页后，底部导航栏失去存在意义，整个 Scaffold 简化为单页。
+    Scaffold { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            FileListScreen(
+                onOpenSearch = onOpenSearch,
+                onOpenRecycle = onOpenRecycle,
+                onOpenAnnouncement = onOpenAnnouncement,
+                announcementUnread = announcementUnread,
+                onOpenDrawer = { scope.launch { drawerState.open() } },
+                // 外部分享进来的文件/链接：由网盘页消费（文件直接传当前目录）
+                pendingShare = pendingShare,
+                onShareConsumed = onShareConsumed,
+                onOpenSharedLink = { link -> onOpenResolve(link) }
+            )
         }
     }
 }
-
-@Composable
-private fun MeTab(
-    accountName: String,
-    onOpenDownload: () -> Unit,
-    onOpenFavorites: () -> Unit,
-    onOpenRecycle: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenAbout: () -> Unit,
-    onOpenAccount: () -> Unit,
-    onLogout: () -> Unit,
-    /** V30：是否显示账号入口（原版 show_account_button） */
-    showAccountButton: Boolean = true,
-    /** V30：是否在条目上显示类型标签（原版 show_file_type_label） */
-    showFileTypeLabel: Boolean = false,
-    /** V33：关于入口是否有更新（红点） */
-    updateAvailable: Boolean = false
-) {
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        if (showAccountButton) {
-            Text("当前账号：$accountName", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(16.dp))
-        }
-        MeEntry("账号信息", onOpenAccount)
-        MeEntry("下载管理", onOpenDownload)
-        MeEntry("收藏夹" + if (showFileTypeLabel) "（文件夹可检查更新）" else "", onOpenFavorites)
-        MeEntry("回收站", onOpenRecycle)
-        MeEntry("设置", onOpenSettings)
-        // 关于页（对齐原版 about.lua）：版本号 / 检查更新
-        MeEntry("关于", onOpenAbout, badge = updateAvailable)
-        Spacer(Modifier.height(24.dp))
-        TextButton(onClick = onLogout) { Text("退出登录", color = MaterialTheme.colorScheme.error) }
-    }
-}
-
-@Composable
-private fun MeEntry(title: String, onClick: () -> Unit, badge: Boolean = false) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        if (badge) {
-            Spacer(Modifier.width(8.dp))
-            Badge()
-        }
-    }
 }

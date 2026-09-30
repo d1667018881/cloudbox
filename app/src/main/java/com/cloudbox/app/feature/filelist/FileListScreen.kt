@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Check
@@ -298,6 +297,10 @@ fun FileListScreen(
                     },
                     actions = {
                         if (!state.selectionMode) {
+                            // V43（2026-09-30）顶栏精简（对齐蓝云式轻顶栏）：
+                            // 高频入口（公告红点 / 搜索）保留独立图标，
+                            // 低频操作（排序 / 视图切换）收进 ⋮ 菜单 ——
+                            // 此前 4 个图标并排挤在面包屑旁，视觉臃肿。
                             // 公告入口（自建）+ 未读红点
                             IconButton(onClick = onOpenAnnouncement) {
                                 BadgedBox(badge = { if (announcementUnread) Badge() }) {
@@ -305,15 +308,15 @@ fun FileListScreen(
                                 }
                             }
                             IconButton(onClick = onOpenSearch) { Icon(Icons.Filled.Search, "搜索") }
-                            // 排序：当前目录内客户端排序（不动服务端数据）
                             Box {
                                 IconButton(onClick = { showSortMenu = true }) {
-                                    Icon(Icons.AutoMirrored.Filled.Sort, "排序：${state.sortMode.label}")
+                                    Icon(Icons.Filled.MoreVert, "排序与视图")
                                 }
                                 androidx.compose.material3.DropdownMenu(
                                     expanded = showSortMenu,
                                     onDismissRequest = { showSortMenu = false }
                                 ) {
+                                    // 排序：当前目录内客户端排序（不动服务端数据）
                                     com.cloudbox.app.feature.filelist.SortMode.entries.forEach { mode ->
                                         androidx.compose.material3.DropdownMenuItem(
                                             text = { Text(mode.label) },
@@ -328,10 +331,25 @@ fun FileListScreen(
                                             }
                                         )
                                     }
+                                    androidx.compose.material3.HorizontalDivider(
+                                        Modifier.padding(vertical = 4.dp)
+                                    )
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = {
+                                            Text(if (state.gridMode) "切换为列表视图" else "切换为网格视图")
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                if (state.gridMode) Icons.Filled.ViewList else Icons.Filled.GridView,
+                                                null, Modifier.size(18.dp)
+                                            )
+                                        },
+                                        onClick = {
+                                            showSortMenu = false
+                                            viewModel.toggleGrid()
+                                        }
+                                    )
                                 }
-                            }
-                            IconButton(onClick = viewModel::toggleGrid) {
-                                Icon(if (state.gridMode) Icons.Filled.ViewList else Icons.Filled.GridView, "切换视图")
                             }
                         }
                     }

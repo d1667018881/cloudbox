@@ -353,23 +353,6 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("显示账号切换按钮", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "关闭后首页不再显示账号入口（单账号用户可关）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.showAccountButton,
-                    onCheckedChange = viewModel::saveShowAccountButton
-                )
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
                     Text("自动加载页面剩余内容", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         "列表滚动到底部时自动加载下一页，无需手动点击",
