@@ -31,6 +31,8 @@ data class FileListUiState(
     val selectionMode: Boolean = false,
     val selected: Set<Long> = emptySet(),
     val shareResult: ShareInfo? = null,
+    /** V46：菜单「复制链接」待消费（Screen 侧执行剪贴板写入后 consume） */
+    val pendingCopyShare: ShareInfo? = null,
     /** V44：菜单「解析」直达——取到分享链接后跳解析页（带提取码文本，解析页自动填充） */
     val pendingResolveLink: String? = null,
     /** 批量操作的进度提示（串行执行，可能十几秒；为空表示没有批量任务在跑） */
@@ -398,6 +400,25 @@ class FileListViewModel @Inject constructor(
                 .onFailure { e -> _uiState.update { it.copy(message = "收藏失败：${e.message}") } }
         }
     }
+
+    /**
+     * 菜单「复制链接」一级项（V46，2026-10-03 TA 反馈找回）：
+     * 历史上「复制链接」只藏在二级分享弹窗的小图标里，菜单越加越长后更难找。
+     * 这里取分享信息后交给 Screen 写剪贴板（VM 不持 context，与 pendingResolveLink 同模式）。
+     */
+    fun copyShareLink(file: CloudFile) {
+        viewModelScope.launch {
+            val result = if (file.isFolder) {
+                fileRepository.getDirShare(file.id)
+            } else {
+                fileRepository.getFileShare(file.id)
+            }
+            result.onSuccess { share -> _uiState.update { it.copy(pendingCopyShare = share) } }
+                .onFailure { e -> _uiState.update { it.copy(message = "获取分享链接失败：${e.message}") } }
+        }
+    }
+
+    fun consumePendingCopyShare() = _uiState.update { it.copy(pendingCopyShare = null) }
 
     /** 菜单「收藏」直达项：先取分享链接再入收藏（收藏夹以分享链接为主键） */
     fun favoriteFile(file: CloudFile) {

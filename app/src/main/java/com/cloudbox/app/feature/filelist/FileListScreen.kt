@@ -33,6 +33,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -757,68 +764,104 @@ fun FileListScreen(
             onDismissRequest = { menuFile = null },
             // V42（N12）：长文件名完整显示——列表行只给省略号，这里是用户
             // 看全名的入口，不能也截断（此前 maxLines=2 被硬切，超长名只能看到前几个字）
-            title = { Text(file.name) },
+            title = {
+                Text(
+                    file.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                )
+            },
             text = {
                 Column {
-                    // V44（2026-10-01 TA 真机反馈）：解析/收藏此前只能从「查看分享
-                    // 链接与提取码」二级弹窗绕（收藏甚至没接库、点了没反应），
-                    // 高频操作提为一级菜单项。
-                    MenuAction("解析（获取直链）") {
+                    // V46（2026-10-03 TA 反馈）：菜单按功能分组排列（分享 → 整理 →
+                    // 本机 → 危险），组间 6dp 微距示意分组、组内连续——不是硬分区，
+                    // 近似功能的自然挨在一起；每项配图标，视觉扫描更快。
+                    // 「复制链接」此前只藏在二级分享弹窗的小图标里，提为一级项。
+
+                    // ── 分享组：把文件给出去 ──
+                    MenuAction("复制链接", Icons.Filled.Link) {
+                        menuFile = null
+                        viewModel.copyShareLink(file)
+                    }
+                    // V44：解析/收藏此前只能从「查看分享链接与提取码」二级弹窗绕
+                    //（收藏甚至没接库、点了没反应），高频操作提为一级菜单项。
+                    MenuAction("解析（获取直链）", Icons.Filled.Bolt) {
                         menuFile = null
                         viewModel.getShare(file, forResolve = true)
                     }
-                    MenuAction("收藏") {
+                    MenuAction("收藏", Icons.Filled.Star) {
                         menuFile = null
                         viewModel.favoriteFile(file)
                     }
-                    MenuAction("查看分享链接与提取码") {
+                    MenuAction("查看分享链接与提取码", Icons.Filled.QrCode2) {
                         menuFile = null
                         viewModel.getShare(file)
                     }
+
+                    MenuGap()
+
+                    // ── 整理组：文件管理 ──
                     if (!file.isFolder) {
-                        MenuAction("下载到本地") {
-                            menuFile = null
-                            viewModel.downloadSingle(file)
-                        }
                         // 官网文件夹菜单无「重命名」（fol_ename 未定义）
-                        MenuAction("重命名") {
+                        MenuAction("重命名", Icons.Filled.Edit) {
                             menuFile = null
                             renameTarget = file
+                        }
+                    }
+                    MenuAction(
+                        "修改资料（描述）",
+                        Icons.Filled.Description
+                    ) {
+                        menuFile = null
+                        // 先读回原描述再打开弹窗（对齐原版 f_des → task=12 → f_desgo）
+                        viewModel.loadDescForEdit(file)
+                    }
+                    MenuAction(
+                        if (file.isFolder) "设置文件夹提取码" else "设置提取码",
+                        Icons.Filled.Key
+                    ) {
+                        menuFile = null
+                        passwdTarget = file
+                    }
+                    if (!file.isFolder) {
+                        // 官网文件夹菜单无「移动」（已实测确认）
+                        MenuAction("移动到…", Icons.Filled.DriveFileMove) {
+                            menuFile = null
+                            moveSingleTarget = file
                         }
                     }
                     // 星标文件夹（对齐原版「添加星标 / 取消星标」，只对文件夹有意义）
                     if (file.isFolder) {
                         MenuAction(
-                            if (state.menuStarred) "从星标文件夹移除" else "添加到星标文件夹"
+                            if (state.menuStarred) "从星标文件夹移除" else "添加到星标文件夹",
+                            Icons.Filled.Star
                         ) {
                             menuFile = null
                             viewModel.toggleStar(file)
                         }
                     }
-                    MenuAction(if (file.isFolder) "设置文件夹提取码" else "设置提取码") {
-                        menuFile = null
-                        passwdTarget = file
-                    }
-                    MenuAction("修改资料（描述）") {
-                        menuFile = null
-                        // 先读回原描述再打开弹窗（对齐原版 f_des → task=12 → f_desgo）
-                        viewModel.loadDescForEdit(file)
-                    }
-                    // 官网文件夹菜单无「移动」（已实测确认）
+
+                    MenuGap()
+
+                    // ── 本机组：本机/本地操作 ──
                     if (!file.isFolder) {
-                        MenuAction("移动到…") {
+                        MenuAction("下载到本地", Icons.Filled.Download) {
                             menuFile = null
-                            moveSingleTarget = file
+                            viewModel.downloadSingle(file)
                         }
                     }
-                    MenuAction("复制文件名") {
+                    MenuAction("复制文件名", Icons.Filled.ContentCopy) {
                         menuFile = null
                         val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
                         cm.setPrimaryClip(android.content.ClipData.newPlainText("文件名", file.name))
                         viewModel.showMessage("已复制文件名")
                     }
-                    MenuAction("删除", danger = true) {
+
+                    MenuGap()
+
+                    // ── 危险组 ──
+                    MenuAction("删除", Icons.Filled.Delete, danger = true) {
                         menuFile = null
                         deleteTarget = file
                     }
@@ -953,6 +996,23 @@ fun FileListScreen(
             viewModel.consumePendingResolve()
         }
     }
+    // V46：菜单「复制链接」——取到分享信息后写剪贴板（格式与二级分享弹窗的
+    // 复制按钮完全一致：链接 + 提取码），VM 不持 context 所以在 Screen 侧消费
+    state.pendingCopyShare?.let { share ->
+        LaunchedEffect(share) {
+            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+            val text = buildString {
+                append(share.shareUrl)
+                if (share.onof == "1" && share.pwd.isNotBlank()) {
+                    append("\n提取码：").append(share.pwd)
+                }
+            }
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("分享链接", text))
+            viewModel.showMessage("已复制分享链接")
+            viewModel.consumePendingCopyShare()
+        }
+    }
 
     // 上传失败时：用同一个弹窗把"时间线 + 失败名单"摊开。
     // 用户看到"上传失败"时最需要知道的是"到底哪一步断了"，而不是再猜一次。
@@ -995,20 +1055,47 @@ private fun ActionChip(label: String, icon: androidx.compose.ui.graphics.vector.
  * 用整行可点区域而不是 AlertDialog 的 buttons —— AlertDialog 的
  * confirmButton/dismissButton 只放得下 1~2 个，8 个操作塞不进去，
  * 硬塞会被挤成两行、还会出现按钮文字换行。
+ *
+ * V46：从纯文字升级为「图标 + 文字」——一列纯文字十来项时视觉全是字，
+ * 扫不出目标；图标提供第二维度定位，圆角按压反馈对齐 M3 菜单规范。
  */
 @Composable
-private fun MenuAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth()
+private fun MenuAction(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = if (danger) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(14.dp))
+        }
         Text(
             label,
-            modifier = Modifier.fillMaxWidth(),
             color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyLarge
         )
     }
+}
+
+/** 组间微距：分组靠「组内连续、组间 6dp」示意，不搞硬分区（TA 明确不要真分隔） */
+@Composable
+private fun MenuGap() {
+    Spacer(Modifier.height(6.dp))
 }
 
 /**
