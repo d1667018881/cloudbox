@@ -108,8 +108,9 @@ class DirectLinkRepositoryImpl @Inject constructor(
             runCatching {
                 // 用原始链接所在域请求：t/k/fid/uid/puid 由该域服务端渲染页面时下发，
                 // 跨域复用会被判非法（旧实现重写到 shareBase 后请求是失败诱因之一）。
-                val origin = originBaseOf(shareUrl)
-                val sharePage = getPage(shareUrl, origin)
+                // V45：分享页获取统一走 fetchSharePage（含域名救护），origin 用活下来的域。
+                val (effectiveUrl, sharePage) = fetchSharePage(shareUrl)
+                val origin = originBaseOf(effectiveUrl)
                 resolveFolderFromPage(sharePage, origin, password)
             }
         }
@@ -193,15 +194,30 @@ class DirectLinkRepositoryImpl @Inject constructor(
      * 这样用户粘贴 /bXXXX 目录链接也能直接解析，不必手动切换模式。
      */
     private suspend fun resolveInternal(shareUrl: String, password: String): DirectLink {
-        val origin = originBaseOf(shareUrl)
+        // 0) 分享页 + 域名救护（V45：蓝奏子域会轮换性死亡，DNS 失败时换活域重试，
+        //    成功后全程用活下来的 effectiveUrl——origin/referer 都跟实际域走）
+        val (effectiveUrl, fetchedHtml) = fetchSharePage(shareUrl)
+        val origin = originBaseOf(effectiveUrl)
 
         // 1) 分享页（可能被 acw_sc__v2 挑战拦截）
-        var html = getPage(shareUrl, origin)
-        html = solveAcwIfNeeded(html, shareUrl, origin)
+        var html = fetchedHtml
+        html = solveAcwIfNeeded(html, effectiveUrl, origin)
 
         // 1.5) 失效页早退：实测返回 "文件不存在，或已删除" 的空壳页（约 1KB）
         if (html.contains("文件不存在") || html.contains("已取消分享")) {
             throw ApiError.Business(-1, "文件不存在或已删除")
+        }
+
+        // 1.55) 蓝奏政策墙（V45）：免费账号分享的 APK 禁止下载。页面原文
+        //      「非会员不在支持分享apk文件」（"不在"是服务端原文错别字，勿改）。
+        //      注意：此墙实测只拦移动端 UA，本 App 全程桌面 UA 碰不到——但用户
+        //      可自定义 UA，识别它是为了万一命中时报真实原因，而不是误导性的
+        //      「无法提取 fid」。此墙无下载元素，救护回退也救不了，直接报错。
+        if (html.contains("非会员不在支持分享")) {
+            throw ApiError.Business(
+                -1,
+                "蓝奏云政策：免费账号分享的 APK 已停止提供下载（需分享者开通会员）"
+            )
         }
 
         // 1.6) 文件夹链接：单文件流程拿不到直链，抛出专用错误码，
@@ -212,7 +228,7 @@ class DirectLinkRepositoryImpl @Inject constructor(
         }
 
         // 2) 文件名：优先 <title>（实测 "Fluent v3.zip - 蓝奏云"），去掉站点后缀
-        val fileName = extractTitle(html) ?: shareUrl.substringAfterLast('/')
+        val fileName = extractTitle(html) ?: effectiveUrl.substringAfterLast('/')
 
         // 3) fid（var fid = 96810913;）
         val fid = HtmlExtractor.extractFileId(html)
@@ -222,14 +238,14 @@ class DirectLinkRepositoryImpl @Inject constructor(
         //      /tp/<id>?webtp=…，/tp 页 JS 变量拼直链（vkjxld + hyggid + lanosso）。
         //      老模板（iframe → apifile）分支保留，两代页面并存期间各自识别。
         HtmlExtractor.extractWebtpHref(html)?.let { webtpHref ->
-            return resolveViaWebtp(webtpHref, origin, shareUrl, fileName)
+            return resolveViaWebtp(webtpHref, origin, effectiveUrl, fileName)
         }
 
         // 4) iframe 页（/fn?…）→ wp_sign / ajaxdata / kdns
         val iframeSrc = HtmlExtractor.extractIframe(html)
             ?: throw ApiError.Business(-1, "分享页未包含下载 iframe（文件可能已失效或需要提取码）")
         val iframeUrl = absolutize(iframeSrc, origin)
-        var fnHtml = getPage(iframeUrl, shareUrl)
+        var fnHtml = getPage(iframeUrl, effectiveUrl)
         fnHtml = solveAcwIfNeeded(fnHtml, iframeUrl, origin)
 
         val sign = HtmlExtractor.extractWpSign(fnHtml)
@@ -327,7 +343,7 @@ class DirectLinkRepositoryImpl @Inject constructor(
         //    直接抛 IllegalArgumentException）。
         val domNorm = if (dom.startsWith("http")) dom else "https://${dom.trimEnd('/')}"
         val directUrl = "${domNorm.trimEnd('/')}/file/${path.removePrefix("/")}"
-        val link = DirectLink(url = directUrl, fileName = fileName, referer = shareUrl)
+        val link = DirectLink(url = directUrl, fileName = fileName, referer = effectiveUrl)
 
         // 7) 探测是否为"验证中间页"（IP 风控时会先返回一个 HTML 验证页而非文件）。
         //    不探测的话用户会下载到一个 4KB 的 HTML —— 典型的"解析成功但下载不了"。
@@ -551,6 +567,47 @@ class DirectLinkRepositoryImpl @Inject constructor(
             return "${url.scheme}://$host"
         }
         return apiClient.domainInterceptor.snapshot().shareBase
+    }
+
+    /**
+     * 取分享页 HTML，DNS 失败时做**域名救护**（V45，2026-10-03）。
+     *
+     * 背景：蓝奏域名系轮换性死亡——实测 wwbig/www/wwt.lanzouq.com 子域 A 记录
+     * 被服务端整体删除，用户侧表现为「昨天还能解析，今天报网络错误」。而分享
+     * ID 是全局的：同一 ID 换任意活域同路径照样打开（2026-10-03 逐个实测，
+     * 候选表见 [DomainUtils.fallbackShareHosts]）。
+     *
+     * 策略：原 URL 正常请求；仅当抛 [java.net.UnknownHostException]（DNS 解析
+     * 失败）时才逐候选试活域，第一个 2xx 的胜出。**HTTP 层错误（404/403…）
+     * 不回退**——那是链接或服务问题，换域救不了，原样上抛保留真实错误。
+     *
+     * @return (effectiveUrl, html)：effectiveUrl 是**实际拿到页面的 URL**，
+     *         后续 origin/referer/直链 referer 必须全用它（跨域 referer 会被判非法）。
+     */
+    private fun fetchSharePage(shareUrl: String): Pair<String, String> {
+        val origin = originBaseOf(shareUrl)
+        try {
+            return shareUrl to getPage(shareUrl, origin)
+        } catch (e: java.net.UnknownHostException) {
+            val host = shareUrl.toHttpUrlOrNull()?.host ?: throw e
+            val candidates = DomainUtils.fallbackShareHosts(host)
+                .filter { it != host }
+                .map { candidateHost ->
+                    // 只换 scheme://host 段，路径（分享 ID）原样保留
+                    shareUrl.replaceFirst(Regex("""^(https?://)[^/]+"""), "$1$candidateHost")
+                }
+            for (candidateUrl in candidates) {
+                try {
+                    val html = getPage(candidateUrl, originBaseOf(candidateUrl))
+                    return candidateUrl to html
+                } catch (_: java.net.UnknownHostException) {
+                    // 该候选域也死了 → 试下一个
+                }
+            }
+            // 全部候选失败：抛原始异常（别吞——「网络不可用」和「域名死绝」的
+            // 排障路径不同，保留原始 UnknownHost 信息给用户看真实原因）
+            throw e
+        }
     }
 
     /**

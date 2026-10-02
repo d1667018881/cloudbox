@@ -131,4 +131,41 @@ object DomainUtils {
         if (AppConstants.FORBIDDEN_DOMAINS.any { h == it || h.endsWith(".$it") }) return false
         return AppConstants.TRUSTED_HOST_REGEX.matches(h)
     }
+
+    /**
+     * 分享域名救护候选表（V45，2026-10-03）。
+     *
+     * 背景：蓝奏域名系会轮换性死亡——2026-10-02 实测 wwbig/www/wwt.lanzouq.com
+     * 三个子域 A 记录被服务端整体删除（DoH 权威确认 NXDOMAIN），而分享 ID 是
+     * 全局的，换任意活域同路径照样打开。用户侧表现为「昨天还能解析，今天
+     * 报网络错误」，且 PC 端因 DNS 缓存未过期还能用，极易误判为 App 故障。
+     *
+     * 候选实测（2026-10-03，同分享 ID 逐个请求验证）：
+     * - lanzoui.com / lanzoux.com / lanzoub.com / lanzok.com / lanzoup.com → 200
+     * - lanzou.com（404，不认该 ID）/ lanzol.com（超时）/ lanzouy/q/m.com（DNS 已死）→ 不入表
+     *
+     * ⚠️ 表会过时：下次蓝奏再杀域时，把当时实测活的 zone 补进来、死的挪走。
+     *   子域不挑（wwbig/wwt/www 同一分享 ID 全 200），保原子域优先 + www 变体兜底。
+     */
+    private val FALLBACK_SHARE_ZONES = listOf(
+        "lanzoui.com", "lanzoux.com", "lanzoub.com", "lanzok.com", "lanzoup.com"
+    )
+
+    /**
+     * 原分享 host 死了以后，按「保留子域换 zone 优先、www 变体兜底」的顺序给出候选。
+     * - wwbig.lanzouq.com → [wwbig.lanzoui.com, www.lanzoui.com, wwbig.lanzoux.com, …]
+     * - lanzouq.com（裸域）→ [www.lanzoui.com, www.lanzoux.com, …]
+     * 非 lanzou 系 host（理论到不了这里，护栏）返回空表。
+     */
+    fun fallbackShareHosts(originalHost: String): List<String> {
+        val host = originalHost.lowercase().removePrefix("www.")
+        val parts = host.split(".").filter { it.isNotBlank() }
+        if (parts.size < 2) return emptyList()
+        val sub = parts.dropLast(2) // wwbig.lanzouq.com → wwbig；apex → 空
+        val subPrefix = if (sub.isEmpty()) "" else sub.joinToString(".") + "."
+        return FALLBACK_SHARE_ZONES
+            .flatMap { z -> listOf("${subPrefix}$z", "www.$z") }
+            .distinct()
+            .filter { isTrustedShareHost(it) }
+    }
 }

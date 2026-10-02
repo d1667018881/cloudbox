@@ -4053,3 +4053,30 @@ TA 真机反馈六项 + 另一窗口转来三件同根因加固，全部落本�
    新增回调默认值时点检所有调用方是否真的传了
 3. ensureDownloadable 曾只处理"当前一跳"，中间页会连续出现（G→A→真链），
    必须循环处理而非单发判
+
+### 45.8 V45 域名救护：DNS 失败自动换活域（2026-10-03）
+
+**起因**：TA 报 wwbig.lanzouq.com 域名好像死了。诊断两层反转——
+1. 首测（移动 UA）误判"非会员 APK 政策墙"→ TA 反问"PC 端可以正常下载"
+   → 桌面 UA 复测翻案：**该墙只拦移动端 UA**，App 全程桌面 UA 碰不到
+2. AliDNS DoH 权威确认 wwbig/www/wwt.lanzouq.com A 记录确被删除（NXDOMAIN），
+   TA 的 PC 能用是 DNS 缓存未过期
+3. 10-03 域名又复活（新 IP 组 103.216.x，此前 8.147.229.x 阿里云）——
+   实为蓝奏 DNS 迁移抖动，昨天死是过程态
+
+**实现**（DomainUtils + DirectLinkRepositoryImpl）：
+- fallbackShareHosts：保留子域换 zone 优先 + www 变体兜底；
+  候选表 5 个实测活域（lanzoui/x/b/k/p，lanzou.com 404 与 lanzol 超时不入表），
+  每次蓝奏杀域需人工维护该表
+- fetchSharePage：原 URL 正常请求；仅 UnknownHostException（DNS 失败）触发
+  回退循环，第一个 2xx 胜出；HTTP 层错误不回退（链接/服务问题换域救不了）
+- effectiveUrl 贯穿后续 origin/referer（跨域 referer 判非法的教训见 originBaseOf）
+- 顺带：识别"非会员不在支持分享"政策页（原文错别字"不在"勿改），
+  报真实原因而非误导性的"无法提取 fid"
+
+**验证**：precheck 137 文件过；Python 端到端模拟（死域→候选逐试→
+wwbig.lanzoui.com 200 真文件名）；复活后原域 200 iframe 齐全。
+
+**教训**：诊断"域名死了"要区分三态——DNS 层死（回退可救）/服务层墙
+（回退无用，报真实原因）/迁移抖动（回退让用户无感）。UA 是第二变量，
+移动端/桌面端行为差异必须双测再下结论。
