@@ -25,7 +25,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -67,9 +69,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -80,6 +84,7 @@ import com.cloudbox.app.feature.filelist.dialog.RenameDialog
 import com.cloudbox.app.feature.filelist.dialog.ShareDialog
 import com.cloudbox.app.feature.filelist.dialog.SimpleInputDialog
 import kotlinx.coroutines.launch
+import kotlin.math.min
 
 /**
  * 文件列表主界面：面包屑 + 双模式（列表/网格）+ 下拉刷新 + 分页 + 多选批量操作。
@@ -111,6 +116,62 @@ fun FileListScreen(
     uploadViewModel: com.cloudbox.app.feature.upload.UploadViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    // ==================== V44：返回目录时恢复滚动位置 ====================
+    // TA 真机反馈（2026-10-01）：文件多时下滑→进文件夹→返回，位置又回到顶部，
+    // 应与进入时一致。
+    //
+    // 思路：离开目录时快照当前滚动位置（index + offset），回到该目录时恢复。
+    // 两个关键点：
+    // 1) 返回时 VM 会重拉第 1 页（loadPage(append=false)），若快照位置超出
+    //    已加载条数，先续拉下一页直到够再 scrollToItem——恢复的才是"离开时
+    //    看到的那条"，而不是被 clamp 到页尾。
+    // 2) 快照必须在列表收缩**之前**做：livePos 由 snapshotFlow 持续刷新，
+    //    目录切换的 LaunchedEffect 里直接取值——它跑在 layout 把
+    //    firstVisibleItemIndex clamp 掉之前，拿到的是旧目录的真实位置。
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    val savedScroll = remember { mutableStateMapOf<Long, Pair<Int, Int>>() }
+    var lastFolderId by remember { mutableStateOf(state.folderStack.last().first) }
+    var livePos by remember { mutableStateOf(0 to 0) }
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            if (state.gridMode) {
+                gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+            } else {
+                listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+            }
+        }.collect { livePos = it }
+    }
+    LaunchedEffect(state.folderStack) {
+        val cur = state.folderStack.last().first
+        if (lastFolderId != cur) {
+            savedScroll[lastFolderId] = livePos
+            lastFolderId = cur
+        }
+    }
+    var restoreTarget by remember { mutableStateOf<Pair<Long, Pair<Int, Int>>?>(null) }
+    LaunchedEffect(state.folderStack.last().first) {
+        val cur = state.folderStack.last().first
+        restoreTarget = savedScroll[cur]?.let { cur to it }
+    }
+    LaunchedEffect(restoreTarget, state.displayFiles.size, state.loadingMore) {
+        val target = restoreTarget ?: return@LaunchedEffect
+        if (target.first != state.folderStack.last().first) return@LaunchedEffect
+        val (idx, off) = target.second
+        // +1 给 AutoLoadMoreRow 留位；loadingMore 在 key 里，续拉完成会再触发
+        val available = state.displayFiles.size + if (state.hasMore) 1 else 0
+        when {
+            idx < available || !state.hasMore -> {
+                val safe = min(idx, maxOf(0, available - 1))
+                if (state.gridMode) gridState.scrollToItem(safe, off)
+                else listState.scrollToItem(safe, off)
+                restoreTarget = null
+            }
+            !state.loadingMore -> viewModel.loadMore()
+        }
+    }
+
     // V30：文件类型标签开关（对齐原版 show_file_type_label，默认开）
     val showFileTypeLabel by viewModel.settingsStore.showFileTypeLabel
         .collectAsState(initial = true)
@@ -524,6 +585,7 @@ fun FileListScreen(
                     }
                 } else if (state.gridMode) {
                     LazyVerticalGrid(
+                        state = gridState,
                         columns = GridCells.Adaptive(minSize = 110.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
@@ -540,7 +602,7 @@ fun FileListScreen(
                         }
                     }
                 } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
                             ListItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) {
                                 menuFile = it
@@ -698,6 +760,17 @@ fun FileListScreen(
             title = { Text(file.name) },
             text = {
                 Column {
+                    // V44（2026-10-01 TA 真机反馈）：解析/收藏此前只能从「查看分享
+                    // 链接与提取码」二级弹窗绕（收藏甚至没接库、点了没反应），
+                    // 高频操作提为一级菜单项。
+                    MenuAction("解析（获取直链）") {
+                        menuFile = null
+                        viewModel.getShare(file, forResolve = true)
+                    }
+                    MenuAction("收藏") {
+                        menuFile = null
+                        viewModel.favoriteFile(file)
+                    }
                     MenuAction("查看分享链接与提取码") {
                         menuFile = null
                         viewModel.getShare(file)
@@ -866,7 +939,19 @@ fun FileListScreen(
         )
     }
     state.shareResult?.let { share ->
-        ShareDialog(share = share, onDismiss = viewModel::dismissShare)
+        // V44：星标接库——此前 onFavorite 没传（默认空实现），点了等于没点
+        ShareDialog(
+            share = share,
+            onDismiss = viewModel::dismissShare,
+            onFavorite = viewModel::favoriteShare
+        )
+    }
+    // V44：菜单「解析」直达——取到分享链接（拼了提取码文本）后跳解析页自动解析
+    state.pendingResolveLink?.let { link ->
+        LaunchedEffect(link) {
+            onOpenSharedLink(link)
+            viewModel.consumePendingResolve()
+        }
     }
 
     // 上传失败时：用同一个弹窗把"时间线 + 失败名单"摊开。

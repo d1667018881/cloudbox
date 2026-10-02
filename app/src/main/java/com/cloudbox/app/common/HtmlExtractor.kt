@@ -167,11 +167,54 @@ object HtmlExtractor {
     fun extractAjaxUrl(html: String): String? =
         RE_AJAX_URL.find(html)?.groupValues?.get(1)
 
+    /**
+     * 直链接口地址**全部候选**（V44，2026-10-01）。
+     *
+     * 同一接口地址在 iframe 页上以两种形态轮换下发：
+     * - 老形态 `url : 'https://apifile.woozooo.com/ajaxfile.php?file=…'`
+     * - 新形态 `var domain1='…'` / `var domain2='…'`（2026-10-01 实测出现，
+     *   下发裸域名，由调用方按 /ajaxfile.php?file=<fid> 构造）
+     * 调用方逐个试，拿到 JSON 的即有效；LinkedHashSet 保持出现顺序 + 去重。
+     */
+    fun extractAjaxUrlCandidates(html: String): List<String> {
+        val out = LinkedHashSet<String>()
+        RE_AJAX_URL.findAll(html).forEach { out.add(it.groupValues[1]) }
+        RE_DOMAIN_VAR.findAll(html).forEach { out.add(it.groupValues[1]) }
+        return out.toList()
+    }
+
+    private val RE_DOMAIN_VAR = Regex("""var\s+domain\d*\s*=\s*['"]([^'"]+)['"]""")
+
     /** kdns 值（iframe 页）：1 = 正常域，0 = 降级备用域 */
     fun extractKdns(html: String): Int? = RE_KDNS.find(html)?.groupValues?.get(1)?.toIntOrNull()
 
     /** 是否处于 acw_sc__v2 挑战页（返回 arg1；无挑战返回 null） */
     fun extractAcwArg1(html: String): String? = RE_ACW_ARG1.find(html)?.groupValues?.get(1)
+
+    // ==================== 2026-10-01 新模板（无 iframe 形态） ====================
+    //
+    // 蓝奏云分享页再次改版：无 <iframe>、无 apifile 接口。流程变成两跳：
+    //   1) 分享页 JS 直接改写下载按钮 href：
+    //      const link = document.getElementById('ddown');
+    //      link.href = '/tp/<id>?webtp=<混淆串>';
+    //   2) GET /tp/<id>?webtp=… 页面，直链由 JS 变量拼出：
+    //      var vkjxld = 'https://developer4.lanrar.com/file/';
+    //      var hyggid = '?<混淆串>';
+    //      var lanosso = '';
+    //      submit.href = vkjxld + hyggid + lanosso
+    // 直链域也换新（实测 developer4.lanrar.com，Range 请求返回真文件流）。
+    // 识别特征：/tp/ 路径 + webtp= 参数（href 初始值是 /tp/#<fid> 占位符，不含 webtp）。
+
+    /** 新模板：分享页 JS 里的 webtp 链接（'/tp/<id>?webtp=…'） */
+    fun extractWebtpHref(html: String): String? =
+        RE_WEBTP_HREF.find(html)?.groupValues?.get(1)
+
+    /** 新模板：/tp 页 JS 变量（var <name> = 'value';，值可含 +/= 等字符、不含单引号） */
+    fun extractJsVar(html: String, name: String): String? =
+        Regex("var\\s+" + name + "\\s*=\\s*'([^']*)'").find(html)
+            ?.groupValues?.get(1)?.ifBlank { null }
+
+    private val RE_WEBTP_HREF = Regex("""['"](/tp/[^'"\s]+webtp=[^'"\s]+)['"]""")
 
     /**
      * 提取直链 sign（旧版形态，按优先级尝试）。

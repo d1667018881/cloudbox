@@ -8,6 +8,7 @@ import com.cloudbox.app.core.domain.model.ShareInfo
 import com.cloudbox.app.core.domain.repository.DirectLinkRepository
 import com.cloudbox.app.core.domain.repository.DownloadRepository
 import com.cloudbox.app.core.domain.repository.FileRepository
+import com.cloudbox.app.core.domain.repository.ShareRepository
 import com.cloudbox.app.core.domain.repository.StarredFolderRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -30,6 +31,8 @@ data class FileListUiState(
     val selectionMode: Boolean = false,
     val selected: Set<Long> = emptySet(),
     val shareResult: ShareInfo? = null,
+    /** V44：菜单「解析」直达——取到分享链接后跳解析页（带提取码文本，解析页自动填充） */
+    val pendingResolveLink: String? = null,
     /** 批量操作的进度提示（串行执行，可能十几秒；为空表示没有批量任务在跑） */
     val batchProgress: String? = null,
     /** 排序方式（客户端排序，后端返回顺序不可依赖） */
@@ -102,7 +105,9 @@ class FileListViewModel @Inject constructor(
     private val directLinkRepository: DirectLinkRepository,
     private val downloadRepository: DownloadRepository,
     /** 星标文件夹（自盘常用目录聚合，对齐原版） */
-    private val starredFolderRepository: StarredFolderRepository
+    private val starredFolderRepository: StarredFolderRepository,
+    /** 收藏（V44：分享弹窗星标此前没接库——点了等于没点，收藏夹永远空） */
+    private val shareRepository: ShareRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FileListUiState())
@@ -349,7 +354,7 @@ class FileListViewModel @Inject constructor(
         it.copy(descTarget = null, descDraft = "", descLoading = false)
     }
 
-    fun getShare(file: CloudFile) {
+    fun getShare(file: CloudFile, forResolve: Boolean = false) {
         viewModelScope.launch {
             val result = if (file.isFolder) {
                 fileRepository.getDirShare(file.id)
@@ -357,10 +362,53 @@ class FileListViewModel @Inject constructor(
                 fileRepository.getFileShare(file.id)
             }
             result.onSuccess { share ->
-                _uiState.update { it.copy(shareResult = share) }
+                _uiState.update {
+                    if (forResolve) {
+                        // 拼成「链接 提取码：xxxx」一段文本：解析页 resolve() 会自动
+                        // 抠 URL + 填提取码（DomainUtils.extractShareUrls/extractPassword）
+                        val linkWithPwd = buildString {
+                            append(share.shareUrl)
+                            if (share.onof == "1" && share.pwd.isNotBlank()) {
+                                append(" 提取码：").append(share.pwd)
+                            }
+                        }
+                        it.copy(pendingResolveLink = linkWithPwd)
+                    } else {
+                        it.copy(shareResult = share)
+                    }
+                }
             }.onFailure { e ->
                 _uiState.update { it.copy(message = "获取分享失败：${e.message}") }
             }
+        }
+    }
+
+    fun consumePendingResolve() = _uiState.update { it.copy(pendingResolveLink = null) }
+
+    /**
+     * 收藏分享（V44）。
+     *
+     * 修的是什么：ShareDialog 的星标按钮此前没接 [onFavorite] 回调（走默认空实现），
+     * 点了等于没点——收藏夹永远空。这里统一落库（菜单「收藏」项与分享弹窗星标共用）。
+     */
+    fun favoriteShare(share: ShareInfo) {
+        viewModelScope.launch {
+            runCatching { shareRepository.addFavorite(share.shareUrl, share.name) }
+                .onSuccess { _uiState.update { it.copy(message = "已收藏「${share.name}」") } }
+                .onFailure { e -> _uiState.update { it.copy(message = "收藏失败：${e.message}") } }
+        }
+    }
+
+    /** 菜单「收藏」直达项：先取分享链接再入收藏（收藏夹以分享链接为主键） */
+    fun favoriteFile(file: CloudFile) {
+        viewModelScope.launch {
+            val result = if (file.isFolder) {
+                fileRepository.getDirShare(file.id)
+            } else {
+                fileRepository.getFileShare(file.id)
+            }
+            result.onSuccess { share -> favoriteShare(share) }
+                .onFailure { e -> _uiState.update { it.copy(message = "获取分享链接失败：${e.message}") } }
         }
     }
 

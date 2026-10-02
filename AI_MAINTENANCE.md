@@ -4011,3 +4011,45 @@ clip(24) → background → clickable → padding(4)。药丸本体恒 48dp；
    自定义容器必须显式钉高度，禁止裸放 wrap 内容 + fillMaxHeight 子项
 2. 布局语义 bug 静态检查不可达（precheck 只查括号/符号残留），新增
    topBar 自定义内容后应至少一次真机/预览验证再出包
+
+### 45.7 V44 六项真机反馈 + 直链解析三件同步加固（2026-10-02）
+
+TA 真机反馈六项 + 另一窗口转来三件同根因加固，全部落本轮：
+
+**UI 六项（TA 报障）**：
+1. 文件弹窗缺「解析」→ 菜单新增一级项：getShare(forResolve) 拼链接+提取码文本
+   → pendingResolveLink → 跳解析页自动解析（DomainUtils 自动抠 URL/填码）
+2. 收藏夹永远空 → ShareDialog onFavorite 从引入起就没接库（默认空实现）！
+   接 shareRepository.addFavorite；菜单另加「收藏」直达项（先取链接再入库）
+3. 返回丢滚动位置 → FileListScreen 每目录快照 listState/gridState 位置
+   （snapshotFlow→livePos，folderStack 变更时存 savedScroll[folderId]）；
+   恢复时位置超出已加载条数先续拉 loadMore 再 scrollToItem
+4. 抽屉太宽 → 360dp 收 280dp
+5. 账号信息合并抽屉头部 → 头部可点直达账号页（带 › 箭头），列表项删除
+6. 下载不管用 → 根因见下
+
+**直链解析三件（同根因：蓝奏云服务端又改版）**：
+① iframe 页接口地址新形态 var domain1/domain2='…'（与 url:'…' 轮换下发）
+   → extractAjaxUrlCandidates 并列收集全部候选，逐个试到返回 JSON 为止
+② dom 子域轮换（slssctm→slsstm2→…）→ 始终用返回 dom 动态拼 +
+   裸域名补 https:// scheme
+③ 直链首 GET 返回 **gzip 裸包裹的 acw 挑战页**（1f 8b 头、无 Content-Encoding，
+   OkHttp 不解压）——V44 首版曾误判"真文件流"（\x1f\x8b 被当文件）。
+   ensureDownloadable 重写为四形态循环（≤3 轮）：
+   G=gzip挑战 → gunzip → AcwScV2 静态算 cookie（实测直链域挑战同为纯 arg1
+   常量表，静态可解，WebView 仅兜底）→ 写共享 CookieJar → 带cookie重试
+   B=明文挑战（同上）；A=down_r 验证页 → POST ajax.php el=1..3 依次试；
+   C=真文件 → 返回。probeMiddlePage 读 64KB：gzip 魔数优先于 Content-Type。
+
+**实测证据链（2026-10-01/02）**：gzip 解压后 var arg1='7BE4...'（静态挑战）；
+算 cookie 后二次请求不再给挑战页（服务端已认）；随后落 down_r 验证页——
+该页是"网络异常验证"风控（页面临时输出），数据中心 IP 必触发、手机 IP
+大概率不触发。el=1 返回 zt=0 验证码错误 → resolveVerifiedUrl 改试 1..3。
+
+**教训**：
+1. 二进制响应判"真文件"必须先排 gzip 魔数（1f 8b）——本文件正是 zip/gzip
+   高发内容，\x1f\x8b 恰好也是合法文件头，单看字节头会误判（本轮亲踩）
+2. UI 回调参数带默认空实现（onFavorite = {}）是"接线型 bug"温床——
+   新增回调默认值时点检所有调用方是否真的传了
+3. ensureDownloadable 曾只处理"当前一跳"，中间页会连续出现（G→A→真链），
+   必须循环处理而非单发判

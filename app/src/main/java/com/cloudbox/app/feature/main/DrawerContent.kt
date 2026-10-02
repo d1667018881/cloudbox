@@ -1,20 +1,25 @@
 package com.cloudbox.app.feature.main
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Badge
@@ -54,14 +59,30 @@ fun MainDrawerContent(
     onOpenAbout: () -> Unit,
     onLogout: () -> Unit
 ) {
-    ModalDrawerSheet {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(accountName, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "云匣",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+    ModalDrawerSheet(modifier = Modifier.width(280.dp)) {
+        // V44（2026-10-01 TA 真机反馈）：①抽屉太宽，360dp 收窄到 280dp；
+        // ②账号信息合并进头部——点头部即跳账号页（原列表「账号信息」入口删除）
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onClose(); onOpenAccount() }
+                .padding(16.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(accountName, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "云匣",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "账号信息",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         HorizontalDivider()
@@ -81,7 +102,7 @@ fun MainDrawerContent(
             onClick = { onClose(); onOpenAnnouncement() }
         )
         HorizontalDivider()
-        DrawerEntry("账号信息", Icons.Filled.Person, onClick = { onClose(); onOpenAccount() })
+        // V44：账号信息入口已合并进抽屉头部（点头像区直达），此处不再单列
         DrawerEntry("设置", Icons.Filled.Settings, onClick = { onClose(); onOpenSettings() })
         DrawerEntry(
             "关于",

@@ -218,6 +218,13 @@ class DirectLinkRepositoryImpl @Inject constructor(
         val fid = HtmlExtractor.extractFileId(html)
             ?: throw ApiError.Business(-1, "无法提取文件 fid（页面结构可能已变化）")
 
+        // 3.5) 新模板（2026-10-01 实测，无 iframe 形态）：分享页 JS 直接下发
+        //      /tp/<id>?webtp=…，/tp 页 JS 变量拼直链（vkjxld + hyggid + lanosso）。
+        //      老模板（iframe → apifile）分支保留，两代页面并存期间各自识别。
+        HtmlExtractor.extractWebtpHref(html)?.let { webtpHref ->
+            return resolveViaWebtp(webtpHref, origin, shareUrl, fileName)
+        }
+
         // 4) iframe 页（/fn?…）→ wp_sign / ajaxdata / kdns
         val iframeSrc = HtmlExtractor.extractIframe(html)
             ?: throw ApiError.Business(-1, "分享页未包含下载 iframe（文件可能已失效或需要提取码）")
@@ -257,36 +264,52 @@ class DirectLinkRepositoryImpl @Inject constructor(
             .add("ves", "1")
         if (password.isNotBlank()) form.add("p", password)
 
-        // V42（N10）：直链接口地址 —— 优先取 iframe 页 JS 下发的完整 URL。
+        // V44（2026-10-01 同步加固）：直链接口地址 —— 并列收集 iframe 页 JS 下发的
+        // **全部候选**逐个试，拿到合法 JSON 的第一个即用。
         //
-        // ⚠️ 2026-09-28 实测（用户真机 407 报障驱动）：服务端已把直链接口迁到
-        // 独立 API 域（apifile.woozooo.com），分享页同域的老路径 /ajaxfile.php
-        // 返回 HTTP 407（空响应体）。对照实验：同域 407 / 页面下发域 200+zt=1。
-        // 「直链接口与分享页同域」这一 V7 时代的假设已被服务端改版废除。
-        // 下发的 URL 域与 file 参数成对出现，直接整体使用；兼容协议相对(//)写法。
-        // 老页面无此 JS 字段时回落同域构造（V7 逆向时的形态）。
-        val ajaxUrlFromPage = HtmlExtractor.extractAjaxUrl(fnHtml)
-        val ajaxUrl = when {
-            ajaxUrlFromPage != null -> when {
-                ajaxUrlFromPage.startsWith("//") -> "https:$ajaxUrlFromPage"
-                else -> absolutize(ajaxUrlFromPage, origin)
+        // ⚠️ 候选为什么有多个：同一直链接口地址在页面上以两种形态轮换下发——
+        //   老形态  url : 'https://apifile.woozooo.com/ajaxfile.php?file=…'
+        //   新形态  var domain1='…' / var domain2='…'（2026-10-01 实测出现）
+        // 加上无任何下发时的同域构造回落（V7 形态），共三层候选：
+        //   407/HTML 的候选跳下一个，直到某个返回 JSON（含 zt）为止。
+        //   ⚠️ 裸域名候选按老接口路径 /ajaxfile.php?file=<fid> 构造。
+        val ajaxCandidates = buildList {
+            HtmlExtractor.extractAjaxUrlCandidates(fnHtml).forEach { raw ->
+                when {
+                    raw.startsWith("http") -> add(raw)
+                    raw.startsWith("//") -> add("https:$raw")
+                    raw.startsWith("/") -> add("${origin.trimEnd('/')}$raw")
+                    // 裸域名（domain1/domain2 形态）
+                    else -> add("https://${raw.trimEnd('/')}/ajaxfile.php?file=$fid")
+                }
             }
-            else -> "${origin.trimEnd('/')}/ajaxfile.php?file=$fid"
+            // 老页面回落：页面无任何下发时同域构造（V7 逆向时的形态）
+            add("${origin.trimEnd('/')}/ajaxfile.php?file=$fid")
+        }.distinct()
+        var body: String? = null
+        for (cand in ajaxCandidates) {
+            val b = runCatching {
+                okHttp.newCall(
+                    Request.Builder()
+                        .url(cand)
+                        .header("Referer", iframeUrl)
+                        .header("Accept-Language", "zh-CN,zh;q=0.9")
+                        .post(form.build())
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) null else resp.body?.string().orEmpty()
+                }
+            }.getOrNull() ?: continue
+            // 接口有效性以「响应是 JSON」为准（407 空体 / HTML 错误页都跳过）
+            if (runCatching { JSONObject(b) }.isSuccess) {
+                body = b
+                break
+            }
         }
-        val body = okHttp.newCall(
-            Request.Builder()
-                .url(ajaxUrl)
-                .header("Referer", iframeUrl)
-                .header("Accept-Language", "zh-CN,zh;q=0.9")
-                .post(form.build())
-                .build()
-        ).execute().use { resp ->
-            if (!resp.isSuccessful) throw ApiError.Server(resp.code)
-            resp.body?.string().orEmpty()
-        }
+        val bodySafe = body
+            ?: throw ApiError.Business(-1, "直链接口全部候选不可用（页面结构可能已变化）")
 
-        val json = runCatching { JSONObject(body) }.getOrNull()
-            ?: throw ApiError.Business(-1, "直链接口响应异常: ${body.take(120)}")
+        val json = JSONObject(bodySafe)
         val zt = json.optInt("zt", -1)
         if (zt != 1) {
             throw ApiError.Business(zt, json.optString("inf").ifBlank { "解析失败（zt=$zt）" })
@@ -298,7 +321,12 @@ class DirectLinkRepositoryImpl @Inject constructor(
 
         // 6) 直链 = dom + "/file/" + url
         //    注意：新版 url 以 '?' 开头，不能去掉前导字符
-        val directUrl = "${dom.trimEnd('/')}/file/${path.removePrefix("/")}"
+        //    V44（2026-10-01 同步加固）：dom 子域已观察多轮换（slssctm → slsstm2 →
+        //    developer4.lanrar.com…），必须始终用**返回的 dom**动态拼；且新形态
+        //    dom 可能不带 scheme（裸域名），统一补 https://（OkHttp 遇无 scheme URL
+        //    直接抛 IllegalArgumentException）。
+        val domNorm = if (dom.startsWith("http")) dom else "https://${dom.trimEnd('/')}"
+        val directUrl = "${domNorm.trimEnd('/')}/file/${path.removePrefix("/")}"
         val link = DirectLink(url = directUrl, fileName = fileName, referer = shareUrl)
 
         // 7) 探测是否为"验证中间页"（IP 风控时会先返回一个 HTML 验证页而非文件）。
@@ -307,66 +335,142 @@ class DirectLinkRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 探测直链是否可直接下载；若返回的是验证中间页，则二次解析出真实下载地址。
+     * 新模板（2026-10-01，无 iframe 形态）解析。
      *
-     * **2026-09 v1.3.4.9 对照实测：直链域名会下发两种截然不同的中间页，必须都处理。**
+     * 流程：分享页 JS 下发 '/tp/<id>?webtp=…' → GET 该页 → 直链由 JS 变量拼出：
+     * `vkjxld + hyggid + lanosso`（lanosso 实测为空串，保留拼接以防服务端启用）。
      *
-     * ┌ 形态 A：业务验证页（老形态，domain=developer2.lanrar.com）
-     * │   页面含 down_r(el) 与参数 file='…' / sign='…'
-     * │   → POST 同目录 ajax.php {file, el, sign} → {"zt":1,"url":"真实下载地址"}
-     * ├ 形态 B：acw 挑战页（新形态，domain=*.dmpdmp.com）
-     * │   页面形如 <html><script>var arg1='40位HEX';(function(a,c){…})(a0i,0x760bf)…
-     * │   ⚠️ 与分享页那种「纯 arg1 常量表」挑战不同：这里是一段**混淆 JS**，
-     * │      必须在真实 JS 引擎里跑完才会 Set-Cookie acw_sc__v2。
-     *       实测同一 session 连续请求 3 次仍返回挑战页 → 靠重试/换 UA 都过不去。
-     * │   → 原版 v1.3.4.9 的做法（home_func.lua:11875 起）：
-     * │     识别「var arg1=」后走 **WebView「带 header 重载」**，借系统 WebView
-     * │     执行 JS 拿到 challenge cookie，再回主进程继续下载。
-     * │   本实现同一思路：把挑战页丢给 [DirectLinkWebViewBridge]（WebView 执行），
-     * │   拿回 acw_sc__v2 写进 CookieJar，然后重试**同一条直链**。
-     * └ 形态 C：都不是 → 原样返回（真文件流）
+     * ⚠️ 直链域（developer4.lanrar.com）首次 GET 返回的是 **gzip 包裹的 acw
+     * 挑战页**（V44 同步加固时实测推翻了此前"返回真文件流"的误判）——由
+     * [ensureDownloadable] 识别并拆挑战后才是真文件，见其注释形态 G。
      *
-     * 只读前 1KB 判断，不下载正文；任何异常都回落原链（不阻塞解析）。
+     * 已知边界：带提取码的分享在新模板下的提交方式尚未实测（手上样本无密码），
+     * 缺 vkjxld/hyggid 时抛带特征的业务错误，便于真机反馈定位。
+     */
+    private suspend fun resolveViaWebtp(
+        webtpHref: String,
+        origin: String,
+        shareUrl: String,
+        fileName: String
+    ): DirectLink {
+        val tpUrl = absolutize(webtpHref, origin)
+        var tpHtml = getPage(tpUrl, shareUrl)
+        tpHtml = solveAcwIfNeeded(tpHtml, tpUrl, origin)
+        val base = HtmlExtractor.extractJsVar(tpHtml, "vkjxld")
+            ?: throw ApiError.Business(-1, "新模板 /tp 页缺 vkjxld（页面结构可能又变化，或需要提取码）")
+        val h = HtmlExtractor.extractJsVar(tpHtml, "hyggid")
+            ?: throw ApiError.Business(-1, "新模板 /tp 页缺 hyggid（页面结构可能又变化）")
+        val lanosso = HtmlExtractor.extractJsVar(tpHtml, "lanosso") ?: ""
+        val directUrl = base + h + lanosso
+        // referer 用分享页地址：直链域若校验来源，同站分享页最保险
+        return ensureDownloadable(DirectLink(url = directUrl, fileName = fileName, referer = shareUrl))
+    }
+
+    /**
+     * 探测直链是否可直接下载；不能则逐级拆中间页。
+     *
+     * **2026-10-01 V44 同步加固：直链域一次解析里可能按序出现四种形态。**
+     *
+     * ┌ 形态 G：gzip 包裹的 acw 挑战页（新！⚠️ 不带 Content-Encoding 头，
+     * │   OkHttp 不会透明解压，裸字节 1f 8b 开头——旧探测按 Content-Type/明文
+     * │   匹配全部漏判，用户会把 2.7KB 的 gzip 挑战页当文件存下来）
+     * │   → gunzip → 静态 arg1 挑战 → [AcwScV2] 算 cookie 写共享 CookieJar
+     * │     → 带 cookie 重试**同一条直链**（2026-10-01 实测：干净 IP 上即为
+     * │       真文件；被风控的 IP 会落到形态 A）
+     * ├ 形态 B：明文 acw 挑战页（var arg1='40位HEX'）
+     * │   → 同上先静态算（主站同款算法，直链域挑战同为纯 arg1 常量表）；
+     * │     静态算不动（混淆 JS 挑战）再走 [DirectLinkWebViewBridge] 兜底
+     * ├ 形态 A：业务验证页（down_r + file/sign → POST 同目录 ajax.php）
+     * │   → zt=1 的 url 即真实下载地址（IP 风控时出现）
+     * └ 形态 C：真文件流 → 原样返回
+     *
+     * 只读前 64KB 判断（gzip 挑战页需要完整流才能解；探测连接是一次性的，
+     * 真实下载是后续独立请求，读到 64KB 即断开无副作用）；任何异常回落原链。
      */
     private fun ensureDownloadable(link: DirectLink): DirectLink = runCatching {
-        val probe = okHttp.newCall(
-            Request.Builder()
-                .url(link.url)
-                .header("Range", "bytes=0-1023")
-                .header("Referer", link.referer)
-                .build()
-        ).execute()
-        probe.use { resp ->
-            if (!resp.isSuccessful) return@runCatching link
-            val ct = resp.header("Content-Type").orEmpty()
-            if (!ct.contains("text/html", ignoreCase = true)) return@runCatching link
-            // 只读前 1KB：避免 Range 不被支持时把整个文件读进内存。
-            // 用 byteStream 而非 okio —— okio 只是 okhttp 的传递依赖，编译期不可见。
-            val input = resp.body?.byteStream() ?: return@runCatching link
-            val buf = ByteArray(1024)
-            val n = input.read(buf, 0, buf.size)
-            if (n <= 0) return@runCatching link
-            val head = String(buf, 0, n, Charsets.UTF_8)
-
-            // ⚠️ 每个分支都必须 return@use（显式类型），否则 Kotlin 会把整块推断成
-            //    Nothing，导致 use{} 的返回值类型与函数声明的 DirectLink 不符而编译失败。
-            // 形态 A：业务验证页
-            if (head.contains("down_r(")) {
-                val real = resolveVerifiedUrl(link.url, head)
-                return@use if (real != null) link.copy(url = real) else link
-            }
-
-            // 形态 B：acw 挑战页 —— 必须真跑 JS 才能拿到 cookie
-            if (head.contains("var arg1=") || head.contains("acw_sc__v2")) {
-                val cookie = challengeCookieFor(link)
-                if (cookie != null) {
-                    putChallengeCookie(link.url, cookie)
-                    return@use link
+        var current = link
+        repeat(3) {
+            val head = probeMiddlePage(current) ?: return@runCatching current
+            when {
+                // 形态 A：业务验证页 → POST 同目录 ajax.php 拿真实下载地址
+                head.contains("down_r(") -> {
+                    val real = resolveVerifiedUrl(current.url, head) ?: return@runCatching current
+                    current = current.copy(url = real)
+                }
+                // 形态 B/G：acw 挑战 —— 静态算法优先，WebView 兜底
+                else -> {
+                    val staticValue = AcwScV2.compute(head)?.substringAfter('=')
+                    if (staticValue != null) {
+                        putAcwCookie(current.url, staticValue)
+                    } else {
+                        val wvCookie = challengeCookieFor(current) ?: return@runCatching current
+                        putChallengeCookie(current.url, wvCookie)
+                    }
+                    // 带 cookie 下一轮重试同一直链（落在形态 A 或真文件）
                 }
             }
-            return@use link
         }
+        current
     }.getOrDefault(link)
+
+    /**
+     * 探测直链响应：是中间页（gzip 挑战 / 明文挑战 / 验证页）返回其可读文本，
+     * 是真文件流返回 null。
+     *
+     * gzip 魔数（1f 8b）判定优先于一切 Content-Type——挑战页 gzip 是**不带
+     * Content-Encoding 的裸 gzip**，OkHttp 原样透传；解开后无挑战/验证标记的
+     * gzip 是真 .gz 文件，同样返回 null（解不出完整流按 null 处理，不误杀）。
+     */
+    private fun probeMiddlePage(link: DirectLink): String? = runCatching {
+        okHttp.newCall(
+            Request.Builder()
+                .url(link.url)
+                .header("Referer", link.referer)
+                .build()
+        ).execute().use { resp ->
+            if (!resp.isSuccessful) return@runCatching null
+            val input = resp.body?.byteStream() ?: return@runCatching null
+            // 64KB 上限：挑战/验证页实测 < 5KB；真文件读到 64KB 即可判"非 HTML"
+            val buf = ByteArray(64 * 1024)
+            var n = 0
+            while (n < buf.size) {
+                val r = input.read(buf, n, buf.size - n)
+                if (r <= 0) break
+                n += r
+            }
+            if (n < 2) return@runCatching null
+            val head = if (buf[0] == 0x1f.toByte() && buf[1] == 0x8b.toByte()) {
+                // gunzip；截断的 gzip（真 .gz 文件被 64KB 截断）解不出挑战标记 → 空串 → null
+                runCatching {
+                    java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(buf, 0, n))
+                        .use { s -> String(s.readBytes(), Charsets.UTF_8) }
+                }.getOrDefault("")
+            } else {
+                String(buf, 0, n, Charsets.UTF_8)
+            }
+            when {
+                head.contains("var arg1=") || head.contains("acw_sc__v2") -> head
+                head.contains("down_r(") -> head
+                else -> null
+            }
+        }
+    }.getOrNull()
+
+    /** 把静态算出的 acw_sc__v2 写进共享 CookieJar（与 [solveAcwIfNeeded] 同域规则） */
+    private fun putAcwCookie(url: String, value: String) {
+        if (value.isBlank()) return
+        val host = url.toHttpUrlOrNull()?.host ?: return
+        runCatching {
+            apiClient.cookieJar.putCookie(
+                okhttp3.Cookie.Builder()
+                    .name("acw_sc__v2")
+                    .value(value)
+                    .domain(host.removePrefix("www."))
+                    .path("/")
+                    .build()
+            )
+        }
+    }
 
     /**
      * 让 WebView 执行挑战页 JS，取回 acw_sc__v2 的完整 `name=value` 串。
@@ -407,22 +511,28 @@ class DirectLinkRepositoryImpl @Inject constructor(
         val sign = Regex("""['"]sign['"]\s*:\s*'([^']+)'""").find(html)?.groupValues?.get(1)
             ?: return null
         val ajaxUrl = pageUrl.substringBeforeLast("/") + "/ajax.php"
-        val form = FormBody.Builder()
-            .add("file", file)
-            .add("el", "1")
-            .add("sign", sign)
-            .build()
-        val body = okHttp.newCall(
-            Request.Builder()
-                .url(ajaxUrl)
-                .header("Referer", pageUrl)
-                .post(form)
+        // V44（2026-10-01）：验证页实测有 down_r(1)/down_r(2)/down_r(3) 三个按钮，
+        // 单 el=1 实测返回 zt=0「验证码错误」——依次试 1..3，拿到 zt=1 的 url 即真链。
+        for (el in 1..3) {
+            val form = FormBody.Builder()
+                .add("file", file)
+                .add("el", el.toString())
+                .add("sign", sign)
                 .build()
-        ).execute().use { it.body?.string().orEmpty() }
-        return runCatching { JSONObject(body) }
-            .getOrNull()
-            ?.optString("url")
-            ?.takeIf { it.startsWith("http") }
+            val body = okHttp.newCall(
+                Request.Builder()
+                    .url(ajaxUrl)
+                    .header("Referer", pageUrl)
+                    .post(form)
+                    .build()
+            ).execute().use { it.body?.string().orEmpty() }
+            val url = runCatching { JSONObject(body) }
+                .getOrNull()
+                ?.optString("url")
+                ?.takeIf { it.startsWith("http") }
+            if (url != null) return url
+        }
+        return null
     }
 
     // ==================== helpers ====================
