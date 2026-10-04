@@ -47,10 +47,10 @@ class AccountViewModel @Inject constructor(
     /** 账户概览页（myfile.php?item=1&v2，与 getUserProfile 同页——已验证存在） */
     private fun diskBase() = domainInterceptor.snapshot().diskMain.trimEnd('/')
 
-    fun accountCenterUrl() = "$diskBase()/myfile.php?item=1&v2"
+    fun accountCenterUrl() = "${diskBase()}/myfile.php?item=1&v2"
 
     /** 网页版文件管理（与 WebViewUploadActivity 同款 URL 形态——已验证存在） */
-    fun webDiskUrl() = "$diskBase()/mydisk.php?item=files&action=index"
+    fun webDiskUrl() = "${diskBase()}/mydisk.php?item=files&action=index"
 
     /**
      * 变更手机号 / 注销账户：必须短信验证，App 侧做不了（ProfileRepositoryImpl

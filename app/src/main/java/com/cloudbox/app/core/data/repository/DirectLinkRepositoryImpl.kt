@@ -66,8 +66,8 @@ class DirectLinkRepositoryImpl @Inject constructor(
             runCatching {
                 // 0) 缓存命中（TTL 1 小时）。force=true 跳过：下载场景直链时效仅约
                 //    30 分钟且挑战 cookie 逐次轮换，缓存的直链可能已死——宁可重解析
+                val cacheKey = if (password.isBlank()) shareUrl else "$shareUrl|pwd=$password"
                 if (!force) {
-                    val cacheKey = if (password.isBlank()) shareUrl else "$shareUrl|pwd=$password"
                     db.directLinkDao().getFresh(cacheKey, System.currentTimeMillis() - 3600_000L)?.let {
                         return@runCatching DirectLink(it.directUrl, it.fileName, it.referer)
                     }
