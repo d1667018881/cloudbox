@@ -294,7 +294,13 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(Routes.ACCOUNT) {
                             com.cloudbox.app.feature.account.AccountScreen(
-                                onBack = { navController.popBackStack() }
+                                onBack = { navController.popBackStack() },
+                                // V47：账号面板自带的退出登录（与抽屉退出同款导航）
+                                onLogout = {
+                                    navController.navigate(Routes.LOGIN) {
+                                        popUpTo(Routes.MAIN) { inclusive = true }
+                                    }
+                                }
                             )
                         }
                         composable(Routes.ANNOUNCEMENT) {

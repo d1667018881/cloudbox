@@ -16,6 +16,12 @@ object UserProfileHtmlParser {
 
     private val RE_USER_NAME =
         Regex("<div class=\"c_topr\">(.*?)<span", RegexOption.DOT_MATCHES_ALL)
+    // V47：手机号（c_top1，嵌套在 c_topr 里，脱敏形态 151****6328）与会员等级（ulv1）
+    private val RE_PHONE =
+        Regex("<div class=\"c_top1\">(.*?)</div>", RegexOption.DOT_MATCHES_ALL)
+    private val RE_LEVEL =
+        Regex("<span class=\"ulv1\">(.*?)</span>", RegexOption.DOT_MATCHES_ALL)
+    private val RE_HTTP_URL = Regex("https?://[^\\s\"'<]+")
     private val RE_DISPLAY_NAME =
         Regex("<div class=\"c_top1\">(.*?)</div>", RegexOption.DOT_MATCHES_ALL)
 
@@ -39,13 +45,22 @@ object UserProfileHtmlParser {
 
     fun parse(html: String): UserProfile {
         if (html.isBlank()) return UserProfile()
-        val shareLink = RE_SHARE_1.find(html)?.groupValues?.get(1)
+        // V47（2026-10-04）：页面改版后旧正则会抓到导航区整段 HTML（TA 真机
+        // 实锤：显示 <span>文件</span></a>… 一坨源码）。清洗：含 '<' 的抓取结果
+        // 视为被污染，从中提取第一条 http 链接；提取不到按 null 处理（显示层
+        // 给"未获取到"，绝不再把 HTML 原文当链接展示）。
+        val shareLinkRaw = RE_SHARE_1.find(html)?.groupValues?.get(1)
             ?: RE_SHARE_2.find(html)?.groupValues?.get(1)
+        val shareLink = shareLinkRaw?.let { raw ->
+            if (raw.contains('<')) RE_HTTP_URL.find(raw)?.groupValues?.get(1) else raw
+        }
             ?: RE_SHARE_QR.find(html)?.groupValues?.get(1)
         return UserProfile(
             userName = RE_USER_NAME.find(html)?.groupValues?.get(1).clean(),
             displayName = RE_DISPLAY_NAME.find(html)?.groupValues?.get(1).clean(),
             shareLink = shareLink.clean(),
+            phone = RE_PHONE.find(html)?.groupValues?.get(1).clean(),
+            level = RE_LEVEL.find(html)?.groupValues?.get(1).clean(),
             shareLinkCode = RE_SHARE_CODE.find(html)?.groupValues?.get(1).clean(),
             externalLinkTitle = RE_UBT.find(html)?.groupValues?.get(1).clean(),
             externalLinkSummary = RE_USM.find(html)?.groupValues?.get(1).clean(),

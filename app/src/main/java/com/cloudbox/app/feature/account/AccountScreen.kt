@@ -1,5 +1,7 @@
 package com.cloudbox.app.feature.account
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,18 +11,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonOff
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -39,176 +49,155 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 
 private enum class AccountDialog { PASSWORD, EXTERNAL_LINK, PUBLISHER, SHARE_CODE }
 
 /**
- * 账号面板（对齐原版 `account.lua` 的「管理账号」弹窗内容）。
+ * 管理账号面板（V47 重写，对齐原版蓝云「管理账号」弹窗截图，2026-10-03）。
  *
- * 展示：显示名 / 用户名 / 文件数 / 累计下载 / 个人分享链(+提取码) / 外链标题简介 / 发布者。
- * 操作：修改密码、外链设置、显示发布者、个人分享链 —— 对应 task=8/10/15/7。
+ * 结构：头部（用户 ID 粗体 + 绑定手机灰色小字 + 会员等级徽章）+ 9 项功能列表：
+ * 个人中心 / 网页版 / 修改密码 / 外链设置 / 昵称设置 / 个人分享链 / 变更手机号 /
+ * 注销账户 / 退出登录。
+ *
+ * 前情：旧版是「信息展示页」——个人分享链直接展示 [UserProfile.shareLink]
+ * 原文，页面改版后解析正则抓到导航区整段 HTML，TA 真机看到一坨网页源码。
+ * 新版改为蓝云同款「入口列表」；shareLink 解析已加污染清洗（含 '<' 时提取
+ * http 链接，提不到显示"未获取"），在「个人分享链」对话框里展示与复制。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountScreen(
     onBack: () -> Unit,
+    onLogout: () -> Unit = onBack,
     viewModel: AccountViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<AccountDialog?>(null) }
+    // 退出登录确认（与 MainScreen 抽屉退出同款：不可撤销，先问一句）
+    var confirmLogout by remember { mutableStateOf(false) }
 
-    // ⚠️ 局部函数必须在引用它的 lambda 之前声明（词法作用域）
     fun copyToClipboard(label: String, text: String) {
         val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                 as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
     }
 
-    LaunchedEffect(state.message) {
-        state.message?.let {
-            snackbar.showSnackbar(it)
-            viewModel.dismissMessage()
+    // VM 消息 → Snackbar
+    LaunchedEffect(Unit) {
+        viewModel.uiState.collect { st ->
+            st.message?.let { snackbar.showSnackbar(it); viewModel.dismissMessage() }
         }
+    }
+    // 退出登录完成 → 切登录页（先清 Cookie 再导航，见 VM.logout 注释）
+    LaunchedEffect(Unit) {
+        viewModel.loggedOut.collect { onLogout() }
+    }
+
+    if (confirmLogout) {
+        AlertDialog(
+            onDismissRequest = { confirmLogout = false },
+            title = { Text("退出登录") },
+            text = { Text("将清除本机保存的登录凭证与密码（云端数据不受影响）。确定退出？") },
+            confirmButton = {
+                TextButton(onClick = { confirmLogout = false; viewModel.logout() }) {
+                    Text("退出", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("取消") } }
+        )
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("账号信息") },
+                title = { Text("管理账号") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
         Column(
             Modifier
-                .fillMaxSize()
                 .padding(padding)
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp)
         ) {
-            when {
-                state.loading -> Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) { CircularProgressIndicator(Modifier.size(28.dp)) }
-
-                state.error != null -> {
-                    Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = viewModel::refresh) { Text("重试") }
-                }
-
-                else -> {
-                    val p = state.profile ?: return@Column
-
+            val p = state.profile
+            // ── 头部：ID 粗体 + 手机灰 + 会员徽章（对齐蓝云截图） ──
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
                     Text(
-                        p.publisherName ?: p.displayName ?: p.userName ?: "云匣用户",
-                        style = MaterialTheme.typography.headlineSmall
+                        p?.userName ?: "…",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    if (!p.userName.isNullOrBlank()) {
+                    p?.phone?.takeIf { it.isNotBlank() }?.let {
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            p.userName,
-                            style = MaterialTheme.typography.bodySmall,
+                            it,
+                            fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-
-                    Spacer(Modifier.height(16.dp))
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            InfoLine("文件数", p.fileCount ?: "—")
-                            InfoLine("累计下载", p.downloadCount ?: "—")
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("个人分享链", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(6.dp))
-                            if (!p.shareLink.isNullOrBlank()) {
-                                Text(
-                                    p.shareLink,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                if (!p.shareLinkCode.isNullOrBlank()) {
-                                    Text(
-                                        "提取码：${p.shareLinkCode}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                                TextButton(onClick = {
-                                    val text = buildString {
-                                        append(p.shareLink)
-                                        if (!p.shareLinkCode.isNullOrBlank()) append("?pass=${p.shareLinkCode}")
-                                    }
-                                    copyToClipboard("分享链", text)
-                                }) { Text("复制链接") }
-                            } else {
-                                Text(
-                                    "未获取到",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("外链（个人主页）", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(6.dp))
-                            InfoLine("标题", p.externalLinkTitle ?: "—")
-                            InfoLine("简介", p.externalLinkSummary ?: "—")
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("显示发布者", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(6.dp))
-                            InfoLine("状态", if (p.publisherVisible) "显示" else "隐藏")
-                            InfoLine("昵称", p.publisherName ?: "—")
-                        }
-                    }
-
-                    Spacer(Modifier.height(20.dp))
-                    Text("账号设置", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { dialog = AccountDialog.PASSWORD },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("修改密码") }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { dialog = AccountDialog.EXTERNAL_LINK },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("外链设置") }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { dialog = AccountDialog.PUBLISHER },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("显示发布者") }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { dialog = AccountDialog.SHARE_CODE },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("个人分享链访问码") }
+                }
+                p?.level?.takeIf { it.isNotBlank() }?.let { lv ->
+                    Text(
+                        lv,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .background(
+                                MaterialTheme.colorScheme.primary,
+                                RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
                 }
             }
+            HorizontalDivider()
+
+            // ── 9 项功能列表（对齐蓝云） ──
+            AccountItem("个人中心", Icons.Filled.Person) {
+                CookieWebPageActivity.start(context, viewModel.accountCenterUrl(), "个人中心")
+            }
+            AccountItem("网页版", Icons.Filled.Public) {
+                CookieWebPageActivity.start(context, viewModel.webDiskUrl(), "网页版")
+            }
+            AccountItem("修改密码", Icons.Filled.Password) { dialog = AccountDialog.PASSWORD }
+            AccountItem("外链设置", Icons.Filled.Link) { dialog = AccountDialog.EXTERNAL_LINK }
+            AccountItem("昵称设置", Icons.Filled.Person) {
+                // task=15：显示发布者开关 + 昵称输入（同一对话框，语义覆盖）
+                dialog = AccountDialog.PUBLISHER
+            }
+            AccountItem("个人分享链", Icons.Filled.Share) { dialog = AccountDialog.SHARE_CODE }
+            AccountItem("变更手机号", Icons.Filled.Smartphone) {
+                // 需短信验证，App 侧做不了 → 打开官方账户页（页内有入口）
+                CookieWebPageActivity.start(context, viewModel.accountSecurityUrl(), "变更手机号")
+            }
+            AccountItem("注销账户", Icons.Filled.PersonOff) {
+                // 高危操作 + 短信验证 → 官方账户页
+                CookieWebPageActivity.start(context, viewModel.accountSecurityUrl(), "注销账户")
+            }
+            AccountItem(
+                "退出登录",
+                Icons.AutoMirrored.Filled.ExitToApp,
+                danger = true
+            ) { confirmLogout = true }
         }
     }
 
@@ -232,28 +221,47 @@ fun AccountScreen(
             onDismiss = { dialog = null },
             onConfirm = { show, name -> dialog = null; viewModel.setPublisher(show, name) }
         )
-        AccountDialog.SHARE_CODE -> ShareCodeDialog(
+        AccountDialog.SHARE_CODE -> ShareLinkDialog(
             submitting = state.submitting,
+            shareLink = state.profile?.shareLink,
+            shareLinkCode = state.profile?.shareLinkCode,
             onDismiss = { dialog = null },
+            onCopyLink = { link, code ->
+                val text = if (code.isNullOrBlank()) link
+                else "$link?pass=$code"
+                copyToClipboard("分享链", text)
+                viewModel.postMessage("已复制分享链")
+            },
             onConfirm = { enable, code -> dialog = null; viewModel.setPersonalLinkCode(enable, code) }
         )
         null -> {}
     }
 }
 
+/** 功能列表行（左图标 + 文字，无右箭头——对齐蓝云截图形态） */
 @Composable
-private fun InfoLine(label: String, value: String) {
+private fun AccountItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, danger: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Icon(
+            icon, null,
+            Modifier.size(22.dp),
+            tint = if (danger) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.width(16.dp))
         Text(
             label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
         )
-        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 }
 
 @Composable
@@ -359,7 +367,7 @@ private fun PublisherDialog(
     var name by remember { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("显示发布者") },
+        title = { Text("昵称设置") },
         text = {
             Column {
                 Row(
@@ -367,14 +375,14 @@ private fun PublisherDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("显示发布者")
+                    Text("对外显示发布者")
                     Switch(checked = show, onCheckedChange = { show = it })
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("发布者昵称") },
+                    label = { Text("昵称（发布者名称）") },
                     singleLine = true,
                     enabled = show,
                     modifier = Modifier.fillMaxWidth()
@@ -391,19 +399,51 @@ private fun PublisherDialog(
     )
 }
 
+/**
+ * 个人分享链对话框（V47 增强）：顶部展示分享链 URL（解析清洗后的）+ 提取码 +
+ * 复制按钮；下方仍是访问码开关（task=7）。
+ */
 @Composable
-private fun ShareCodeDialog(
+private fun ShareLinkDialog(
     submitting: Boolean,
+    shareLink: String?,
+    shareLinkCode: String?,
     onDismiss: () -> Unit,
+    onCopyLink: (String, String?) -> Unit,
     onConfirm: (Boolean, String) -> Unit
 ) {
-    var enable by remember { mutableStateOf(false) }
-    var code by remember { mutableStateOf("") }
+    var enable by remember { mutableStateOf(true) }
+    var code by remember { mutableStateOf(shareLinkCode ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("个人分享链访问码") },
+        title = { Text("个人分享链") },
         text = {
             Column {
+                if (!shareLink.isNullOrBlank()) {
+                    Text(
+                        shareLink,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (!shareLinkCode.isNullOrBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "提取码：$shareLinkCode",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = { onCopyLink(shareLink, shareLinkCode) }) {
+                        Text("复制链接")
+                    }
+                } else {
+                    Text(
+                        "未获取到分享链（账户页解析未命中）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -427,7 +467,7 @@ private fun ShareCodeDialog(
             TextButton(
                 enabled = !submitting && (!enable || code.isNotBlank()),
                 onClick = { onConfirm(enable, code) }
-            ) { Text("确定") }
+            ) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )

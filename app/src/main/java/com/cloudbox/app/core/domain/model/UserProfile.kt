@@ -11,6 +11,8 @@ package com.cloudbox.app.core.domain.model
  * 这些在原版里要么不展示、要么另开网页，故此处不臆造字段。
  *
  * @param userName           登录用户名（原版回调参数 1）
+ * @param phone              绑定手机号（脱敏，V47：页面改版后 c_top1 区下发）
+ * @param level              会员等级徽章文本（V47：ulv1 span，如"普"）
  * @param displayName        页面昵称（参数 2）
  * @param shareLink          个人分享链 URL（参数 3）
  * @param shareLinkCode      个人分享链提取码（参数 4）
@@ -24,6 +26,8 @@ package com.cloudbox.app.core.domain.model
 data class UserProfile(
     val userName: String? = null,
     val displayName: String? = null,
+    val phone: String? = null,
+    val level: String? = null,
     val shareLink: String? = null,
     val shareLinkCode: String? = null,
     val externalLinkTitle: String? = null,

@@ -4098,3 +4098,51 @@ TA 三连反馈（v0.1.194 真机）：
    title 从默认 headlineSmall 收敛为 titleMedium SemiBold（长文件名仍完整显示）
 
 文件夹菜单同步分组（无重命名/移动/下载）；星标项归入整理组。
+
+### 45.10 V47 五连：下载假文件根因锤实 + 收藏三连 + 账号面板重构（2026-10-04）
+
+TA 三组反馈（v0.1.195 真机）逐一销账：
+
+**① 「下载到本地」4.7K 假文件（根因锤实全链实测）**
+真浏览器（agent-browser）+ Python 复刻对照，完整证据链：
+- 直链必须拼 `&toolsdown` 尾参（fn 页 `var down_3` 下发；缺它服务端判
+  "文件未授权" rel=-1 JSON——此前 App 从未拼过，历史遗留缺口）
+- 直链实为 302 → lanosso.com CDN 真文件（实测 h1050.lanosso.com 返回
+  908425B APK = CI 产物逐字节同大小）
+- **根因**：解析探测时 OkHttp 自动跟 302 看到真流判"可下载"，但交给系统
+  DownloadManager 的仍是原始挑战链——它不会解 acw gzip 挑战，把挑战页存成
+  "成功"文件。修复四件：
+  a. extractDown3 拼 toolsdown（HtmlExtractor 新正则，固定值兜底）
+  b. finalizeUrl：探测通过后把跟随 302 的**最终 CDN URL**替换进直链
+     （referer 同步换直链本身，贴真浏览器行为；异常回落原链）
+  c. resolve() 加 force 参数：downloadSingle 与解析页 download 都 force
+     重解析（缓存的直链可能是死挑战链，直链时效约 30 分钟）
+  d. queryStatus 完成侧假文件校验兜底：文件头 gzip/HTML/JSON 检测
+     （< 64KB 且非 .gz/.html 后缀）→ 判 FAILED + 清垃圾文件
+- 解析页 download 同步修（此前直接用解析缓存的 item.link 入队）：
+  force 重解析拿 CDN 直链，失败回落旧链
+
+**② 收藏三连**
+- 未命名：接口 name 是"分享名"（用户自定义常空）——getShare/favoriteFile
+  源头回退 file.name（一处修全链路受益）
+- 长按菜单飞到屏幕角落：DropdownMenu 原挂全屏 Box → 改锚定在长按的行内
+- 「去解析」补 Bolt 图标
+- 过程教训：整块菜单重写时误删「删除」项，git diff 对比抓回——
+  **菜单重写必须 git diff 核对项数**
+
+**③ 账号面板按蓝云截图重构（TA：参考蓝云管理账号+截图）**
+- 根因（个人分享链显示 HTML）：页面改版后 c_top1 区=手机号、ulv1=等级徽章，
+  旧 RE_SHARE_1 正则抓到导航区整段 HTML。UserProfileHtmlParser 三修：
+  phone/level 新字段 + shareLink 污染清洗（含 '<' 提取 http 链接，
+  提不到按 null 显示"未获取"，绝不再把 HTML 原文当链接展示）
+- AccountScreen 整体重写：头部（ID 粗体 + 手机灰 + 等级徽章）+ 蓝云 9 项
+  列表（个人中心/网页版/修改密码/外链设置/昵称设置/个人分享链/变更手机号/
+  注销账户/退出登录）；4 个既有对话框复用，ShareCodeDialog 增强（URL 展示
+  +复制+访问码）
+- 新 CookieWebPageActivity：带登录态打开官方网页（个人中心/网页版/变更
+  手机号/注销；短信验证 App 侧做不了，与原版蓝云一样跳网页；Cookie 从
+  CookiePersistenceJar 灌系统 WebView CookieManager，同 WebViewUpload
+  Activity 模式）；Manifest 已注册
+- 变更手机号/注销暂都指向账户概览页（myfile.php?item=1&v2，页内有入口；
+  不臆造无依据的 URL——直链手机/注销页 URL 未实测）
+- logout 事件流接线（先清 Cookie 再导航，与 MainScreen.doLogout 同款时序）

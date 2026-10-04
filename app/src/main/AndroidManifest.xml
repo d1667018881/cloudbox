@@ -119,6 +119,15 @@
             android:label="网页上传"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.CloudBox" />
+        <!-- V47（2026-10-04）：账号面板的 网页版/个人中心/变更手机号/注销账户 页。
+             与 WebViewUploadActivity 同款定位：带登录态打开官方网页（登录 Cookie
+             从 CookiePersistenceJar 灌进系统 WebView 的 CookieManager）。
+             不导出（无 intent-filter），只能由本 App 内部启动。 -->
+        <activity
+            android:name=".feature.account.CookieWebPageActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize"
+            android:theme="@style/Theme.CloudBox" />
 
         <!-- 程序错误页（对齐原版 error_page.lua）：崩溃时展示错误信息并允许复制。
              独立 Activity + 独立任务栈：崩溃发生在导航途中时，主 Activity 状态可能

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -199,6 +200,13 @@ fun FavoritesScreen(
                             },
                             onMore = { menuTarget = fav }
                         )
+                        // V47（2026-10-04 TA 反馈）：菜单锚定在**本行**——原来
+                        // 挂在全屏 Box 上，DropdownMenu 锚定父容器左上角，
+                        // 长按后菜单飞到屏幕角落而非长按的条目处
+                        if (menuTarget == fav) {
+                            FavoriteMenu(fav, menuTarget, viewModel, context, onOpenShare,
+                                onEdit = { editTarget = fav }, onDismiss = { menuTarget = null })
+                        }
                         HorizontalDivider()
                     }
                 }
@@ -206,53 +214,6 @@ fun FavoritesScreen(
         }
     }
 
-    // 更多操作菜单（长按或点右侧「⋯」触发）
-    menuTarget?.let { fav ->
-        Box(Modifier.fillMaxSize()) {
-            DropdownMenu(expanded = true, onDismissRequest = { menuTarget = null }) {
-                DropdownMenuItem(
-                    text = { Text("编辑名称与备注") },
-                    leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                    onClick = { menuTarget = null; editTarget = fav }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (fav.pinned) "取消置顶" else "置顶") },
-                    leadingIcon = { Icon(Icons.Filled.PushPin, null) },
-                    onClick = { menuTarget = null; viewModel.togglePin(fav) }
-                )
-                DropdownMenuItem(
-                    text = { Text("复制链接") },
-                    leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
-                    onClick = {
-                        menuTarget = null
-                        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                as android.content.ClipboardManager
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("分享链接", fav.shareUrl))
-                        viewModel.notify("已复制链接")
-                    }
-                )
-                // 原版只给文件夹型收藏提供「更新」入口（favorites.lua:1126）
-                if (fav.isFolder) {
-                    DropdownMenuItem(
-                        text = { Text("检查此文件夹更新") },
-                        leadingIcon = { Icon(Icons.Filled.Refresh, null) },
-                        onClick = { menuTarget = null; viewModel.checkFolderUpdates() }
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("去解析") },
-                    onClick = { menuTarget = null; onOpenShare(fav.shareUrl) }
-                )
-                DropdownMenuItem(
-                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
-                    leadingIcon = {
-                        Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error)
-                    },
-                    onClick = { menuTarget = null; deleteTarget = fav }
-                )
-            }
-        }
-    }
 }
 
 /** 单条收藏：轻点解析，长按/点「⋯」出菜单 */
@@ -369,4 +330,62 @@ private fun EditFavoriteDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
+}
+
+/** 收藏条目的长按/更多菜单（锚定在本行） */
+@Composable
+private fun FavoriteMenu(
+    fav: FavoriteShare,
+    menuTarget: FavoriteShare?,
+    viewModel: FavoritesViewModel,
+    context: android.content.Context,
+    onOpenShare: (String) -> Unit,
+    onEdit: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.material3.DropdownMenu(
+        expanded = menuTarget == fav,
+        onDismissRequest = onDismiss
+    ) {
+        DropdownMenuItem(
+            text = { Text("编辑名称与备注") },
+            leadingIcon = { Icon(Icons.Filled.Edit, null) },
+            onClick = { onDismiss(); onEdit() }
+        )
+        DropdownMenuItem(
+            text = { Text(if (fav.pinned) "取消置顶" else "置顶") },
+            leadingIcon = { Icon(Icons.Filled.PushPin, null) },
+            onClick = { onDismiss(); viewModel.togglePin(fav) }
+        )
+        DropdownMenuItem(
+            text = { Text("复制链接") },
+            leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
+            onClick = {
+                onDismiss()
+                val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("分享链接", fav.shareUrl))
+                viewModel.notify("已复制链接")
+            }
+        )
+        // 原版只给文件夹型收藏提供「更新」入口（favorites.lua:1126）
+        if (fav.isFolder) {
+            DropdownMenuItem(
+                text = { Text("检查此文件夹更新") },
+                leadingIcon = { Icon(Icons.Filled.Refresh, null) },
+                onClick = { onDismiss(); viewModel.checkFolderUpdates() }
+            )
+        }
+        DropdownMenuItem(
+            text = { Text("去解析") },
+            // V47（TA 反馈）：其他项都有图标，唯独这项没有——看着别扭
+            leadingIcon = { Icon(Icons.Filled.Bolt, null) },
+            onClick = { onDismiss(); onOpenShare(fav.shareUrl) }
+        )
+        DropdownMenuItem(
+            text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+            leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+            onClick = { onDismiss(); viewModel.remove(fav.shareUrl) }
+        )
+    }
 }

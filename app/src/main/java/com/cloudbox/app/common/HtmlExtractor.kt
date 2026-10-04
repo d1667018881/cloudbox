@@ -188,6 +188,13 @@ object HtmlExtractor {
     /** kdns 值（iframe 页）：1 = 正常域，0 = 降级备用域 */
     fun extractKdns(html: String): Int? = RE_KDNS.find(html)?.groupValues?.get(1)?.toIntOrNull()
 
+    /**
+     * V47（2026-10-04）：提取 fn 页 `var down_3 = '&toolsdown'` 尾参。
+     * 直链必须拼它，缺了服务端判"文件未授权"（真浏览器行为对照实测）。
+     */
+    fun extractDown3(html: String): String? =
+        Regex("var\\s+down_3\\s*=\\s*['\"]([^'\"]*)['\"]").find(html)?.groupValues?.get(1)
+
     /** 是否处于 acw_sc__v2 挑战页（返回 arg1；无挑战返回 null） */
     fun extractAcwArg1(html: String): String? = RE_ACW_ARG1.find(html)?.groupValues?.get(1)
 

@@ -363,7 +363,11 @@ class FileListViewModel @Inject constructor(
             } else {
                 fileRepository.getFileShare(file.id)
             }
-            result.onSuccess { share ->
+            result.onSuccess { sh ->
+                // V47（TA 反馈"收藏后显示未命名"）：接口的 name 是**分享名**（用户
+                // 自定义），没设置过就是空——空时回退文件名，收藏/复制/解析跳转
+                // 全链路都受益（不单独在收藏处打补丁）
+                val share = sh.copy(name = sh.name.ifBlank { file.name })
                 _uiState.update {
                     if (forResolve) {
                         // 拼成「链接 提取码：xxxx」一段文本：解析页 resolve() 会自动
@@ -428,7 +432,7 @@ class FileListViewModel @Inject constructor(
             } else {
                 fileRepository.getFileShare(file.id)
             }
-            result.onSuccess { share -> favoriteShare(share) }
+            result.onSuccess { share -> favoriteShare(share.copy(name = share.name.ifBlank { file.name })) }
                 .onFailure { e -> _uiState.update { it.copy(message = "获取分享链接失败：${e.message}") } }
         }
     }
@@ -753,7 +757,9 @@ class FileListViewModel @Inject constructor(
         viewModelScope.launch {
             fileRepository.getFileShare(file.id).onSuccess { share ->
                 val pwd = if (share.onof == "1") share.pwd else ""
-                directLinkRepository.resolve(share.shareUrl, pwd)
+                // force=true 跳过直链缓存（V47）：缓存的直链可能是挑战链/已过期，
+                // 下载场景必须拿"finalize 过的 CDN 直链"（时效约 30 分钟内有效）
+                directLinkRepository.resolve(share.shareUrl, pwd, force = true)
                     .onSuccess { link ->
                         downloadRepository.enqueue(
                             url = link.url,

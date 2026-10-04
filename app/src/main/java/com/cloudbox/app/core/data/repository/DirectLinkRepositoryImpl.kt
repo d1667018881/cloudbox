@@ -61,13 +61,16 @@ class DirectLinkRepositoryImpl @Inject constructor(
 
     private val okHttp get() = apiClient.okHttpClient
 
-    override suspend fun resolve(shareUrl: String, password: String): Result<DirectLink> =
+    override suspend fun resolve(shareUrl: String, password: String, force: Boolean): Result<DirectLink> =
         withContext(Dispatchers.IO) {
             runCatching {
-                // 0) 缓存命中（TTL 1 小时）
-                val cacheKey = if (password.isBlank()) shareUrl else "$shareUrl|pwd=$password"
-                db.directLinkDao().getFresh(cacheKey, System.currentTimeMillis() - 3600_000L)?.let {
-                    return@runCatching DirectLink(it.directUrl, it.fileName, it.referer)
+                // 0) 缓存命中（TTL 1 小时）。force=true 跳过：下载场景直链时效仅约
+                //    30 分钟且挑战 cookie 逐次轮换，缓存的直链可能已死——宁可重解析
+                if (!force) {
+                    val cacheKey = if (password.isBlank()) shareUrl else "$shareUrl|pwd=$password"
+                    db.directLinkDao().getFresh(cacheKey, System.currentTimeMillis() - 3600_000L)?.let {
+                        return@runCatching DirectLink(it.directUrl, it.fileName, it.referer)
+                    }
                 }
 
                 // 1) 第三方解析服务（设置页可配置，可替换解析源）
@@ -335,14 +338,18 @@ class DirectLinkRepositoryImpl @Inject constructor(
         val path = json.optString("url")
         if (dom.isBlank() || path.isBlank()) throw ApiError.Business(-1, "直链字段缺失（dom/url）")
 
-        // 6) 直链 = dom + "/file/" + url
+        // 6) 直链 = dom + "/file/" + url + "&toolsdown"
         //    注意：新版 url 以 '?' 开头，不能去掉前导字符
         //    V44（2026-10-01 同步加固）：dom 子域已观察多轮换（slssctm → slsstm2 →
         //    developer4.lanrar.com…），必须始终用**返回的 dom**动态拼；且新形态
         //    dom 可能不带 scheme（裸域名），统一补 https://（OkHttp 遇无 scheme URL
         //    直接抛 IllegalArgumentException）。
+        //    V47（2026-10-04）：真浏览器实测直链必带 &toolsdown 尾参（fn 页
+        //    var down_3 下发，2026-10-04 实测固定 '&toolsdown'）——缺它服务端
+        //    判"文件未授权"（rel=-1 JSON）。从 fn 页提取，提不到用固定值兜底。
         val domNorm = if (dom.startsWith("http")) dom else "https://${dom.trimEnd('/')}"
-        val directUrl = "${domNorm.trimEnd('/')}/file/${path.removePrefix("/")}"
+        val toolsdown = HtmlExtractor.extractDown3(fnHtml) ?: "&toolsdown"
+        val directUrl = "${domNorm.trimEnd('/')}/file/${path.removePrefix("/")}$toolsdown"
         val link = DirectLink(url = directUrl, fileName = fileName, referer = effectiveUrl)
 
         // 7) 探测是否为"验证中间页"（IP 风控时会先返回一个 HTML 验证页而非文件）。
@@ -406,11 +413,11 @@ class DirectLinkRepositoryImpl @Inject constructor(
     private fun ensureDownloadable(link: DirectLink): DirectLink = runCatching {
         var current = link
         repeat(3) {
-            val head = probeMiddlePage(current) ?: return@runCatching current
+            val head = probeMiddlePage(current) ?: return@runCatching finalizeUrl(current)
             when {
                 // 形态 A：业务验证页 → POST 同目录 ajax.php 拿真实下载地址
                 head.contains("down_r(") -> {
-                    val real = resolveVerifiedUrl(current.url, head) ?: return@runCatching current
+                    val real = resolveVerifiedUrl(current.url, head) ?: return@runCatching finalizeUrl(current)
                     current = current.copy(url = real)
                 }
                 // 形态 B/G：acw 挑战 —— 静态算法优先，WebView 兜底
@@ -419,14 +426,42 @@ class DirectLinkRepositoryImpl @Inject constructor(
                     if (staticValue != null) {
                         putAcwCookie(current.url, staticValue)
                     } else {
-                        val wvCookie = challengeCookieFor(current) ?: return@runCatching current
+                        val wvCookie = challengeCookieFor(current) ?: return@runCatching finalizeUrl(current)
                         putChallengeCookie(current.url, wvCookie)
                     }
                     // 带 cookie 下一轮重试同一直链（落在形态 A 或真文件）
                 }
             }
         }
-        current
+        finalizeUrl(current)
+    }.getOrDefault(link)
+
+    /**
+     * V47（2026-10-04）：探测为"真文件流"后，把直链替换为**跟随 302 后的最终 URL**。
+     *
+     * 为什么：slsstm2 直链本身是 302 跳到 lanosso.com CDN 的（真浏览器行为实测，
+     * 2026-10-04 h1050.lanosso.com 返回 908425B 真 APK 与 CI 产物逐字节同大小）。
+     * OkHttp 探测时自动跟了 302 看到真流；但若把**原始挑战链**交给系统
+     * DownloadManager，它不会解 acw 挑战，会把挑战页当文件存盘（TA 真机
+     * "下载到本地 = 4.7K 假文件"的根因）。CDN URL 无挑战，直接可拉。
+     *
+     * 实现：再发一次 GET（跟重定向）读 resp.request.url 即最终地址；
+     * 任何异常回落原链（探测保守，绝不因 finalize 失败丢直链）。
+     */
+    private fun finalizeUrl(link: DirectLink): DirectLink = runCatching {
+        okHttp.newCall(
+            Request.Builder()
+                .url(link.url)
+                .header("Referer", link.referer)
+                .build()
+        ).execute().use { resp ->
+            val finalUrl = resp.request.url.toString()
+            // referer 同步换成直链本身：真实浏览器 302 后的请求 Referer 即直链，
+            // CDN 侧万一校验来源也不会拿分享页这种跨域 referer 出岔子
+            if (finalUrl != link.url && resp.isSuccessful) {
+                link.copy(url = finalUrl, referer = link.url)
+            } else link
+        }
     }.getOrDefault(link)
 
     /**

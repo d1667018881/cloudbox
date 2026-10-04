@@ -284,6 +284,20 @@ class DownloadRepositoryImpl @Inject constructor(
                     val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
                     if (status == DownloadManager.STATUS_SUCCESSFUL) {
                         syncRealFileName(record, cursor)
+                        // V47（2026-10-04）：假文件校验兜底——直链被反爬挑战拦截时
+                        // DownloadManager 会把挑战页当文件存成"成功"。修根因在解析层
+                        //（finalizeUrl 换 CDN 直链），这里做最后一道防线：文件头是
+                        // gzip（1f 8b，裸包裹挑战页）或 HTML 文本 → 判失败并清掉垃圾文件，
+                        // 用户重试即走新解析链路。真 .gz 文件名以 .gz 结尾的除外。
+                        if (isFakeDownload(cursor, record)) {
+                            deleteLocalFile(record.downloadId)
+                            downloadManager.remove(record.downloadId)
+                            return@runCatching DownloadTask(
+                                record.downloadId, record.fileName, record.mimeType,
+                                DownloadManager.STATUS_FAILED, 0, 0,
+                                record.referer, record.url, record.paused, record.createdAt
+                            )
+                        }
                     }
                     DownloadTask(record.downloadId, record.fileName, record.mimeType, status, total, downloaded, record.referer, record.url, record.paused, record.createdAt)
                 } else {
@@ -308,6 +322,37 @@ class DownloadRepositoryImpl @Inject constructor(
             db.downloadRecordDao().updateFileName(record.downloadId, realName)
         }
     }
+
+    /**
+     * V47：判断"成功"的下载是不是反爬挑战页假文件。
+     * 特征：文件头 gzip 魔数（裸包裹 acw 挑战）或 HTML 文本（<!DOCTYPE/<html），
+     * 且文件名不是 .gz/.html/.htm——是的话说明存的是挑战页不是用户要的文件。
+     * 文件读不到/读失败按"真"处理（不误杀）。
+     */
+    private fun isFakeDownload(cursor: Cursor, record: DownloadRecordEntity): Boolean = runCatching {
+        val lower = record.fileName.lowercase()
+        if (lower.endsWith(".gz") || lower.endsWith(".html") || lower.endsWith(".htm")) return@runCatching false
+        val idxUri = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+        val path = when {
+            idxUri >= 0 -> cursor.getString(idxUri)?.let { Uri.parse(it).path }
+            else -> null
+        } ?: return@runCatching false
+        val f = File(path)
+        if (!f.exists() || f.length() > 64 * 1024) return@runCatching false // 挑战页实测 < 5KB
+        val head = ByteArray(16)
+        java.io.FileInputStream(f).use { ins ->
+            var n = 0
+            while (n < 16) {
+                val r = ins.read(head, n, 16 - n)
+                if (r <= 0) break
+                n += r
+            }
+        }
+        val isGzip = head[0] == 0x1f.toByte() && head[1] == 0x8b.toByte()
+        val headStr = String(head, Charsets.ISO_8859_1).lowercase()
+        isGzip || headStr.startsWith("<!doctype") || headStr.startsWith("<html") ||
+            headStr.startsWith("{\"rel\"")
+    }.getOrDefault(false)
 
     /** 删除 DownloadManager 已下载的本地文件 */
     private fun deleteLocalFile(downloadId: Long) {

@@ -173,9 +173,16 @@ class ResolveViewModel @Inject constructor(
      */
     private var lastWasFolderLink = false
 
-    /** 下载解析结果 */
+    /**
+     * 下载解析结果。
+     *
+     * V47（2026-10-04）：**不再直接用解析时缓存的直链**——解析结果可能已过期
+     * （直链时效约 30 分钟）或本身就是带挑战的原始链（DownloadManager 不会解
+     * acw 挑战，会把挑战页当文件存成 4.7K 假文件）。点下载时用 force 重解析，
+     * 拿 finalize 过的 CDN 直链再入队。重解析失败回落旧链（保底能下载）。
+     */
     fun download(item: ResolveItem) {
-        val link = item.link ?: return
+        val oldLink = item.link ?: return
         viewModelScope.launch {
             // 移动网络提醒：流量是用户的钱，默认先问一句（设置页可关）
             if (settingsStore.warnMobileNetwork.first() &&
@@ -185,6 +192,9 @@ class ResolveViewModel @Inject constructor(
                     it.copy(message = "当前是移动网络，已开始下载（可在设置页关闭此提醒）")
                 }
             }
+            val pwd = _uiState.value.password
+            val link = directLinkRepository.resolve(item.shareUrl, pwd, force = true)
+                .getOrNull() ?: oldLink
             val uid = fileRepository.currentUid() ?: ""
             downloadRepository.enqueue(
                 url = link.url,
