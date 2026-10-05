@@ -448,12 +448,19 @@ class DirectLinkRepositoryImpl @Inject constructor(
                 } else current
             }
             when {
-                // 形态 A：业务验证页 → POST 同目录 ajax.php 拿真实下载地址
+                // 形态 A：业务验证页 → POST 同目录 ajax.php 拿真实下载地址。
+                // V48（2026-10-05）：OkHttp 直连 POST 实测被服务端拒（校验
+                // JS 环境/指纹，头无法复刻）→ 失败后 WebView 兜底自动过验证。
                 probe.head.contains("down_r(") -> {
                     val real = resolveVerifiedUrl(current.url, probe.head)
+                        ?: runCatching {
+                            DirectLinkWebViewBridge.acquireVerifiedUrlSync(
+                                current.url, current.referer
+                            )
+                        }.getOrNull()
                         ?: throw ApiError.Business(
                             -1,
-                            "下载链接需要人机验证，自动通过失败（服务端风控）——请稍后重试，或复制链接到浏览器下载"
+                            "下载链接需要人机验证，自动通过失败——请稍后重试，或复制链接到浏览器下载"
                         )
                     current = current.copy(url = real)
                 }

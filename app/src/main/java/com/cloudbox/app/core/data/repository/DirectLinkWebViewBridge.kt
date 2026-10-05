@@ -57,6 +57,9 @@ object DirectLinkWebViewBridge {
     private const val POLL_INTERVAL_MS = 500L
     private const val POLL_MAX_TRIES = 24
 
+    /** 验证页自动通过超时：acw 挑战 + 3 轮 down_r（每轮失败 reload 1s）+ 裕量 */
+    private const val VERIFIED_TIMEOUT_MS = 25_000L
+
     /**
      * 同步等待版：给非 suspend 调用链（[DirectLinkRepositoryImpl.ensureDownloadable]）用。
      *
@@ -66,6 +69,110 @@ object DirectLinkWebViewBridge {
     fun acquireCookieSync(url: String, referer: String): String? {
         return kotlinx.coroutines.runBlocking { acquireCookie(url, referer) }
     }
+
+    /**
+     * V48（2026-10-05）：**验证页自动通过**，返回「立即下载」的真实下载地址。
+     *
+     * 背景：蓝奏云 10 月起在直链域上了「网络异常验证」（页面文案：系统发现
+     * 您的网络异常，需要验证后下载文件）。实测证据链（2026-10-05，curl +
+     * 真浏览器双环境对照）：
+     * - 验证页 = 三个按钮 down_r(1)/down_r(2)/down_r(3)，点对即过（实测
+     *   两轮 el=2 均直接通过），点错页面 reload 换新 sign
+     * - OkHttp/curl 无论怎么复刻头（新 sign + Origin + X-Requested-With +
+     *   Accept + HTTP/2 + 全套 cookie）POST ajax.php 一律被拒返回 HTML
+     * - Chrome 内核（WebView/agent-browser）稳定通过
+     * → 服务端校验的是客户端 JS 执行环境/指纹，非头部可复刻
+     *
+     * 因此 OkHttp 的 resolveVerifiedUrl 失败后，本函数开隐藏 WebView 走
+     * 完整浏览器路径：load 直链 → JS 自动过 acw 挑战 → 验证页 onPageFinished
+     * 注入 down_r(el)（1→2→3 轮换，失败 reload 后自动点下一个）→ 验证成功
+     * 页面出现 `#go a`（立即下载）→ 取其 href 即真链（自带签名无需 cookie，
+     * CDN 实测裸请求可下）。
+     *
+     * 返回的 URL 交给 ensureDownloadable 再 probe（302→CDN finalize）。
+     */
+    fun acquireVerifiedUrlSync(url: String, referer: String): String? {
+        return kotlinx.coroutines.runBlocking { acquireVerifiedUrl(url, referer) }
+    }
+
+    suspend fun acquireVerifiedUrl(url: String, referer: String): String? =
+        withTimeoutOrNull(VERIFIED_TIMEOUT_MS) { loadAndVerify(url, referer) }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun loadAndVerify(url: String, referer: String): String? =
+        withContext(Dispatchers.Main) {
+            try {
+                suspendCancellableCoroutine { cont ->
+                    val ctx = currentApplication() ?: run {
+                        cont.resume(null); return@suspendCancellableCoroutine
+                    }
+                    var settled = false
+                    var elTry = 0 // down_r(1..3) 轮换游标，跨 reload 保持
+                    val web = WebView(ctx)
+                    val handler = Handler(Looper.getMainLooper())
+
+                    fun finish(value: String?) {
+                        if (settled) return
+                        settled = true
+                        handler.removeCallbacksAndMessages(null)
+                        runCatching { web.stopLoading() }
+                        runCatching { web.destroy() }
+                        cont.resume(value)
+                    }
+
+                    /** 查「立即下载」链接；没有则点下一个验证按钮 */
+                    fun checkAndClick() {
+                        if (settled) return
+                        web.evaluateJavascript(
+                            "(function(){var a=document.querySelector('#go a');return (a&&a.href)?a.href:null})()"
+                        ) { res ->
+                            val href = res?.trim('"')
+                            if (!href.isNullOrEmpty() && href != "null" && href.startsWith("http")) {
+                                finish(href); return@evaluateJavascript
+                            }
+                            if (elTry < 3) {
+                                elTry++
+                                // down_r 存在则点击；返回 false=页面没有验证函数
+                                //（可能尚未渲染完，稍后重查）
+                                web.evaluateJavascript(
+                                    "typeof down_r==='function' ? (down_r($elTry), 'ok') : 'no'"
+                                ) { r ->
+                                    if (r == null || r.trim('"') == "no") {
+                                        handler.postDelayed({ checkAndClick() }, 800)
+                                    }
+                                    // 点了 → 失败则页面 1s 后 reload → onPageFinished 再进
+                                }
+                            } else {
+                                finish(null)
+                            }
+                        }
+                    }
+
+                    web.settings.javaScriptEnabled = true
+                    web.settings.domStorageEnabled = true
+                    web.settings.userAgentString = DESKTOP_UA
+
+                    web.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): Boolean = false
+
+                        override fun onPageFinished(view: WebView?, pageUrl: String?) {
+                            super.onPageFinished(view, pageUrl)
+                            // 等 JS 定义 down_r（jQuery 先加载完），再查/点击
+                            handler.postDelayed({ checkAndClick() }, 600)
+                        }
+                    }
+
+                    web.loadUrl(url, mapOf("Referer" to referer))
+
+                    cont.invokeOnCancellation { handler.post { finish(null) } }
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
 
     /**
      * 打开隐藏 WebView 加载 [url]，等 acw_sc__v2 出现后返回 `name=value`。

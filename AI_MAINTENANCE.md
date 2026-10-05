@@ -4193,3 +4193,26 @@ UI 错误信息全部可读（"请重试，或复制直链到浏览器下载"）
 filemoreajax 接口双形态实测（file=/uid= 等价、lx=1 通 lx=4 拒）。
 修=HtmlExtractor.extractLx 实时提取（默认 2），resolveFolderFromPage
 接线。t/k/fid/uid/puid 提取与 DTO（name_all）实测全部兼容无需动。
+
+### 45.12 V48b：验证页 WebView 自动通过（TA 复测全报人机验证失败）
+
+TA 真机复测：所有文件报「下载链接需要人机验证，自动通过失败」。TA 质疑
+"蓝奏云没有风控"——对，浏览器用户看不见这页面（JS 自动过）。
+
+**实验证据链（curl + agent-browser 双环境对照）**：
+- 验证页 = down_r(1)/(2)/(3) 三按钮，点对即过（两轮 el=2 均直接成功）
+- curl 修正实验（每个 el 前重新 GET 刷新 sign + Origin + XRW + Accept +
+  HTTP/2 + 全套 cookie）**全灭**，POST ajax.php 一律返回 HTML
+- Chrome 内核（agent-browser）稳定通过
+- 验证页无隐藏 JS（源码全文排查：仅 down_r + reload 逻辑）
+- GET 不拦（能拿验证页）、POST 拦 → 服务端校验客户端 JS 环境/指纹
+- 时间线：9/22 V42 时 OkHttp POST 可过 → 服务端 10 月上新校验
+
+**结论**：OkHttp 直连已无出路，唯一通路=真浏览器内核。
+
+**修**：DirectLinkWebViewBridge.acquireVerifiedUrlSync——隐藏 WebView
+load 直链 → JS 自动过 acw 挑战 → onPageFinished 注入 down_r(el) 1→2→3
+轮换（失败 reload 自动续点）→ 验证成功 DOM 出现 #go a（立即下载）→
+取 href 即真链（自带签名，CDN 实测裸请求可下）→ 交回 ensureDownloadable
+probe（302→CDN finalize）。超时 25s；el 轮换游标跨 reload 保持。
+错误文案去掉"服务端风控"字样（TA 反馈该词误导）。
