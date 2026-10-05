@@ -343,9 +343,10 @@ fun FileListScreen(
         topBar = {
             Column {
                 TopAppBar(
-                    // V48（TA 真机反馈"首页上面空着太多"）：默认 64dp 太高，
-                    // 压到 52dp——面包屑/图标仍居中，整体顶部区域收掉 12dp
-                    modifier = Modifier.height(52.dp),
+                    // ⚠️ V48 教训（2026-10-05 TA 真机"图标变得特别小"）：
+                    // 给 TopAppBar 强制 height 会连状态栏 inset 一起算进高度，
+                    // 内容区被挤到 ~20dp、图标被压缩——绝不能用 height 缩顶栏。
+                    // 顶部空白的精修需按真机截图对拍后再动（勿凭感觉调）。
                     title = {
                         if (state.selectionMode) {
                             Text("已选 ${state.selected.size} 项")
@@ -396,7 +397,7 @@ fun FileListScreen(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
                             // V43c（2026-09-30 真机修复）：topBar 槽位的测量约束是
                             // maxHeight=整屏，Row 不钉高度时 VerticalDivider 内部的
                             // fillMaxHeight() 会把整条搜索条撑到全屏高（真机实测

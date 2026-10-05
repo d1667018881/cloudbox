@@ -4216,3 +4216,18 @@ load 直链 → JS 自动过 acw 挑战 → onPageFinished 注入 down_r(el) 1�
 取 href 即真链（自带签名，CDN 实测裸请求可下）→ 交回 ensureDownloadable
 probe（302→CDN finalize）。超时 25s；el 轮换游标跨 reload 保持。
 错误文案去掉"服务端风控"字样（TA 反馈该词误导）。
+
+### 45.13 V48c：验证轮询 bug 修正 + 顶栏图标回滚（TA v0.1.200 复测两反馈）
+
+**① 下载仍报"自动通过失败"——V48b 致命 bug 实锤（我的锅）**
+验证成功路径：down_r(el) POST 成功后 jQuery 把「立即下载」<a> **原地注入
+#go，无页面跳转、无任何回调**。V48b 只在 onPageFinished 查一次链接、
+点击 down_r 后无后续轮询 → 链接出现了永远没人读 → 25s 超时 → 报错。
+**每次必失败。** 重写为单一自续轮询：每 1s 查 #go a href；没有则距上次
+点击 ≥2.5s 且 <6 次时点下一个 down_r(el)（1→2→3 循环）；挑战 reload/
+验证失败 reload/成功注入/直接下载四路径统一覆盖；另加 DownloadListener
+兜底（流程以直接开始下载收场时从 onDownloadStart 拿最终地址）。
+
+**② 顶栏图标变特别小——height(52dp) 连状态栏 inset 一起算**
+M3 TopAppBar 的内容高度 = 52dp − 状态栏 inset(~24-30dp) ≈ 20dp，图标
+被压缩。回滚 height 与搜索条 padding；顶部空白精修改走截图对拍流程。

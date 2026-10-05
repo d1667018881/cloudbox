@@ -107,7 +107,8 @@ object DirectLinkWebViewBridge {
                         cont.resume(null); return@suspendCancellableCoroutine
                     }
                     var settled = false
-                    var elTry = 0 // down_r(1..3) 轮换游标，跨 reload 保持
+                    var clicks = 0
+                    var lastClickMs = 0L
                     val web = WebView(ctx)
                     val handler = Handler(Looper.getMainLooper())
 
@@ -120,30 +121,37 @@ object DirectLinkWebViewBridge {
                         cont.resume(value)
                     }
 
-                    /** 查「立即下载」链接；没有则点下一个验证按钮 */
-                    fun checkAndClick() {
-                        if (settled) return
-                        web.evaluateJavascript(
-                            "(function(){var a=document.querySelector('#go a');return (a&&a.href)?a.href:null})()"
-                        ) { res ->
-                            val href = res?.trim('"')
-                            if (!href.isNullOrEmpty() && href != "null" && href.startsWith("http")) {
-                                finish(href); return@evaluateJavascript
-                            }
-                            if (elTry < 3) {
-                                elTry++
-                                // down_r 存在则点击；返回 false=页面没有验证函数
-                                //（可能尚未渲染完，稍后重查）
-                                web.evaluateJavascript(
-                                    "typeof down_r==='function' ? (down_r($elTry), 'ok') : 'no'"
-                                ) { r ->
-                                    if (r == null || r.trim('"') == "no") {
-                                        handler.postDelayed({ checkAndClick() }, 800)
-                                    }
-                                    // 点了 → 失败则页面 1s 后 reload → onPageFinished 再进
+                    // 单一自续轮询（V48c 修正 V48b 致命 bug）：
+                    // 每 1s 查「立即下载」链接；没有则距上次点击 ≥2.5s 且次数
+                    // 未用尽时点下一个 down_r(el)（1→2→3 循环，最多 6 次）。
+                    //
+                    // ⚠️ V48b 的 bug：验证成功路径是 jQuery 把 <a> 注入 #go，
+                    //    **无任何页面跳转/回调**——只在 onPageFinished 查一次
+                    //    链接、点击后无后续轮询 → 链接永远没人读 → 25s 超时
+                    //    报"自动通过失败"（TA 真机 v0.1.200 复现）。
+                    //    纯轮询统一覆盖全部路径：acw 挑战 reload、验证失败
+                    //    reload、成功注入、以及 DownloadListener 直接触发。
+                    val tick = object : Runnable {
+                        override fun run() {
+                            if (settled) return
+                            web.evaluateJavascript(
+                                "(function(){var a=document.querySelector('#go a');return (a&&a.href)?a.href:null})()"
+                            ) { res ->
+                                if (settled) return@evaluateJavascript
+                                val href = res?.trim('"')
+                                if (!href.isNullOrEmpty() && href != "null" && href.startsWith("http")) {
+                                    finish(href); return@evaluateJavascript
                                 }
-                            } else {
-                                finish(null)
+                                val now = android.os.SystemClock.elapsedRealtime()
+                                if (now - lastClickMs >= 2500 && clicks < 6) {
+                                    clicks++
+                                    lastClickMs = now
+                                    val el = ((clicks - 1) % 3) + 1
+                                    web.evaluateJavascript(
+                                        "typeof down_r==='function'?(down_r($el),'ok'):'no'"
+                                    ) { }
+                                }
+                                handler.postDelayed(this, 1000)
                             }
                         }
                     }
@@ -157,15 +165,15 @@ object DirectLinkWebViewBridge {
                             view: WebView?,
                             request: WebResourceRequest?
                         ): Boolean = false
-
-                        override fun onPageFinished(view: WebView?, pageUrl: String?) {
-                            super.onPageFinished(view, pageUrl)
-                            // 等 JS 定义 down_r（jQuery 先加载完），再查/点击
-                            handler.postDelayed({ checkAndClick() }, 600)
-                        }
+                    }
+                    // 兜底捕获：万一流程以「直接开始下载」收场（WebView 对文件
+                    // URL 触发 onDownloadStart），从这拿最终地址
+                    web.setDownloadListener { dlUrl, _, _, _, _ ->
+                        if (dlUrl.startsWith("http")) finish(dlUrl)
                     }
 
                     web.loadUrl(url, mapOf("Referer" to referer))
+                    handler.postDelayed(tick, 1500)
 
                     cont.invokeOnCancellation { handler.post { finish(null) } }
                 }
