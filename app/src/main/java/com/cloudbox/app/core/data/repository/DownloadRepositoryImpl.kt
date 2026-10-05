@@ -46,7 +46,9 @@ class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: AppDatabase,
     private val cookieJar: CookiePersistenceJar,
-    private val settingsStore: SettingsStore
+    private val settingsStore: SettingsStore,
+    /** V48：入队预检复用解析层同一 OkHttp 栈（共享 CookieJar 的反爬 cookie） */
+    private val apiClient: com.cloudbox.app.core.data.remote.LanzouApiClient
 ) : DownloadRepository {
 
     private val downloadManager: DownloadManager
@@ -64,6 +66,12 @@ class DownloadRepositoryImpl @Inject constructor(
         mimeType: String?,
         accountUid: String
     ): Long = withContext(Dispatchers.IO) {
+        // V48（2026-10-05）：入队预检——用与解析层同款 OkHttp（共享反爬 cookie）
+        // Range 0-0 探一次。是挑战/验证页就直接报错，**绝不入队假成功**。
+        // 背景：TA 真机"点下载=未知/失败"——直链原样溜进 DownloadManager 后被
+        // 反爬页拦，系统组件无 JS 无 cookie，存下 4.7K 挑战页；解析层出口已
+        // 严格化，这里是第二道防线（也覆盖解析与入队之间直链过期的时序窗口）。
+        precheckDownloadable(url, referer)
         val safeName = sanitizeFileName(restoreSpoofedName(fileName))
         val request = buildRequest(
             url, safeName, referer, mimeType, cookieHeaderFor(url),
@@ -222,6 +230,41 @@ class DownloadRepositoryImpl @Inject constructor(
      */
     private suspend fun showDownloadNotification(): Boolean =
         runCatching { settingsStore.sendMessage.first() }.getOrDefault(true)
+
+    /**
+     * V48：入队前验证 URL 是文件流。Range: bytes=0-0 读首字节：
+     * - gzip 魔数 / HTML / JSON 开头 → 反爬中间页 → 抛错（用户可见明确原因）
+     * - 其余（含 206/200）→ 放行
+     * 网络/解析类异常放行（保守：不让预检故障挡住本来能下的任务——
+     * DownloadManager 自身还有重试与 V47 的完成侧假文件校验兜底）。
+     */
+    private fun precheckDownloadable(url: String, referer: String?) {
+        runCatching {
+            apiClient.okHttpClient.newCall(
+                okhttp3.Request.Builder()
+                    .url(url)
+                    .header("Range", "bytes=0-0")
+                    .apply { referer?.let { header("Referer", it) } }
+                    .build()
+            ).execute().use { resp ->
+                if (!resp.isSuccessful) return
+                val head = ByteArray(8)
+                val input = resp.body?.byteStream() ?: return
+                val n = input.read(head)
+                if (n < 4) return
+                val isGzip = head[0] == 0x1f.toByte() && head[1] == 0x8b.toByte()
+                val headStr = String(head, 0, n, Charsets.ISO_8859_1).lowercase()
+                if (isGzip || headStr.startsWith("<!doctype") || headStr.startsWith("<html") ||
+                    headStr.startsWith("{\"rel\"")
+                ) {
+                    throw com.cloudbox.app.common.ApiError.Business(
+                        -1,
+                        "下载预检未通过：链接被服务端反爬拦截——请重试，或复制直链到浏览器下载"
+                    )
+                }
+            }
+        }
+    }
 
     private fun buildRequest(
         url: String,

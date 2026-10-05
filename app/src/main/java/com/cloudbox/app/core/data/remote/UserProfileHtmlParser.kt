@@ -51,9 +51,11 @@ object UserProfileHtmlParser {
         // 给"未获取到"，绝不再把 HTML 原文当链接展示）。
         val shareLinkRaw = RE_SHARE_1.find(html)?.groupValues?.get(1)
             ?: RE_SHARE_2.find(html)?.groupValues?.get(1)
-        val shareLink = shareLinkRaw?.let { raw ->
-            if (raw.contains('<')) RE_HTTP_URL.find(raw)?.groupValues?.get(1) else raw
-        }
+        // V48（TA 真机实锤）：抓取污染不止 '<' 形态——二维码 JS 源码
+        // （'code', { text: 'https://…'…）不含 '<'，只防尖括号会漏。
+        // 改为**总是提取** RE_HTTP_URL：纯 URL 提取结果=自身（无损），
+        // 任何混入 JS/空白/引号的形态都只留链接；提不到=null 显示"未获取"。
+        val shareLink = shareLinkRaw?.let { raw -> RE_HTTP_URL.find(raw)?.groupValues?.get(1) }
             ?: RE_SHARE_QR.find(html)?.groupValues?.get(1)
         return UserProfile(
             userName = RE_USER_NAME.find(html)?.groupValues?.get(1).clean(),

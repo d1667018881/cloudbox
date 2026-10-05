@@ -63,7 +63,10 @@ class CookiePersistenceJar @Inject constructor(
             for (cookie in cookies) {
                 // 只持久化已知可信域的 Cookie：防止恶意/钓鱼域 Set-Cookie 污染加密存储。
                 // 发送阶段 Cookie.matches 还会再过滤，但此处先拦截可避免持久化脏数据。
-                if (!isTrustedCookieDomain(cookie.domain)) continue
+                // 例外：反爬专用 cookie（acw_tc 等）按名字放行任意域——见字段注释。
+                if (cookie.name !in antiCrawlerCookieNames &&
+                    !isTrustedCookieDomain(cookie.domain)
+                ) continue
                 addCookieLocked(cookie)
             }
             persistLocked()
@@ -129,6 +132,18 @@ class CookiePersistenceJar @Inject constructor(
 
     /** 校验 Cookie 的 domain 是否属于已知可信域（与链接识别同一套规则，
      *  覆盖 lanzou 全部单字母变体域名，避免新变体域名的 Cookie 被误丢导致登录态失效） */
+    /**
+     * 反爬专用 cookie 名单（V48，2026-10-05）：这些名字**不受域名白名单限制**。
+     *
+     * 为什么：直链域（slsstm2.dmpdmp.com 等，随轮换漂移）每跳都会 Set-Cookie
+     * acw_tc / cdn_sec_tc / down_ip——它们是 CDN 反爬会话凭证，不带任何登录态，
+     * 但被 isTrustedShareHost（只认 lanzou/woozooo 系）整批丢弃，导致后续
+     * POST ajax.php 验证缺 cookie 失败（TA 真机"点下载=失败"的成因之一）。
+     * 白名单的目的是防登录 cookie 被钓鱼域骗走——这四个名字无登录语义，
+     * 任意域放行零风险。
+     */
+    private val antiCrawlerCookieNames = setOf("acw_tc", "cdn_sec_tc", "down_ip", "acw_sc__v2")
+
     private fun isTrustedCookieDomain(domain: String): Boolean {
         val d = domain.removePrefix(".").lowercase()
         return DomainUtils.isTrustedShareHost(d)

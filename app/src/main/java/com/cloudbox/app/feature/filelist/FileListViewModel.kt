@@ -642,14 +642,16 @@ class FileListViewModel @Inject constructor(
                     val pwd = if (share.onof == "1") share.pwd else ""
                     directLinkRepository.resolve(share.shareUrl, pwd)
                         .onSuccess { link ->
-                            downloadRepository.enqueue(
-                                url = link.url,
-                                fileName = link.fileName.ifBlank { file.name },
-                                referer = link.referer,
-                                mimeType = null,
-                                accountUid = fileRepository.currentUid() ?: ""
-                            )
-                            ok++
+                            // V48：enqueue 带预检可能抛 ApiError——包 runCatching 防协程崩溃
+                            runCatching {
+                                downloadRepository.enqueue(
+                                    url = link.url,
+                                    fileName = link.fileName.ifBlank { file.name },
+                                    referer = link.referer,
+                                    mimeType = null,
+                                    accountUid = fileRepository.currentUid() ?: ""
+                                )
+                            }.onSuccess { ok++ }.onFailure { fail++ }
                         }.onFailure { fail++ }
                 }.onFailure { fail++ }
             }
@@ -761,14 +763,21 @@ class FileListViewModel @Inject constructor(
                 // 下载场景必须拿"finalize 过的 CDN 直链"（时效约 30 分钟内有效）
                 directLinkRepository.resolve(share.shareUrl, pwd, force = true)
                     .onSuccess { link ->
-                        downloadRepository.enqueue(
-                            url = link.url,
-                            fileName = link.fileName.ifBlank { file.name },
-                            referer = link.referer,
-                            mimeType = null,
-                            accountUid = fileRepository.currentUid() ?: ""
-                        )
-                        _uiState.update { it.copy(message = "已加入下载队列") }
+                        // V48：enqueue 带预检，可能抛 ApiError（链接被反爬拦截）——
+                        // 不包 runCatching 会绕过 onFailure 直接炸协程
+                        runCatching {
+                            downloadRepository.enqueue(
+                                url = link.url,
+                                fileName = link.fileName.ifBlank { file.name },
+                                referer = link.referer,
+                                mimeType = null,
+                                accountUid = fileRepository.currentUid() ?: ""
+                            )
+                        }.onSuccess {
+                            _uiState.update { it.copy(message = "已加入下载队列") }
+                        }.onFailure { e ->
+                            _uiState.update { it.copy(message = "下载失败：${e.message}") }
+                        }
                     }.onFailure { e ->
                         _uiState.update { it.copy(message = "解析失败：${e.message}") }
                     }

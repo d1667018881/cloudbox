@@ -196,14 +196,20 @@ class ResolveViewModel @Inject constructor(
             val link = directLinkRepository.resolve(item.shareUrl, pwd, force = true)
                 .getOrNull() ?: oldLink
             val uid = fileRepository.currentUid() ?: ""
-            downloadRepository.enqueue(
-                url = link.url,
-                fileName = link.fileName,
-                referer = link.referer,
-                mimeType = if (link.fileName.endsWith(".apk", true)) "application/vnd.android.package-archive" else null,
-                accountUid = uid
-            )
-            _uiState.update { it.copy(message = "已加入下载队列：${link.fileName}") }
+            // V48：enqueue 带预检，可能抛 ApiError——包 runCatching 防协程崩溃
+            runCatching {
+                downloadRepository.enqueue(
+                    url = link.url,
+                    fileName = link.fileName,
+                    referer = link.referer,
+                    mimeType = if (link.fileName.endsWith(".apk", true)) "application/vnd.android.package-archive" else null,
+                    accountUid = uid
+                )
+            }.onSuccess {
+                _uiState.update { it.copy(message = "已加入下载队列：${link.fileName}") }
+            }.onFailure { e ->
+                _uiState.update { it.copy(message = "下载失败：${e.message}") }
+            }
         }
     }
 

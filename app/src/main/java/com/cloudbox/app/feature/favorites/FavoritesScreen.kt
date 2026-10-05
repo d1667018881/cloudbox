@@ -345,7 +345,10 @@ private fun FavoriteMenu(
 ) {
     androidx.compose.material3.DropdownMenu(
         expanded = menuTarget == fav,
-        onDismissRequest = onDismiss
+        onDismissRequest = onDismiss,
+        // V48：右移 72dp（菜单宽约 200dp，右移后视觉中心落在条目中部，
+        // 而不是紧贴屏幕左缘——TA 期望“在按的文件附近”）
+        offset = androidx.compose.ui.unit.IntOffset(72, 0)
     ) {
         DropdownMenuItem(
             text = { Text("编辑名称与备注") },

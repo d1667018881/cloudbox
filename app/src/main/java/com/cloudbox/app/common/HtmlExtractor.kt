@@ -139,6 +139,15 @@ object HtmlExtractor {
     fun extractPuid(html: String): String? = RE_PUID.find(html)?.groupValues?.get(1)
 
     /**
+     * filemoreajax 的 lx 参数（V48，2026-10-05）：**从页面 JS 实时提取**。
+     * 实测 /b 文件夹页下发 'lx':2、/u 个人主页下发 'lx':1——硬编码任一值
+     * 都会让另一种形态 zt=4 拒绝（TA"解析不能解析文件夹"的根因）。
+     * 提不到按 /b 形态（历史默认）。
+     */
+    fun extractLx(html: String): Int? =
+        Regex("""['"]lx['"]\s*:\s*'?(\d+)""").find(html)?.groupValues?.get(1)?.toIntOrNull()
+
+    /**
      * 单文件页 fid（var fid = 96810913;）。
      * 旧实现的 data-id="…" 在新版页面已不存在，保留仅作兜底。
      */

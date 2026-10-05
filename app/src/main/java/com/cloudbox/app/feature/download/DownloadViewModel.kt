@@ -106,6 +106,8 @@ class DownloadViewModel @Inject constructor(
         DownloadManager.STATUS_PAUSED -> "已暂停"
         DownloadManager.STATUS_SUCCESSFUL -> "已完成"
         DownloadManager.STATUS_FAILED -> "失败"
-        else -> "未知"
+        // -1 = DownloadManager 已查不到该任务（被清理/取消）。V48：原文案"未知"
+        // 让 TA 误以为是 bug——实际是假文件拦截后的记录清理，语义对齐"已失效"
+        else -> "已失效"
     }
 }

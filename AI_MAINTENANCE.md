@@ -4146,3 +4146,50 @@ TA 三组反馈（v0.1.195 真机）逐一销账：
 - 变更手机号/注销暂都指向账户概览页（myfile.php?item=1&v2，页内有入口；
   不臆造无依据的 URL——直链手机/注销页 URL 未实测）
 - logout 事件流接线（先清 Cookie 再导航，与 MainScreen.doLogout 同款时序）
+
+### 45.11 V48 六连修：下载链全面加固 + 文件夹解析根因（2026-10-05）
+
+TA 六连反馈（v0.1.197 真机）销账（1/5/6/3/2/4 顺序）：
+
+**① 「点下载=未知/失败，复制直链浏览器能下」——三层根因叠加，全面加固**
+实测证据链（agent-browser + curl + 浏览器 fetch 分离实验）：
+- 直链域每跳 Set-Cookie（acw_tc/cdn_sec_tc/down_ip）被域白名单（只认
+  lanzou/woozooo）整批丢弃 → POST ajax.php 验证缺 cookie
+- 验证页 el=1 失败、el=2 才过（curl/浏览器双验证）；resolveVerifiedUrl
+  全 el 失败时 V47 回落**原始直链**入队 → DownloadManager 无 JS 吃挑战页
+  → 假文件校验 remove 记录 → 先"失败"后"未知"（-1 查不到任务）
+- **CDN（lanosso.com）实测五种头组合裸请求全通**（206+APK 头）——
+  交给 DownloadManager 的必须是 CDN URL，任何直链原样都是死路
+修四层：
+a. CookiePersistenceJar：反爬 cookie 名单（acw_tc/cdn_sec_tc/down_ip/
+   acw_sc__v2）按名字放行任意域——它们无登录语义，白名单本意是防登录
+   cookie 被钓鱼域骗走，不适用于 CDN 会话凭证
+b. ensureDownloadable 出口严格化：probe 返回 (head, finalUrl)，文件流时
+   直接用 302 跟随后的最终 URL（V47 finalizeUrl 并入，消时序缝隙）；
+   验证页/挑战循环用尽 → **抛 ApiError**（不再原链入队假成功）；
+   仅 IOException 回落原链
+c. enqueue 预检：Range 0-0 探首字节，gzip/HTML/JSON 形态 → 抛错不入队
+   （第二道防线，覆盖解析与入队间的直链过期窗口）
+d. enqueue 异常防护×3（downloadSingle/downloadSelected/ResolveViewModel
+   .download）：runCatching 包住——不包会绕过 Result 机制直接炸协程
+e. -1 状态文案"未知"→"已失效"（假文件清理后的记录态，语义对齐）
+UI 错误信息全部可读（"请重试，或复制直链到浏览器下载"）。
+
+**⑤ 分享码开关显示开了**：ShareLinkDialog 初始值写死 true → 改读页面
+实际状态（shareLinkCode 非空=启用）
+
+**⑥ 分享链显示 JS 源码**：二维码 JS（'code',{text:'https://…'）不含
+'<'，V47 清洗漏网 → 改**总是提取** RE_HTTP_URL（纯 URL 提取=无损）
+
+**③ 收藏长按菜单仍飞左下**：V47 行内锚定已在 v0.1.197——TA 描述的
+"左侧下方"=v0.1.195 全屏 Box 版行为（DropdownMenu 锚全屏容器底部），
+**版本未跟上**。本次加 offset 72dp 微调（视觉中心落条目中部），回复中
+明确请 TA 确认装 197+
+
+**② 首页顶部空白**：TopAppBar 64→52dp + 搜索条 vertical 6→2dp
+
+**④ 文件夹解析不能**：根因=**lx 参数**。实测 /b 文件夹页 JS 下发 'lx':2、
+/u 个人主页下发 'lx':1，App 硬编码 lx=2 → 个人主页形态 zt=4 拒绝。
+filemoreajax 接口双形态实测（file=/uid= 等价、lx=1 通 lx=4 拒）。
+修=HtmlExtractor.extractLx 实时提取（默认 2），resolveFolderFromPage
+接线。t/k/fid/uid/puid 提取与 DTO（name_all）实测全部兼容无需动。

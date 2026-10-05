@@ -142,6 +142,8 @@ class DirectLinkRepositoryImpl @Inject constructor(
         // 老页面没有时降级空串（服务端多数仍接受）
         val uid = HtmlExtractor.extractUid(sharePage).orEmpty()
         val puid = HtmlExtractor.extractPuid(sharePage).orEmpty()
+        // V48（2026-10-05）：lx 实时提取（个人主页 /u 形态=1，文件夹 /b 形态=2）
+        val lx = HtmlExtractor.extractLx(sharePage) ?: 2
 
         // 2) 翻页列出文件夹内全部文件
         val files = mutableListOf<Pair<String, String>>() // (fileUrl, pwd)
@@ -149,6 +151,9 @@ class DirectLinkRepositoryImpl @Inject constructor(
         while (true) {
             val resp = apiClient.apiService.getShareFileList(
                 fileFid = fid,
+                // V48：lx 从页面 JS 提取（/b 文件夹=2、/u 个人主页=1，
+                // 硬编码 2 会让个人主页形态 zt=4 拒绝）
+                lx = lx,
                 pg = pg,
                 fid = fid,
                 uid = uid,
@@ -410,77 +415,94 @@ class DirectLinkRepositoryImpl @Inject constructor(
      * 只读前 64KB 判断（gzip 挑战页需要完整流才能解；探测连接是一次性的，
      * 真实下载是后续独立请求，读到 64KB 即断开无副作用）；任何异常回落原链。
      */
-    private fun ensureDownloadable(link: DirectLink): DirectLink = runCatching {
+    /**
+     * 逐级拆直链中间页，**出口严格化**（V48，2026-10-05 重构）。
+     *
+     * 形态链（实测 2026-10-05）：gzip 挑战 → 验证页 → 真 CDN 直链。
+     * 每轮 [probeMiddlePage] 返回 (head, finalUrl)：
+     * - head == null → 已是文件流，finalUrl 即 302 跟随后的 CDN 地址，直接采用
+     *  （V47 的 finalizeUrl 并入此处：探测请求本身就带最终 URL，省一次重复
+     *   请求，并消除"探测时是文件、finalize 时变挑战"的时序缝隙）
+     * - head 是验证页 → [resolveVerifiedUrl]；全 el 失败 → **抛错**（V47 及以前
+     *   回落原始直链交给 DownloadManager，无 JS 必吃挑战页 → 假文件 →
+     *   TA 真机"点下载=未知/失败"的直接成因。宁可明确报错，不假成功）
+     * - head 是挑战 → 算 cookie 进 jar（trio cookie 已由 saveFromResponse
+     *   按名字放行，不再被域白名单丢弃）→ 下一轮
+     *
+     * 循环上限 4（挑战+验证+1 轮裕量）；用尽仍非文件流 → 抛错。
+     * 仅网络级异常（IOException）回落原链（保底可用浏览器打开的场景）。
+     */
+    private fun ensureDownloadable(link: DirectLink): DirectLink {
         var current = link
-        repeat(3) {
-            val head = probeMiddlePage(current) ?: return@runCatching finalizeUrl(current)
+        repeat(4) {
+            val probe = try {
+                probeMiddlePage(current)
+            } catch (e: java.io.IOException) {
+                return current // 网络故障：原链交回（DownloadManager 可能自行重试）
+            }
+            if (probe.head == null) {
+                // 文件流：URL 换成跟随 302 后的最终地址（referer 同步换直链，
+                // 贴真浏览器 302 后的请求形态；CDN 实测裸请求可下）
+                return if (probe.finalUrl != current.url) {
+                    current.copy(url = probe.finalUrl, referer = current.url)
+                } else current
+            }
             when {
                 // 形态 A：业务验证页 → POST 同目录 ajax.php 拿真实下载地址
-                head.contains("down_r(") -> {
-                    val real = resolveVerifiedUrl(current.url, head) ?: return@runCatching finalizeUrl(current)
+                probe.head.contains("down_r(") -> {
+                    val real = resolveVerifiedUrl(current.url, probe.head)
+                        ?: throw ApiError.Business(
+                            -1,
+                            "下载链接需要人机验证，自动通过失败（服务端风控）——请稍后重试，或复制链接到浏览器下载"
+                        )
                     current = current.copy(url = real)
                 }
                 // 形态 B/G：acw 挑战 —— 静态算法优先，WebView 兜底
                 else -> {
-                    val staticValue = AcwScV2.compute(head)?.substringAfter('=')
+                    val staticValue = AcwScV2.compute(probe.head)?.substringAfter('=')
                     if (staticValue != null) {
                         putAcwCookie(current.url, staticValue)
                     } else {
-                        val wvCookie = challengeCookieFor(current) ?: return@runCatching finalizeUrl(current)
+                        val wvCookie = challengeCookieFor(current)
+                            ?: throw ApiError.Business(
+                                -1,
+                                "反爬挑战无法解开（算法可能已更新）——请稍后重试，或复制链接到浏览器下载"
+                            )
                         putChallengeCookie(current.url, wvCookie)
                     }
-                    // 带 cookie 下一轮重试同一直链（落在形态 A 或真文件）
+                    // 带 cookie 下一轮重试同一直链
                 }
             }
         }
-        finalizeUrl(current)
-    }.getOrDefault(link)
+        throw ApiError.Business(
+            -1,
+            "直链多重挑战未通过（服务端风控升级）——请稍后重试，或复制链接到浏览器下载"
+        )
+    }
 
-    /**
-     * V47（2026-10-04）：探测为"真文件流"后，把直链替换为**跟随 302 后的最终 URL**。
-     *
-     * 为什么：slsstm2 直链本身是 302 跳到 lanosso.com CDN 的（真浏览器行为实测，
-     * 2026-10-04 h1050.lanosso.com 返回 908425B 真 APK 与 CI 产物逐字节同大小）。
-     * OkHttp 探测时自动跟了 302 看到真流；但若把**原始挑战链**交给系统
-     * DownloadManager，它不会解 acw 挑战，会把挑战页当文件存盘（TA 真机
-     * "下载到本地 = 4.7K 假文件"的根因）。CDN URL 无挑战，直接可拉。
-     *
-     * 实现：再发一次 GET（跟重定向）读 resp.request.url 即最终地址；
-     * 任何异常回落原链（探测保守，绝不因 finalize 失败丢直链）。
-     */
-    private fun finalizeUrl(link: DirectLink): DirectLink = runCatching {
-        okHttp.newCall(
-            Request.Builder()
-                .url(link.url)
-                .header("Referer", link.referer)
-                .build()
-        ).execute().use { resp ->
-            val finalUrl = resp.request.url.toString()
-            // referer 同步换成直链本身：真实浏览器 302 后的请求 Referer 即直链，
-            // CDN 侧万一校验来源也不会拿分享页这种跨域 referer 出岔子
-            if (finalUrl != link.url && resp.isSuccessful) {
-                link.copy(url = finalUrl, referer = link.url)
-            } else link
-        }
-    }.getOrDefault(link)
+    /** 探测结果：head=中间页可读文本（null=真文件流）；finalUrl=跟随 302 后的最终地址 */
+    private data class ProbeResult(val head: String?, val finalUrl: String)
 
     /**
      * 探测直链响应：是中间页（gzip 挑战 / 明文挑战 / 验证页）返回其可读文本，
-     * 是真文件流返回 null。
+     * 是真文件流返回 head=null。
      *
      * gzip 魔数（1f 8b）判定优先于一切 Content-Type——挑战页 gzip 是**不带
      * Content-Encoding 的裸 gzip**，OkHttp 原样透传；解开后无挑战/验证标记的
-     * gzip 是真 .gz 文件，同样返回 null（解不出完整流按 null 处理，不误杀）。
+     * gzip 是真 .gz 文件，同样按文件流处理（解不出完整流按 null 处理，不误杀）。
+     *
+     * 网络异常直接抛出（调用方区分"网络故障"与"文件流"——runCatching 吞掉
+     * 异常返回 null 会让两者混淆，V48 起 IOException 上抛）。
      */
-    private fun probeMiddlePage(link: DirectLink): String? = runCatching {
+    private fun probeMiddlePage(link: DirectLink): ProbeResult {
         okHttp.newCall(
             Request.Builder()
                 .url(link.url)
                 .header("Referer", link.referer)
                 .build()
         ).execute().use { resp ->
-            if (!resp.isSuccessful) return@runCatching null
-            val input = resp.body?.byteStream() ?: return@runCatching null
+            if (!resp.isSuccessful) return ProbeResult(null, resp.request.url.toString())
+            val input = resp.body?.byteStream() ?: return ProbeResult(null, resp.request.url.toString())
             // 64KB 上限：挑战/验证页实测 < 5KB；真文件读到 64KB 即可判"非 HTML"
             val buf = ByteArray(64 * 1024)
             var n = 0
@@ -489,8 +511,8 @@ class DirectLinkRepositoryImpl @Inject constructor(
                 if (r <= 0) break
                 n += r
             }
-            if (n < 2) return@runCatching null
-            val head = if (buf[0] == 0x1f.toByte() && buf[1] == 0x8b.toByte()) {
+            if (n < 2) return ProbeResult(null, resp.request.url.toString())
+            val body = if (buf[0] == 0x1f.toByte() && buf[1] == 0x8b.toByte()) {
                 // gunzip；截断的 gzip（真 .gz 文件被 64KB 截断）解不出挑战标记 → 空串 → null
                 runCatching {
                     java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(buf, 0, n))
@@ -499,13 +521,14 @@ class DirectLinkRepositoryImpl @Inject constructor(
             } else {
                 String(buf, 0, n, Charsets.UTF_8)
             }
-            when {
-                head.contains("var arg1=") || head.contains("acw_sc__v2") -> head
-                head.contains("down_r(") -> head
+            val head = when {
+                body.contains("var arg1=") || body.contains("acw_sc__v2") -> body
+                body.contains("down_r(") -> body
                 else -> null
             }
+            return ProbeResult(head, resp.request.url.toString())
         }
-    }.getOrNull()
+    }
 
     /** 把静态算出的 acw_sc__v2 写进共享 CookieJar（与 [solveAcwIfNeeded] 同域规则） */
     private fun putAcwCookie(url: String, value: String) {

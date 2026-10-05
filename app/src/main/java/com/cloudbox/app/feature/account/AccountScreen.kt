@@ -412,7 +412,10 @@ private fun ShareLinkDialog(
     onCopyLink: (String, String?) -> Unit,
     onConfirm: (Boolean, String) -> Unit
 ) {
-    var enable by remember { mutableStateOf(true) }
+    // V48（TA 真机实锤"没有启用分享码但显示开启"）：初始值读**页面解析出的
+    // 实际状态**——个人分享链有密码（shareLinkCode 非空）= 访问码已启用。
+    // 此前写死 true，纯 UI 假状态。
+    var enable by remember { mutableStateOf(!shareLinkCode.isNullOrBlank()) }
     var code by remember { mutableStateOf(shareLinkCode ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
