@@ -672,10 +672,10 @@ class DirectLinkRepositoryImpl @Inject constructor(
                 try {
                     val html = getPage(candidateUrl, originBaseOf(candidateUrl))
                     return candidateUrl to html
-                } catch (_: Exception) {
+                } catch (e2: Exception) {
                     // 该候选域也坏 → 试下一个（同样只认域级故障，
                     // 网络/超时类异常直接抛，避免误导排障方向）
-                    if (!isDomainLevelFailure(_)) throw _
+                    if (!isDomainLevelFailure(e2)) throw e2
                 }
             }
             // 全部候选失败：抛原始异常（别吞——「网络不可用」和「域名死绝」的
