@@ -148,7 +148,11 @@ object DomainUtils {
      *   子域不挑（wwbig/wwt/www 同一分享 ID 全 200），保原子域优先 + www 变体兜底。
      */
     private val FALLBACK_SHARE_ZONES = listOf(
-        "lanzoui.com", "lanzoux.com", "lanzoub.com", "lanzok.com", "lanzoup.com"
+        // 2026-10-06 实测证书状态：lanzoui ✅ / lanzoup ✅ / lanzouq ✅（V45 死后
+        // 复活，9-22 新证书）；lanzoux ❌（证书 8-31 过期未续——本轮救护扩展的
+        // 直接诱因）；lanzoub/lanzok ❌（握手失败）。坏域留在表里无害（候选逐个
+        // 试、失败自动跳过），下次轮换再按实测调。
+        "lanzoui.com", "lanzouq.com", "lanzoup.com", "lanzoux.com", "lanzoub.com", "lanzok.com"
     )
 
     /**

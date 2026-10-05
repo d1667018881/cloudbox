@@ -4231,3 +4231,38 @@ probe（302→CDN finalize）。超时 25s；el 轮换游标跨 reload 保持。
 **② 顶栏图标变特别小——height(52dp) 连状态栏 inset 一起算**
 M3 TopAppBar 的内容高度 = 52dp − 状态栏 inset(~24-30dp) ≈ 20dp，图标
 被压缩。回滚 height 与搜索条 padding；顶部空白精修改走截图对拍流程。
+
+### 45.14 V48d：lanzoux 证书过期救护 + 蓝云原版逆向成果全量验证（2026-10-06 凌晨）
+
+**① lanzoux.com 解析报 "Chain validation failed"——非 App bug**
+TA 反馈 https://lanzoux.com/iG42h49hhz0d 解析失败、换 lanzouq 正常。
+openssl 实锤：lanzoux.com SSL 证书 **2026-08-31 过期未续**（AlphaSSL），
+OkHttp 抛 SSLException("Chain validation failed")。lanzouq.com 是 9-22 新
+证书（V45 时 A 记录死过，现已复活）。
+修：fetchSharePage 救护触发从 UnknownHostException 扩到域级故障
+（isDomainLevelFailure：DNS 死 + SSLException/CertificateException 沿
+cause 链 8 层）——证书过期/自签/链断/主机名不匹配都是「这个域的 HTTPS
+坏了」，换活域同分享 ID 照常打开。候选表加 lanzouq.com（六域证书实测：
+lanzoui/lanzoup/lanzouq ✅、lanzoux ❌过期、lanzoub/lanzok ❌握手失败）。
+
+**② 蓝云原版 APK 逆向成果验证（TA 转来另一 AI 的解密交付）**
+全量重放 verify 流程（本地跑 container_decrypt + 严格 Lua5.3 chunk walk +
+41364 字符串常量 sdec 全量 UTF-8）：
+- 55/55 文件结构严格吻合（无 STRUCTURE MISMATCH）
+- 41364 常量 41355 有效（99.98%）；9 个"无效"全为同一假阳性
+  （[\xe4-\xe9][\x80-\xbf][\x80-\xbf]=中文 UTF-8 匹配 Lua pattern，本来就是
+  二进制正则，非解密错误——verify.py 判据小盲点，不影响结论）
+- 交叉对拍（硬证据）：计算acw_sc_v2 的 40 项置换表 + 密钥
+  3000176000856006061501533003690027800375 与本仓 AcwScV2（协议层独立
+  逆向）逐字符一致
+- REPORT 断言抽查全中：344089JbfS4903== / LanyunByStardew6（ty_core）、
+  pm clear / rm -r（func.lua）、loadstring("return "..)（download.lua:497）
+- 协议事实吻合：pc.woozooo.com 默认域、doupload.php task=2/19/47、
+  uid后缀、filemoreajax——与 LanzouApiService 完全对应
+结论：**解密成果正确**。APK 本体已下载归档 security_analysis/lanyun_apk/
+（4.7MB，versionName 1.3.4.10；MD5 1cd38c84 与 REPORT 的 c2a844d 不同=
+线上包与其分析样本不同构建，供知悉）。
+原版下载方式确认：webview.lua onDownloadStart——WebView 全程渲染分享页
+用户点「普通下载」→ onDownloadStart 拿最终 URL → DownloadManager/第三方
+下载器。与 V48b/V48c 的隐藏 WebView 方向一致；验证页正是原版用户也会
+遇到的（服务器 IP + TA 手机 IP 双双实测吃到）。

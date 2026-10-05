@@ -653,7 +653,14 @@ class DirectLinkRepositoryImpl @Inject constructor(
         val origin = originBaseOf(shareUrl)
         try {
             return shareUrl to getPage(shareUrl, origin)
-        } catch (e: java.net.UnknownHostException) {
+        } catch (e: Exception) {
+            // V48d（2026-10-06）：救护触发从「DNS 死」扩到「域级故障」。
+            // 实锤案例：lanzoux.com SSL 证书 2026-08-31 过期未续（AlphaSSL），
+            // OkHttp 抛 SSLException("Chain validation failed")——域名活着但
+            // 证书死了，换活域同分享 ID 照常打开（TA 实测 lanzouq 可用）。
+            // SSL 族全认：过期/自签/链不完整/主机名不匹配，都是「这个域的
+            // HTTPS 坏了」而不是「网络不可用」，换域都能救。
+            if (!isDomainLevelFailure(e)) throw e
             val host = shareUrl.toHttpUrlOrNull()?.host ?: throw e
             val candidates = DomainUtils.fallbackShareHosts(host)
                 .filter { it != host }
@@ -665,14 +672,37 @@ class DirectLinkRepositoryImpl @Inject constructor(
                 try {
                     val html = getPage(candidateUrl, originBaseOf(candidateUrl))
                     return candidateUrl to html
-                } catch (_: java.net.UnknownHostException) {
-                    // 该候选域也死了 → 试下一个
+                } catch (_: Exception) {
+                    // 该候选域也坏 → 试下一个（同样只认域级故障，
+                    // 网络/超时类异常直接抛，避免误导排障方向）
+                    if (!isDomainLevelFailure(_)) throw _
                 }
             }
             // 全部候选失败：抛原始异常（别吞——「网络不可用」和「域名死绝」的
-            // 排障路径不同，保留原始 UnknownHost 信息给用户看真实原因）
+            // 排障路径不同，保留原始信息给用户看真实原因）
             throw e
         }
+    }
+
+    /**
+     * 异常是否为「域级故障」（换域可救）：DNS 解析失败或 TLS 证书问题。
+     * 沿 cause 链找——OkHttp/Retrofit 会把底层异常包多层。
+     */
+    private fun isDomainLevelFailure(e: Throwable): Boolean {
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 8) {
+            when (t) {
+                is java.net.UnknownHostException -> return true
+                // SSLHandshakeException / SSLPeerUnverifiedException 都是 SSLException 子类；
+                // 证书过期在 Conscrypt 上表现为 SSLException("Chain validation failed")
+                is javax.net.ssl.SSLException -> return true
+                is java.security.cert.CertificateException -> return true
+            }
+            t = t.cause
+            depth++
+        }
+        return false
     }
 
     /**
