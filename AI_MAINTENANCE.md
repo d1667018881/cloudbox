@@ -4301,3 +4301,42 @@ WebView 渲染用户手滑即可，V48c 观察项不变）、Android/data hack�
 **验收点**：收藏页建组/移动/重命名/删组→备份→恢复（分组不丢）；填
 wwbig.lanzouq.com 开手动域替换→解析任意 lanzou 链接（应全部换域成功）；
 配 ADM 包名开第三方下载→解析页下载跳 ADM；关闭开关回内置队列。
+
+**V49 对拍总表（证据链，下个接手 AI 从这里开始）**：
+
+对拍方法：蓝云 APK（线上 1cd38c84）与 TA 朋友样本（c2a844d7）解密源码
+`/tmp/lanyun/src_readable/`（已归档 `security_analysis/lanyun_apk/`，
+CloudBox 侧不存副本）——提取 143 个设置键 + 各页面源码（设置 5 页/
+about 3381 行/recycle 1905 行/home 9705 行）逐项找 CloudBox 等价实现。
+
+| 蓝云功能（设置键） | CloudBox 等价实现 | 位置 |
+|---|---|---|
+| 回收站（recycle.lua） | RecycleScreen（恢复全部/清空/按文件夹浏览） | feature/recycle/ |
+| 关于页（about.lua 3381 行） | AboutScreen（检查更新+应用内下载+项目地址+帮助+FAQ+反馈+法律+开源许可+更新日志） | feature/about/ |
+| 消息设置（message_settings.lua） | 剪贴板识别 get_clipboard / 流量提醒 warn_mobile_network / 删除二次确认 delete_secondary_confirmation / 收藏自动检查 auto_check_days | V30 批，SettingsScreen |
+| 行为设置（action_settings.lua） | 自动加载下一页 auto_load | V31 批，FileList |
+| 文件设置（file_settings.lua 1006 行） | 上传伪装 spoof_suffix_list+下载还原（UploadRepositoryImpl/DownloadRepositoryImpl）| V32/V33 批 |
+| 自定义设置（customize_settings.lua 2457 行） | show_file_type_label / two_line_title / 图标包 icon_pack_path（列表网格手动切换替代 pad_mode 双列） | V30/V34 批 |
+| 下载设置（download_settings.lua 3779 行） | download_folder / send_message 通知 / 第三方下载器（V49 补）/ 下载修改后缀=伪装还原已覆盖 | V34 批+V49 |
+| home_sort_mode/folder_sort_mode 等排序 9 键 | 四维排序（名称AZ/ZA/拼音/时间）+ 目录记忆 | FileListViewModel |
+| bookmark_folder / bookmark_folder_data | **V49 移植**：聚合式分组（无独立表） | feature/favorites/ |
+| link_replacement / link_replacement_new | **V49 移植**：手动域替换 | SettingsScreen + DirectLinkRepositoryImpl |
+| use_third_party_downloader + custom_download_manager_pack/activity | **V49 移植**：解析页下载分流 | ResolveViewModel |
+
+明确不移植（有据）：滑块验证组件（线上新包独有，WebView 用户手滑即可，
+V48c 观察项不变）/ Android_data_hack（绕系统限制，风险）/ 滑动关对话框
+swpie_to_close_dialog（易误触）/ 主题色自绘体系（已有 MD3 主题）/
+use_hide_theme 隐藏主题（娱乐向）/ stat 本地统计（无网络需求）。
+
+**代码改动面（git diff --stat，16 文件 +721/-12）**：DB 层 4 文件
+（Entity+Dao+AppDatabase v8+DatabaseModule 迁移）→ 领域层 3 文件
+（模型+接口+实现）→ 备份 1 文件（folder 字段双向）→ 设置层 3 文件
+（Store 5 键+VM+Screen 两区两框）→ 功能层 3 文件（Favorites VM+Screen
+三组件、ResolveViewModel 分流）+ DirectLinkRepositoryImpl（域替换入口）。
+
+**首轮 CI 三个编译错（907c875 修，教训）**：①MIGRATION_7_8 插进了
+@Module object 内部 @Provides 注解与函数之间——注解错挂到属性上
+（**顶层插入锚必须选在 object 外**）②Icons.Filled.Folder 不在
+material-icons-core（extended 才有，本仓未引入）→ 换 List
+（**core 图标集只有 37 个，不熟的名字先查再写**）③handToThirdPartyDownloader
+读 DataStore first() 忘标 suspend（**普通函数内读 Flow 一律先想协程**）。
