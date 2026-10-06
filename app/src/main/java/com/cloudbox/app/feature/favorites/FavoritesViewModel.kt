@@ -22,13 +22,19 @@ import javax.inject.Inject
  */
 data class FavoritesUiState(
     val favorites: List<FavoriteShare> = emptyList(),
+    /** V49：当前过滤的分组（null = 全部，"" = 未分组） */
+    val currentFolder: String? = null,
     /** 是否正在检查（原版 checkingUpdate） */
     val checking: Boolean = false,
     val checkDone: Int = 0,
     val checkTotal: Int = 0,
     val checkCurrent: String = "",
     val message: String? = null
-)
+) {
+    /** 从条目聚合出的分组名列表（按名称排序；无独立表，见 Entity.folder 注释） */
+    val folders: List<String>
+        get() = favorites.map { it.folder }.filter { it.isNotBlank() }.distinct().sorted()
+}
 
 @HiltViewModel
 class FavoritesViewModel @Inject constructor(
@@ -56,6 +62,47 @@ class FavoritesViewModel @Inject constructor(
             if (name.isNotBlank()) shareRepository.updateName(url, name.trim())
             shareRepository.updateRemark(url, remark.trim())
             _state.update { it.copy(message = "已保存") }
+        }
+    }
+
+    // ==================== V49：收藏夹分组（对齐原版 bookmark_folder） ====================
+
+    /** 切换分组过滤（null=全部，""=未分组） */
+    fun selectFolder(folder: String?) {
+        _state.update { it.copy(currentFolder = folder) }
+    }
+
+    /** 移动收藏到分组（空串=移回未分组） */
+    fun move(url: String, folder: String) {
+        viewModelScope.launch {
+            shareRepository.moveFavorite(url, folder)
+            _state.update { it.copy(message = if (folder.isBlank()) "已移出分组" else "已移入「${folder.trim()}」") }
+        }
+    }
+
+    /** 分组重命名 */
+    fun renameFolder(oldName: String, newName: String) {
+        viewModelScope.launch {
+            shareRepository.renameFolder(oldName, newName)
+            _state.update { state ->
+                state.copy(
+                    currentFolder = if (state.currentFolder == oldName) newName else state.currentFolder,
+                    message = "分组已重命名"
+                )
+            }
+        }
+    }
+
+    /** 删除分组（组内条目移回未分组） */
+    fun dissolveFolder(name: String) {
+        viewModelScope.launch {
+            shareRepository.dissolveFolder(name)
+            _state.update { state ->
+                state.copy(
+                    currentFolder = if (state.currentFolder == name) null else state.currentFolder,
+                    message = "分组已删除（组内收藏已移回未分组）"
+                )
+            }
         }
     }
 

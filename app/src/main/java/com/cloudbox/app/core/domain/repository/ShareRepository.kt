@@ -42,6 +42,17 @@ interface ShareRepository {
 
     /** 修正收藏的类型与提取码（重新收藏时调用，保证 folder 型能被更新检查覆盖） */
     suspend fun correctKind(url: String, kind: String, pass: String)
+
+    // ==================== V49：收藏夹分组（对齐原版 bookmark_folder） ====================
+
+    /** 移动收藏到分组（空串 = 移回未分组） */
+    suspend fun moveFavorite(url: String, folder: String)
+
+    /** 分组重命名 */
+    suspend fun renameFolder(oldName: String, newName: String)
+
+    /** 删除分组（组内条目移回未分组） */
+    suspend fun dissolveFolder(name: String)
 }
 
 /** 一次「检查收藏文件夹更新」的结果汇总 */

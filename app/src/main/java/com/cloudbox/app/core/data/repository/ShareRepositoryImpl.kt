@@ -39,7 +39,9 @@ class ShareRepositoryImpl @Inject constructor(
                 kind = old?.kind ?: "file",
                 pass = old?.pass ?: "",
                 hasUpdate = old?.hasUpdate ?: false,
-                lastCheckAt = old?.lastCheckAt ?: 0L
+                lastCheckAt = old?.lastCheckAt ?: 0L,
+                // V49：重新收藏保留原分组（对齐原版 bookmark_folder_data 语义）
+                folder = old?.folder ?: ""
             )
         )
     }
@@ -138,6 +140,22 @@ class ShareRepositoryImpl @Inject constructor(
         db.favoriteShareDao().updateKindAndPass(url, kind, pass)
     }
 
+    // ==================== V49：收藏夹分组 ====================
+
+    override suspend fun moveFavorite(url: String, folder: String) {
+        db.favoriteShareDao().updateFolder(url, folder.trim())
+    }
+
+    override suspend fun renameFolder(oldName: String, newName: String) {
+        val t = newName.trim()
+        if (t.isEmpty() || t == oldName) return
+        db.favoriteShareDao().renameFolder(oldName, t)
+    }
+
+    override suspend fun dissolveFolder(name: String) {
+        db.favoriteShareDao().dissolveFolder(name)
+    }
+
     // ==================== 内部 ====================
 
     /** 条目间延时，避开风控（与 resolveBatch 同量级） */
@@ -167,6 +185,7 @@ class ShareRepositoryImpl @Inject constructor(
         kind = kind,
         pass = pass,
         hasUpdate = hasUpdate,
-        lastCheckAt = lastCheckAt
+        lastCheckAt = lastCheckAt,
+        folder = folder
     )
 }

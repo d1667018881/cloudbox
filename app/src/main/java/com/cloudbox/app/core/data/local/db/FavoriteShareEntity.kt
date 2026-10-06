@@ -34,5 +34,13 @@ data class FavoriteShareEntity(
     val hasUpdate: Boolean = false,
 
     /** 上次检查时间戳（毫秒），0 = 从未检查 */
-    val lastCheckAt: Long = 0L
+    val lastCheckAt: Long = 0L,
+
+    /**
+     * V49（对齐原版 bookmark_folder / bookmark_folder_data，2026-10-06）：
+     * 收藏所属分组名，空串 = 未分组。分组列表由条目聚合而来（无独立表）——
+     * 原版的 bookmark_folder_data 是独立数组（允许空分组），但空分组
+     * 没有实际用途，聚合式少一张表、少一套迁移、删除最后一项后分组自动消失。
+     */
+    val folder: String = ""
 )

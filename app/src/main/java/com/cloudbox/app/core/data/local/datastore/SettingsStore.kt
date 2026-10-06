@@ -57,6 +57,18 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /** 删除二次确认。对齐原版 delete_secondary_confirmation（默认开） */
     private val keyDeleteConfirm = booleanPreferencesKey("delete_secondary_confirmation")
 
+    // ---- V49（对齐原版 v1.3.4.10，2026-10-06 蓝云源码对拍后确认的三项真差距） ----
+    /** 手动域替换开关。对齐原版 link_replacement（默认关） */
+    private val keyLinkReplacement = booleanPreferencesKey("link_replacement")
+    /** 手动替换的目标域，如 wwbig.lanzouq.com。对齐原版 link_replacement_new */
+    private val keyLinkReplacementNew = stringPreferencesKey("link_replacement_new")
+    /** 用第三方下载器下载直链（ADM/1DM 等）。对齐原版 use_third_party_downloader（默认关） */
+    private val keyUseThirdPartyDownloader = booleanPreferencesKey("use_third_party_downloader")
+    /** 第三方下载器包名，如 com.dv.adm。对齐原版 custom_download_manager_pack */
+    private val keyCustomDownloaderPack = stringPreferencesKey("custom_downloader_pack")
+    /** 第三方下载器 Activity 全限定名（可空=只约束包名）。对齐原版 custom_download_manager_activity */
+    private val keyCustomDownloaderActivity = stringPreferencesKey("custom_downloader_activity")
+
     // ---- V34（第五批）：下载位置与通知（对齐原版 download_folder / send_message） ----
     /** 系统下载器保存位置：Downloads 下的子目录名（空串 = 直接用 Downloads 根） */
     private val keyDownloadFolder = stringPreferencesKey("download_folder")
@@ -110,6 +122,40 @@ class SettingsStore @Inject constructor(private val context: Context) {
      */
     val warnMobileNetwork: Flow<Boolean> = context.settingsDataStore.data.map {
         it[keyWarnMobileNetwork] ?: true
+    }
+
+    // ==================== V49 新增（对齐原版 v1.3.4.10 蓝云源码） ====================
+
+    /**
+     * 手动域替换开关（默认关）。
+     *
+     * 自动救护只认 FALLBACK_SHARE_ZONES 里的已知尾缀；蓝奏云再换新尾缀
+     * （V45→V48d 半年换过三茬）时自动表可能滞后。给用户留一个逃生口：
+     * 填上社区新发现的活域，所有解析请求直接换域再走正常链路。
+     * 对齐原版 link_replacement / link_replacement_new（home_func.lua「链接转换」）。
+     */
+    val linkReplacementEnabled: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyLinkReplacement] ?: false
+    }
+
+    /** 手动替换目标域（如 wwbig.lanzouq.com，空=未配置） */
+    val linkReplacementNew: Flow<String> = context.settingsDataStore.data.map {
+        it[keyLinkReplacementNew] ?: ""
+    }
+
+    /** 是否把解析出的直链交给第三方下载器（默认关，走内置下载队列） */
+    val useThirdPartyDownloader: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyUseThirdPartyDownloader] ?: false
+    }
+
+    /** 第三方下载器包名（空=不约束，交系统选择器） */
+    val customDownloaderPack: Flow<String> = context.settingsDataStore.data.map {
+        it[keyCustomDownloaderPack] ?: ""
+    }
+
+    /** 第三方下载器 Activity 全限定名（可空） */
+    val customDownloaderActivity: Flow<String> = context.settingsDataStore.data.map {
+        it[keyCustomDownloaderActivity] ?: ""
     }
 
     // ==================== V30 新增（对齐原版 v1.3.4.9 自定义设置页） ====================
@@ -284,6 +330,21 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setSendMessage(enabled: Boolean) = edit { p -> p[keySendMessage] = enabled }
 
+    // ==================== V49 setters ====================
+
+    suspend fun setLinkReplacement(enabled: Boolean) = edit { p -> p[keyLinkReplacement] = enabled }
+
+    suspend fun setLinkReplacementNew(domain: String) =
+        edit { p -> p[keyLinkReplacementNew] = sanitizeHost(domain) }
+
+    suspend fun setUseThirdPartyDownloader(enabled: Boolean) =
+        edit { p -> p[keyUseThirdPartyDownloader] = enabled }
+
+    suspend fun setCustomDownloader(pack: String, activity: String) = edit { p ->
+        p[keyCustomDownloaderPack] = pack.trim()
+        p[keyCustomDownloaderActivity] = activity.trim()
+    }
+
     /**
      * 下载子目录名消毒。
      *
@@ -353,6 +414,12 @@ class SettingsStore @Inject constructor(private val context: Context) {
             p[keyDeleteConfirm]?.let { put(KEY_DELETE_CONFIRM, it.toString()) }
             p[keyDownloadFolder]?.let { put(KEY_DOWNLOAD_FOLDER, it) }
             p[keySendMessage]?.let { put(KEY_SEND_MESSAGE, it.toString()) }
+            // V49：三项真差距设置（域替换/第三方下载器），同步进备份防 N1 复发
+            p[keyLinkReplacement]?.let { put(KEY_LINK_REPLACEMENT, it.toString()) }
+            p[keyLinkReplacementNew]?.let { put(KEY_LINK_REPLACEMENT_NEW, it) }
+            p[keyUseThirdPartyDownloader]?.let { put(KEY_USE_THIRD_PARTY_DOWNLOADER, it.toString()) }
+            p[keyCustomDownloaderPack]?.let { put(KEY_CUSTOM_DOWNLOADER_PACK, it) }
+            p[keyCustomDownloaderActivity]?.let { put(KEY_CUSTOM_DOWNLOADER_ACTIVITY, it) }
         }
     }
 
@@ -385,7 +452,20 @@ class SettingsStore @Inject constructor(private val context: Context) {
         map[KEY_DELETE_CONFIRM]?.toLooseBool()?.let { p[keyDeleteConfirm] = it }
         map[KEY_DOWNLOAD_FOLDER]?.let { p[keyDownloadFolder] = sanitizeFolderName(it) }
         map[KEY_SEND_MESSAGE]?.toLooseBool()?.let { p[keySendMessage] = it }
+        // V49：还原三项
+        map[KEY_LINK_REPLACEMENT]?.toLooseBool()?.let { p[keyLinkReplacement] = it }
+        map[KEY_LINK_REPLACEMENT_NEW]?.let { p[keyLinkReplacementNew] = sanitizeHost(it) }
+        map[KEY_USE_THIRD_PARTY_DOWNLOADER]?.toLooseBool()?.let { p[keyUseThirdPartyDownloader] = it }
+        map[KEY_CUSTOM_DOWNLOADER_PACK]?.let { p[keyCustomDownloaderPack] = it.trim() }
+        map[KEY_CUSTOM_DOWNLOADER_ACTIVITY]?.let { p[keyCustomDownloaderActivity] = it.trim() }
     }
+
+    /** 域名清洗：去掉 scheme/路径尾巴，只留 host（备份码可能被手工编辑） */
+    private fun sanitizeHost(raw: String): String =
+        raw.trim()
+            .removePrefix("https://").removePrefix("http://")
+            .substringBefore('/').substringBefore(':')
+            .lowercase()
 
     /**
      * 宽松的布尔解析。
@@ -443,5 +523,11 @@ class SettingsStore @Inject constructor(private val context: Context) {
         // V34（第五批）：下载位置与通知
         const val KEY_DOWNLOAD_FOLDER = "download_folder"
         const val KEY_SEND_MESSAGE = "send_message"
+        // V49
+        const val KEY_LINK_REPLACEMENT = "link_replacement"
+        const val KEY_LINK_REPLACEMENT_NEW = "link_replacement_new"
+        const val KEY_USE_THIRD_PARTY_DOWNLOADER = "use_third_party_downloader"
+        const val KEY_CUSTOM_DOWNLOADER_PACK = "custom_downloader_pack"
+        const val KEY_CUSTOM_DOWNLOADER_ACTIVITY = "custom_downloader_activity"
     }
 }

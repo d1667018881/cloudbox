@@ -55,6 +55,20 @@ interface FavoriteShareDao {
     @Query("UPDATE favorite_shares SET kind=:kind, pass=:pass WHERE shareUrl=:url")
     suspend fun updateKindAndPass(url: String, kind: String, pass: String)
 
+    // ==================== V49：收藏夹分组（对齐 bookmark_folder） ====================
+
+    /** 移动到分组（空串 = 移回未分组） */
+    @Query("UPDATE favorite_shares SET folder=:folder WHERE shareUrl=:url")
+    suspend fun updateFolder(url: String, folder: String)
+
+    /** 分组重命名（一次事务改完，避免中途杀进程出现半改名状态） */
+    @Query("UPDATE favorite_shares SET folder=:newName WHERE folder=:oldName")
+    suspend fun renameFolder(oldName: String, newName: String)
+
+    /** 删除分组 = 全部条目移回未分组 */
+    @Query("UPDATE favorite_shares SET folder='' WHERE folder=:name")
+    suspend fun dissolveFolder(name: String)
+
     // ==================== V32：备份 / 恢复 / 重置 ====================
 
     /** 一次性取全部收藏（备份用，不需要 Flow 订阅） */

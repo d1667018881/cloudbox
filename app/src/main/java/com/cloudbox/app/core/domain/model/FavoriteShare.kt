@@ -38,7 +38,10 @@ data class FavoriteShare(
     val hasUpdate: Boolean = false,
 
     /** 上次检查时间戳（毫秒）。0 = 从未检查 */
-    val lastCheckAt: Long = 0L
+    val lastCheckAt: Long = 0L,
+
+    /** V49（对齐 bookmark_folder）：所属分组名，空串 = 未分组 */
+    val folder: String = ""
 ) {
     val isFolder: Boolean get() = kind == "folder"
 }

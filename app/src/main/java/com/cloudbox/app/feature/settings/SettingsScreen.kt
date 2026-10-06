@@ -60,6 +60,12 @@ fun SettingsScreen(
     val snackbar = remember { SnackbarHostState() }
     var uaDialog by remember { mutableStateOf(false) }
     var resolverDialog by remember { mutableStateOf(false) }
+    // V49：手动域替换 / 第三方下载器
+    var domainDialog by remember { mutableStateOf(false) }
+    var downloaderDialog by remember { mutableStateOf(false) }
+    var domainInput by remember { mutableStateOf(state.linkReplacementNew) }
+    var dlPackInput by remember { mutableStateOf(state.customDownloaderPack) }
+    var dlActivityInput by remember { mutableStateOf(state.customDownloaderActivity) }
     // 自定义伪装后缀列表
     var spoofDialog by remember { mutableStateOf(false) }
     var spoofInput by remember { mutableStateOf("") }
@@ -217,6 +223,32 @@ fun SettingsScreen(
             SettingRow("User-Agent（桌面 UA 伪装）", state.userAgent.take(30)) { uaDialog = true }
             SettingRow("第三方直链解析服务", state.thirdPartyResolver.ifEmpty { "未配置（使用内置解析）" }) { resolverDialog = true }
             SettingRow("域名配置", "远程/手动覆盖/连通性测试") { onOpenDomainConfig() }
+            // V49（对齐原版 link_replacement / home_func.lua「链接转换」）：
+            // 自动救护只认已知尾缀；蓝奏云换全新尾缀时用户手动填新域自救
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f).clickable { domainDialog = true }) {
+                    Text("手动域替换", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "解析链接时强制换成此域（自动救护不认识新域名时的逃生口）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.linkReplacementNew.isNotBlank()) {
+                        Text(
+                            "当前：${state.linkReplacementNew}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Switch(
+                    checked = state.linkReplacementEnabled,
+                    onCheckedChange = viewModel::saveLinkReplacement
+                )
+            }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -325,6 +357,32 @@ fun SettingsScreen(
                 Switch(
                     checked = state.warnMobileNetwork,
                     onCheckedChange = viewModel::saveWarnMobileNetwork
+                )
+            }
+            // V49（对齐原版 use_third_party_downloader / custom_download_manager*）：
+            // 解析出的直链交给用户指定的下载器（ADM/1DM 等），不进内置队列
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f).clickable { downloaderDialog = true }) {
+                    Text("第三方下载器", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "解析后把直链交给指定下载器（ADM/1DM 等）下载",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.customDownloaderPack.isNotBlank()) {
+                        Text(
+                            "当前：${state.customDownloaderPack}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Switch(
+                    checked = state.useThirdPartyDownloader,
+                    onCheckedChange = viewModel::saveUseThirdPartyDownloader
                 )
             }
             HorizontalDivider()
@@ -625,6 +683,75 @@ fun SettingsScreen(
                     TextButton(onClick = { spoofDialog = false }) { Text("取消") }
                 }
             }
+        )
+    }
+    if (domainDialog) {
+        AlertDialog(
+            onDismissRequest = { domainDialog = false },
+            title = { Text("手动域替换") },
+            text = {
+                Column {
+                    Text(
+                        "开启后解析链接时把域名强制换成此处填写的域（如 wwbig.lanzouq.com）。" +
+                            "适用于官方换新域名而 App 自动救护未跟上的场景。留空 = 不替换。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = domainInput,
+                        onValueChange = { domainInput = it },
+                        singleLine = true,
+                        label = { Text("目标域名") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.saveLinkReplacementNew(domainInput)
+                    domainDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { domainDialog = false }) { Text("取消") } }
+        )
+    }
+    if (downloaderDialog) {
+        AlertDialog(
+            onDismissRequest = { downloaderDialog = false },
+            title = { Text("第三方下载器") },
+            text = {
+                Column {
+                    Text(
+                        "开启后，解析页点「下载」会把直链交给下面的下载器而不是内置队列。" +
+                            "包名如 com.dv.adm；Activity 可留空（= 包内任一能收下载 Intent 的页面）。" +
+                            "发送失败会自动回落内置下载。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = dlPackInput,
+                        onValueChange = { dlPackInput = it },
+                        singleLine = true,
+                        label = { Text("包名") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = dlActivityInput,
+                        onValueChange = { dlActivityInput = it },
+                        singleLine = true,
+                        label = { Text("Activity（可留空）") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.saveCustomDownloader(dlPackInput, dlActivityInput)
+                    downloaderDialog = false
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { downloaderDialog = false }) { Text("取消") } }
         )
     }
     if (uaDialog) {

@@ -2,10 +2,14 @@ package com.cloudbox.app.feature.favorites
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,7 +30,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -76,7 +82,11 @@ fun FavoritesScreen(
     viewModel: FavoritesViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
-    val favorites = state.favorites
+    // V49 分组过滤：null=全部（含所有分组），""=未分组
+    val favorites = when (state.currentFolder) {
+        null -> state.favorites
+        else -> state.favorites.filter { it.folder == state.currentFolder }
+    }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -86,6 +96,9 @@ fun FavoritesScreen(
     var menuTarget by remember { mutableStateOf<FavoriteShare?>(null) }
     // 删除二次确认
     var deleteTarget by remember { mutableStateOf<FavoriteShare?>(null) }
+    // V49：移动到分组对话框 / 分组管理对话框
+    var moveTarget by remember { mutableStateOf<FavoriteShare?>(null) }
+    var manageFolders by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -122,6 +135,27 @@ fun FavoritesScreen(
         )
     }
 
+    moveTarget?.let { fav ->
+        MoveToFolderDialog(
+            initialFolder = fav.folder,
+            folders = state.folders,
+            onDismiss = { moveTarget = null },
+            onConfirm = { folder ->
+                viewModel.move(fav.shareUrl, folder)
+                moveTarget = null
+            }
+        )
+    }
+
+    if (manageFolders) {
+        ManageFoldersDialog(
+            folders = state.folders,
+            onDismiss = { manageFolders = false },
+            onRename = { old, new -> viewModel.renameFolder(old, new) },
+            onDelete = { viewModel.dissolveFolder(it) }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
@@ -153,7 +187,7 @@ fun FavoritesScreen(
             )
         }
     ) { padding ->
-        if (favorites.isEmpty()) {
+        if (state.favorites.isEmpty()) {
             Column(
                 Modifier.fillMaxSize().padding(padding),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -189,6 +223,13 @@ fun FavoritesScreen(
                     }
                     HorizontalDivider(Modifier.padding(top = 6.dp))
                 }
+                // V49：分组过滤条（对齐原版 bookmark_folder 收藏夹分组）
+                FolderFilterRow(
+                    folders = state.folders,
+                    current = state.currentFolder,
+                    onSelect = { viewModel.selectFolder(it) },
+                    onManage = { manageFolders = true }
+                )
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(favorites, key = { it.shareUrl }) { fav ->
                         FavoriteRow(
@@ -205,7 +246,9 @@ fun FavoritesScreen(
                         // 长按后菜单飞到屏幕角落而非长按的条目处
                         if (menuTarget == fav) {
                             FavoriteMenu(fav, menuTarget, viewModel, context, onOpenShare,
-                                onEdit = { editTarget = fav }, onDismiss = { menuTarget = null })
+                                onEdit = { editTarget = fav },
+                                onMove = { moveTarget = fav },
+                                onDismiss = { menuTarget = null })
                         }
                         HorizontalDivider()
                     }
@@ -341,6 +384,7 @@ private fun FavoriteMenu(
     context: android.content.Context,
     onOpenShare: (String) -> Unit,
     onEdit: () -> Unit,
+    onMove: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     androidx.compose.material3.DropdownMenu(
@@ -354,6 +398,11 @@ private fun FavoriteMenu(
             text = { Text("编辑名称与备注") },
             leadingIcon = { Icon(Icons.Filled.Edit, null) },
             onClick = { onDismiss(); onEdit() }
+        )
+        DropdownMenuItem(
+            text = { Text(if (fav.folder.isBlank()) "移动到分组" else "移动分组（当前：${fav.folder}）") },
+            leadingIcon = { Icon(Icons.Filled.Folder, null) },
+            onClick = { onDismiss(); onMove() }
         )
         DropdownMenuItem(
             text = { Text(if (fav.pinned) "取消置顶" else "置顶") },
@@ -391,4 +440,186 @@ private fun FavoriteMenu(
             onClick = { onDismiss(); viewModel.remove(fav.shareUrl) }
         )
     }
+}
+
+
+// ==================== V49：收藏夹分组 UI（对齐原版 bookmark_folder） ====================
+
+/**
+ * 分组过滤条：全部 | 未分组 | 各分组 ⋯管理。
+ * 用 FilterChip 而不是 Tab：分组可增删，Chip 行语义更直（原版同款横排）。
+ */
+@Composable
+private fun FolderFilterRow(
+    folders: List<String>,
+    current: String?,
+    onSelect: (String?) -> Unit,
+    onManage: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FilterChip(
+            selected = current == null,
+            onClick = { onSelect(null) },
+            label = { Text("全部") }
+        )
+        FilterChip(
+            selected = current == "",
+            onClick = { onSelect("") },
+            label = { Text("未分组") }
+        )
+        folders.forEach { f ->
+            FilterChip(
+                selected = current == f,
+                onClick = { onSelect(f) },
+                label = { Text(f) }
+            )
+        }
+        AssistChip(
+            onClick = onManage,
+            label = { Text("管理分组") }
+        )
+    }
+}
+
+/** 移动到分组：现有分组单选 + 新建分组输入 */
+@Composable
+private fun MoveToFolderDialog(
+    initialFolder: String,
+    folders: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var newName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移动到分组") },
+        text = {
+            Column {
+                if (folders.isEmpty()) {
+                    Text(
+                        "还没有分组，输入新分组名创建",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                folders.forEach { f ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onConfirm(f) }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Folder, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(10.dp))
+                        Text(f, Modifier.weight(1f))
+                        if (f == initialFolder) {
+                            Text(
+                                "当前",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                if (initialFolder.isNotBlank()) {
+                    Text(
+                        "移出到未分组",
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onConfirm("") }
+                            .padding(vertical = 10.dp)
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                }
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    singleLine = true,
+                    label = { Text("新分组名") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (newName.isNotBlank()) onConfirm(newName.trim()) },
+                enabled = newName.isNotBlank()
+            ) { Text("新建并移入") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/** 分组管理：重命名 / 删除（删除=组内条目移回未分组，对话框里写清楚） */
+@Composable
+private fun ManageFoldersDialog(
+    folders: List<String>,
+    onDismiss: () -> Unit,
+    onRename: (String, String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("管理分组") },
+        text = {
+            Column {
+                if (folders.isEmpty()) {
+                    Text(
+                        "暂无分组。长按收藏 → 移动到分组即可创建",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                folders.forEach { f ->
+                    if (renaming == f) {
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            singleLine = true,
+                            label = { Text("重命名「$f」") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                if (newName.isNotBlank()) onRename(f, newName.trim())
+                                renaming = null
+                            }) { Text("保存") }
+                            TextButton(onClick = { renaming = null }) { Text("取消") }
+                        }
+                    } else {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Folder, null, Modifier.size(18.dp))
+                            Spacer(Modifier.size(10.dp))
+                            Text(f, Modifier.weight(1f))
+                            TextButton(onClick = { renaming = f; newName = f }) { Text("重命名") }
+                            TextButton(onClick = { onDelete(f) }) {
+                                Text("删除", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
 }

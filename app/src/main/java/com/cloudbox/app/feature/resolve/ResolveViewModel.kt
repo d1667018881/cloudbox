@@ -195,6 +195,17 @@ class ResolveViewModel @Inject constructor(
             val pwd = _uiState.value.password
             val link = directLinkRepository.resolve(item.shareUrl, pwd, force = true)
                 .getOrNull() ?: oldLink
+
+            // V49（对齐原版 use_third_party_downloader，webview.lua onDownloadStart）：
+            // 开关开 → 直链交给用户指定的第三方下载器（ADM/1DM 等），不进内置队列。
+            // 有包名+Activity 用显式组件；只有包名用 setPackage 限定；都空走系统选择器。
+            // 发不出去（没装/没配对）回落内置队列，别让用户的下载卡死。
+            if (settingsStore.useThirdPartyDownloader.first() &&
+                handToThirdPartyDownloader(link.url, link.fileName)
+            ) {
+                _uiState.update { it.copy(message = "已交给第三方下载器：${link.fileName}") }
+                return@launch
+            }
             val uid = fileRepository.currentUid() ?: ""
             // V48：enqueue 带预检，可能抛 ApiError——包 runCatching 防协程崩溃
             runCatching {
@@ -211,6 +222,30 @@ class ResolveViewModel @Inject constructor(
                 _uiState.update { it.copy(message = "下载失败：${e.message}") }
             }
         }
+    }
+
+    /**
+     * V49：把直链交给第三方下载器。
+     *
+     * @return true=已成功发出 Intent；false=未配置/未安装/发送失败（调用方回落内置队列）
+     */
+    private fun handToThirdPartyDownloader(url: String, fileName: String): Boolean {
+        val pack = runCatching { settingsStore.customDownloaderPack.first() }.getOrNull()?.trim().orEmpty()
+        val activity = runCatching { settingsStore.customDownloaderActivity.first() }.getOrNull()?.trim().orEmpty()
+        return runCatching {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(android.net.Uri.parse(url), "application/octet-stream")
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (activity.isNotEmpty()) {
+                    if (pack.isEmpty()) return false // Activity 名没有包名无法定位
+                    setClassName(pack, activity)
+                } else if (pack.isNotEmpty()) {
+                    `package` = pack
+                }
+            }
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
     }
 
     /**

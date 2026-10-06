@@ -100,6 +100,15 @@ data class SettingsUiState(
     // ==================== V34（第五批）：下载位置与通知 ====================
     /** 系统下载器保存位置：Downloads 下的子目录名（空串 = 直接用 Downloads 根） */
     val downloadFolder: String = "",
+
+    // ==================== V49（对齐原版 v1.3.4.10 蓝云源码） ====================
+    /** 手动域替换（对齐 link_replacement / link_replacement_new） */
+    val linkReplacementEnabled: Boolean = false,
+    val linkReplacementNew: String = "",
+    /** 第三方下载器（对齐 use_third_party_downloader / custom_download_manager*） */
+    val useThirdPartyDownloader: Boolean = false,
+    val customDownloaderPack: String = "",
+    val customDownloaderActivity: String = "",
     /** 通知栏提醒：下载/上传完成是否弹系统通知 */
     val sendMessage: Boolean = true,
     // ==================== V33：备份增强 ====================
@@ -152,6 +161,12 @@ class SettingsViewModel @Inject constructor(
             val deleteConfirmPref = settingsStore.deleteConfirm.first()
             val folderPref = settingsStore.downloadFolder.first()
             val sendMsgPref = settingsStore.sendMessage.first()
+            // V49：手动域替换 / 第三方下载器
+            val linkRep = settingsStore.linkReplacementEnabled.first()
+            val linkRepNew = settingsStore.linkReplacementNew.first()
+            val useThirdDl = settingsStore.useThirdPartyDownloader.first()
+            val thirdDlPack = settingsStore.customDownloaderPack.first()
+            val thirdDlActivity = settingsStore.customDownloaderActivity.first()
             _uiState.update {
                 it.copy(
                     userAgent = ua, suffixSpoof = spoof,
@@ -169,6 +184,11 @@ class SettingsViewModel @Inject constructor(
                     getClipboard = clipboardPref,
                     deleteConfirm = deleteConfirmPref,
                     downloadFolder = folderPref,
+                    linkReplacementEnabled = linkRep,
+                    linkReplacementNew = linkRepNew,
+                    useThirdPartyDownloader = useThirdDl,
+                    customDownloaderPack = thirdDlPack,
+                    customDownloaderActivity = thirdDlActivity,
                     sendMessage = sendMsgPref,
                     iconPacks = iconPackStore.listPacks()
                 )
@@ -267,6 +287,38 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setWarnMobileNetwork(enabled)
             _uiState.update { it.copy(warnMobileNetwork = enabled) }
+        }
+    }
+
+    // ==================== V49：手动域替换 / 第三方下载器 ====================
+
+    fun saveLinkReplacement(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setLinkReplacement(enabled)
+            _uiState.update { it.copy(linkReplacementEnabled = enabled) }
+        }
+    }
+
+    fun saveLinkReplacementNew(domain: String) {
+        viewModelScope.launch {
+            settingsStore.setLinkReplacementNew(domain)
+            _uiState.update { it.copy(linkReplacementNew = domain) }
+        }
+    }
+
+    fun saveUseThirdPartyDownloader(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setUseThirdPartyDownloader(enabled)
+            _uiState.update { it.copy(useThirdPartyDownloader = enabled) }
+        }
+    }
+
+    fun saveCustomDownloader(pack: String, activity: String) {
+        viewModelScope.launch {
+            settingsStore.setCustomDownloader(pack, activity)
+            _uiState.update {
+                it.copy(customDownloaderPack = pack, customDownloaderActivity = activity)
+            }
         }
     }
 

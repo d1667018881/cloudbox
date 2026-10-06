@@ -4266,3 +4266,38 @@ lanzoui/lanzoup/lanzouq ✅、lanzoux ❌过期、lanzoub/lanzok ❌握手失败
 用户点「普通下载」→ onDownloadStart 拿最终 URL → DownloadManager/第三方
 下载器。与 V48b/V48c 的隐藏 WebView 方向一致；验证页正是原版用户也会
 遇到的（服务器 IP + TA 手机 IP 双双实测吃到）。
+
+### 45.15 V49：蓝云 v1.3.4.10 源码全量对拍 → 三项真差距移植（2026-10-06）
+
+**对拍结论（先说清「为什么只移植三项」）**：把蓝云 143 个设置键 + 功能面
+与 CloudBox 现状逐项对照（回收站/关于/更新日志/帮助/FAQ/多账号/剪贴板
+识别/自动加载/返回缓存/二次确认/流量提醒/伪装还原/图标包/深色三态/四维
+排序……全部已有等价实现——V30-V34 五批移植 + V43-V48 迭代已覆盖原版
+功能面），**真差距只有三项**，本版全部落地：
+
+1. **收藏夹分组**（对齐 bookmark_folder / bookmark_folder_data）
+   - DB v7→v8：favorite_shares 加 `folder` 列（默认空=未分组），MIGRATION_7_8
+   - 聚合式分组（无独立表，空分组无意义，删空自动消失）
+   - UI：过滤条（全部/未分组/各分组）+ 长按「移动到分组」（现有组单选/
+     新建组/移出到未分组）+「管理分组」（重命名/删除=组内回未分组）
+   - 备份 favorites JSON +folder 字段；旧备份无字段=未分组（天然兼容）；
+     重新收藏保留原分组；setPinned/SQL 更新不触碰 folder
+2. **手动域替换**（对齐 link_replacement / home_func.lua「链接转换」）
+   - 设置→网络与解析：开关+目标域；DirectLinkRepositoryImpl.fetchSharePage
+     入口 manualReplaceDomain：开关开+lanzou 系域+目标合法 → 整体换 host，
+     优先级高于自动救护（自动表不认识新尾缀时用户自救，V48d 证书过期的
+     lanzoux 就是活例）。runBlocking 读 DataStore 在 IO 线程安全（同函数
+     本就是 OkHttp 同步调用）
+3. **第三方下载器**（对齐 use_third_party_downloader / custom_download_manager_pack/activity）
+   - 设置→下载行为：开关+包名+Activity（可空）；解析页下载在 enqueue 前
+     分流：有包名+Activity=setClassName；只有包名=setPackage；发送失败
+     （未装/没配对）回落内置队列不卡死
+   - 备份快照 +5 键（N1 红线：新设置项同步进 snapshotAll/applySnapshot）
+
+**本轮明确不移植**（对拍有据）：图标包双列/pad_mode（已有列表/网格手动
+切换）、precise_search（搜索已按需）、滑块验证组件（线上新包独有，
+WebView 渲染用户手滑即可，V48c 观察项不变）、Android/data hack（风险）。
+
+**验收点**：收藏页建组/移动/重命名/删组→备份→恢复（分组不丢）；填
+wwbig.lanzouq.com 开手动域替换→解析任意 lanzou 链接（应全部换域成功）；
+配 ADM 包名开第三方下载→解析页下载跳 ADM；关闭开关回内置队列。

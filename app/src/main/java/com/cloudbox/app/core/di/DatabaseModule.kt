@@ -79,9 +79,19 @@ object DatabaseModule {
 
     @Provides
     @Singleton
+/**
+ * V49（2026-10-06，对齐原版 bookmark_folder）：收藏夹分组。
+ * 只加一列带默认值，无表结构变更、无数据搬移。
+ */
+private val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `favorite_shares` ADD COLUMN `folder` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "cloudbox.db")
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .fallbackToDestructiveMigration() // 其余 schema 变更直接重建；收藏夹/星标已单独保护
             .build()
 }

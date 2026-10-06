@@ -15,6 +15,7 @@ import com.cloudbox.app.core.domain.repository.ResolveFolderResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -649,7 +650,33 @@ class DirectLinkRepositoryImpl @Inject constructor(
      * @return (effectiveUrl, html)：effectiveUrl 是**实际拿到页面的 URL**，
      *         后续 origin/referer/直链 referer 必须全用它（跨域 referer 会被判非法）。
      */
-    private fun fetchSharePage(shareUrl: String): Pair<String, String> {
+    /**
+     * V49：手动域替换（对齐原版 home_func.lua「链接转换」）。
+     *
+     * 开关开 + 目标域合法时，把链接的 host 段整体换成用户域；
+     * 仅对 lanzou 系分享域生效（http/https 与 www 前缀差异都认），
+     * 防止把第三方解析服务等无关 URL 也换掉。
+     * 返回原样的条件：开关关 / 域为空 / 不是 lanzou 域。
+     */
+    private fun manualReplaceDomain(url: String): String {
+        val host = url.toHttpUrlOrNull()?.host ?: return url
+        if (!DomainUtils.isTrustedShareHost(host)) return url
+        val target = runCatching {
+            kotlinx.coroutines.runBlocking { settingsStore.linkReplacementNew.first() }
+        }.getOrNull()?.trim().orEmpty()
+        if (target.isEmpty()) return url
+        val newHost = target
+            .removePrefix("https://").removePrefix("http://")
+            .substringBefore('/').substringBefore(':')
+        if (newHost.isEmpty() || newHost == host) return url
+        return url.replaceFirst(Regex("""^(https?://)[^/]+"""), "$1$newHost")
+    }
+
+    private fun fetchSharePage(shareUrlRaw: String): Pair<String, String> {
+        // V49（对齐原版「链接转换」link_replacement）：用户手动换域优先级最高。
+        // 自动救护（下面的 fallback）只认已知尾缀表；蓝奏云换全新尾缀时表会滞后，
+        // 用户在设置里填上新域即可自救。域不合法/为空时静默跳过。
+        val shareUrl = manualReplaceDomain(shareUrlRaw)
         val origin = originBaseOf(shareUrl)
         try {
             return shareUrl to getPage(shareUrl, origin)

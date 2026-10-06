@@ -147,6 +147,8 @@ class DataBackupRepository @Inject constructor(
                             put("pass", f.pass)
                             put("has_update", f.hasUpdate)
                             put("last_check_at", f.lastCheckAt)
+                            // V49：收藏分组（对齐 bookmark_folder；旧备份无此字段=未分组）
+                            put("folder", f.folder)
                         })
                     }
                 })
@@ -294,7 +296,9 @@ class DataBackupRepository @Inject constructor(
                         kind = o.optString("kind").ifBlank { "file" },
                         pass = o.optString("pass"),
                         hasUpdate = o.optBoolean("has_update", false),
-                        lastCheckAt = o.optLong("last_check_at", 0L)
+                        lastCheckAt = o.optLong("last_check_at", 0L),
+                        // V49：分组（旧备份无字段 → 空串 = 未分组，天然兼容）
+                        folder = o.optString("folder")
                     )
                 }
             }
