@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -401,7 +403,7 @@ private fun FavoriteMenu(
         )
         DropdownMenuItem(
             text = { Text(if (fav.folder.isBlank()) "移动到分组" else "移动分组（当前：${fav.folder}）") },
-            leadingIcon = { Icon(Icons.Filled.Folder, null) },
+            leadingIcon = { Icon(Icons.Filled.List, null) },
             onClick = { onDismiss(); onMove() }
         )
         DropdownMenuItem(
@@ -517,7 +519,7 @@ private fun MoveToFolderDialog(
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Filled.Folder, null, Modifier.size(18.dp))
+                        Icon(Icons.Filled.List, null, Modifier.size(18.dp))
                         Spacer(Modifier.size(10.dp))
                         Text(f, Modifier.weight(1f))
                         if (f == initialFolder) {
@@ -606,7 +608,7 @@ private fun ManageFoldersDialog(
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Filled.Folder, null, Modifier.size(18.dp))
+                            Icon(Icons.Filled.List, null, Modifier.size(18.dp))
                             Spacer(Modifier.size(10.dp))
                             Text(f, Modifier.weight(1f))
                             TextButton(onClick = { renaming = f; newName = f }) { Text("重命名") }

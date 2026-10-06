@@ -229,7 +229,7 @@ class ResolveViewModel @Inject constructor(
      *
      * @return true=已成功发出 Intent；false=未配置/未安装/发送失败（调用方回落内置队列）
      */
-    private fun handToThirdPartyDownloader(url: String, fileName: String): Boolean {
+    private suspend fun handToThirdPartyDownloader(url: String, fileName: String): Boolean {
         val pack = runCatching { settingsStore.customDownloaderPack.first() }.getOrNull()?.trim().orEmpty()
         val activity = runCatching { settingsStore.customDownloaderActivity.first() }.getOrNull()?.trim().orEmpty()
         return runCatching {

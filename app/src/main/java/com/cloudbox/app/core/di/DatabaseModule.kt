@@ -73,12 +73,6 @@ private val MIGRATION_6_7 = object : Migration(6, 7) {
 }
 
 /** Room 数据库提供者 */
-@Module
-@InstallIn(SingletonComponent::class)
-object DatabaseModule {
-
-    @Provides
-    @Singleton
 /**
  * V49（2026-10-06，对齐原版 bookmark_folder）：收藏夹分组。
  * 只加一列带默认值，无表结构变更、无数据搬移。
@@ -89,6 +83,12 @@ private val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+@Module
+@InstallIn(SingletonComponent::class)
+object DatabaseModule {
+
+    @Provides
+    @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "cloudbox.db")
             .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
