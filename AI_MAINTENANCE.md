@@ -4340,3 +4340,34 @@ use_hide_theme 隐藏主题（娱乐向）/ stat 本地统计（无网络需求�
 material-icons-core（extended 才有，本仓未引入）→ 换 List
 （**core 图标集只有 37 个，不熟的名字先查再写**）③handToThirdPartyDownloader
 读 DataStore first() 忘标 suspend（**普通函数内读 Flow 一律先想协程**）。
+
+
+### 45.16 V50：体验层二扫（TA 真机反馈「不如蓝云好用」驱动，2026-10-07，659f887）
+
+**方法论教训**：V49 对拍的是「功能有没有」（143 键全对上），没对「手感好不好」
+——功能等价 ≠ 体验等价。TA 真机用了一天戳破此盲区。体验对拍要单独做一轮。
+
+**三处真差距（+111/-18，6 文件）**：
+
+1. **单击文件 = 下载确认框**（对齐 webview.lua:2199「要下载此文件吗？」）
+   文件名+大小+时间+下载/取消，一步到下载；V43 起的「单击弹操作菜单」
+   让高频意图多一步点击。长按/「⋯」菜单原样保留；多选态/网格模式同步。
+   onClick 演进史留档：分享框(V43前)→菜单(V43)→确认框(V50)。
+2. **目录缓存优先进出**（对齐 back_cache/home_page_cache，原版均默认开）
+   **原实现 file_cache 表只写不读**（搜索索引用）——进出目录反复转圈。
+   修：enterFolder/navigateTo（含返回）→ renderFromCacheThenRefresh：
+   命中秒渲染+后台静默刷第一页（loadPage 加 showLoading，命中不转圈）；
+   未命中（新目录）行为不变。上传/删除后的 refresh() 不走缓存路径。
+   数据滞后由后台刷新纠正，与原版一致。
+3. **show_file_type_label 默认 true**（ty_core.lua:1035 实证；V30 注释
+   「原版默认关」考证错误，连同首帧跳变一起修正）
+
+**评估过未动**（收益/风险比不够）：animation_duration/operation_interval
+（Compose 默认动画已流畅）、列表项下载中标记（需下载管理器联动，面大）、
+图标包多类型体系（icon_pack_type）。
+
+**环境注意**：本仓本地为 detached HEAD + 早期遗留 rebase 残留壳
+（.git/rebase-merge，onto 8d35b40/pick b986d73 空壳）——commit/push
+不受影响（历轮皆此状态），**切勿 rebase --abort**（ORIG_HEAD=b986d73
+会把 HEAD 甩回 9/1 的 V4 提交）；推送统一用 push origin HEAD:main。
+文档追加禁用 heredoc（多行解析吞过一次），用 python 追加。
