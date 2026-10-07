@@ -136,7 +136,7 @@ class FileListViewModel @Inject constructor(
         loadPage(append = true)
     }
 
-    private fun loadPage(append: Boolean) {
+    private fun loadPage(append: Boolean, showLoading: Boolean = true) {
         val folderId = _uiState.value.currentFolderId
         // 导航竞态防护（V5）：用户快速进入/切换文件夹时，旧文件夹的迟到响应
         // 会把新文件夹的列表覆盖成旧内容——表现为"二级目录里出现一级目录的内容/
@@ -145,7 +145,9 @@ class FileListViewModel @Inject constructor(
         viewModelScope.launch {
             if (append) {
                 _uiState.update { it.copy(loadingMore = true) }
-            } else {
+            } else if (showLoading) {
+                // V50：showLoading=false（缓存优先的静默后台刷新）时不置位，
+                // 已渲染的缓存列表保持可见，网络结果回来直接替换
                 _uiState.update { it.copy(loading = true, error = null) }
             }
             fileRepository.getPage(folderId, page).onSuccess { listPage ->
@@ -171,20 +173,53 @@ class FileListViewModel @Inject constructor(
         }
     }
 
-    /** 进入子文件夹 */
+    /**
+     * 进入子文件夹。
+     *
+     * V50（对齐原版 home_page_cache）：浏览过的目录缓存优先——再次进入时
+     * 先秒渲染本地缓存（不转圈），后台静默刷新第一页。没浏览过的目录
+     * 缓存为空，行为与之前完全一致（走网络）。
+     */
     fun enterFolder(folderId: Long, name: String) {
         _uiState.update { it.copy(folderStack = it.folderStack + (folderId to name)) }
         page = 1
-        loadPage(append = false)
+        renderFromCacheThenRefresh()
     }
 
-    /** 面包屑跳转（截断栈） */
+    /**
+     * 面包屑跳转（截断栈）。
+     *
+     * V50（对齐原版 back_cache，默认 true）：跳转目标先渲染本地缓存
+     * （该目录此前浏览时已落库的全部页），再后台刷新第一页。
+     * 返回上级不再转圈等网络——进出目录来回切的手感差距大头就在这。
+     * 风险面：缓存与最新状态可能有短暂偏差（别处删了文件/改了名），
+     * 后台刷新回来即纠正，与原版行为一致。
+     */
     fun navigateTo(index: Int) {
         _uiState.update {
             it.copy(folderStack = it.folderStack.take(index + 1), selectionMode = false, selected = emptySet())
         }
         page = 1
-        loadPage(append = false)
+        renderFromCacheThenRefresh()
+    }
+
+    /**
+     * V50：缓存优先渲染，再后台刷新（用于"进入/回到看过的目录"场景）。
+     *
+     * 缓存命中 → 秒渲染缓存 + **静默**后台刷新（不转圈）；
+     * 未命中（没浏览过的目录）→ 行为与旧版完全一致（转圈走网络）。
+     */
+    private fun renderFromCacheThenRefresh() {
+        val target = _uiState.value.folderStack.lastOrNull()?.first ?: return
+        viewModelScope.launch {
+            val cached = fileRepository.getCachedFolder(target)
+            val hit = cached != null &&
+                _uiState.value.folderStack.lastOrNull()?.first == target
+            if (hit && cached != null) {
+                _uiState.update { it.copy(files = cached, loading = false, error = null) }
+            }
+            loadPage(append = false, showLoading = !hit)
+        }
     }
 
     fun back(): Boolean {

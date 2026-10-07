@@ -117,6 +117,20 @@ class FileRepositoryImpl @Inject constructor(
             }
         }
 
+    override suspend fun getCachedFolder(folderId: Long): List<CloudFile>? =
+        withContext(Dispatchers.IO) {
+            val uid = currentUid() ?: return@withContext null
+            val cached = db.fileCacheDao().getFolder(uid, folderId)
+            if (cached.isEmpty()) null
+            else cached.map {
+                CloudFile(
+                    id = it.id, name = it.name, isFolder = it.isFolder,
+                    size = it.size, time = it.time, onof = it.onof, isDes = it.isDes,
+                    parentId = folderId
+                )
+            }
+        }
+
     override suspend fun getAllFolders(): Result<List<Pair<Long, String>>> =
         withContext(Dispatchers.IO) {
             runCatching {

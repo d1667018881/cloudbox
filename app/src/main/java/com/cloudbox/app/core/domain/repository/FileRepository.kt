@@ -21,6 +21,12 @@ interface FileRepository {
     suspend fun getPage(folderId: Long, page: Int): Result<FileListPage>
 
     /** 获取全部文件夹列表（移动目标选择） */
+    /**
+     * V50：从本地缓存读某目录全部已加载文件（返回上级秒渲染用，对齐原版 back_cache）。
+     * 缓存只在网络成功后写入；空 = 没浏览过，调用方走网络。
+     */
+    suspend fun getCachedFolder(folderId: Long): List<CloudFile>?
+
     suspend fun getAllFolders(): Result<List<Pair<Long, String>>>
 
     /** 新建文件夹，返回新文件夹 id（失败返回 null） */

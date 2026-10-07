@@ -41,10 +41,10 @@ data class SettingsUiState(
     /**
      * V30：列表里显示文件类型标签（图片/视频/压缩包…）。
      *
-     * 对齐原版 `show_file_type_label`。默认**关**：原版默认也是关，
-     * 且标签对已知扩展名的文件是冗余信息，只在用户明确想看时才占位。
+     * 对齐原版 `show_file_type_label`（ty_core.lua:1035 初始化 **true**——
+     * V50 重扫修正：V30 注释里"原版默认关"是考证错误，2026-10-07 对拍源码实证）。
      */
-    val showFileTypeLabel: Boolean = false,
+    val showFileTypeLabel: Boolean = true,
     /**
      * V30：收藏夹自动检查更新的间隔（天）。0 = 关闭。
      *

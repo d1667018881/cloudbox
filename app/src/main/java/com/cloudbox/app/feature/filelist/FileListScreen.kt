@@ -217,6 +217,9 @@ fun FileListScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     /** 点击文件后弹出的操作菜单目标（null = 未打开） */
     var menuFile by remember { mutableStateOf<CloudFile?>(null) }
+
+    // V50：单击文件的下载确认框目标（对齐原版「要下载此文件吗？」）
+    var downloadTarget by remember { mutableStateOf<CloudFile?>(null) }
     /** 单文件删除确认目标 */
     var deleteTarget by remember { mutableStateOf<CloudFile?>(null) }
     /** 单文件移动到目标目录（true = 打开目录选择框） */
@@ -755,14 +758,46 @@ fun FileListScreen(
         )
     }
 
-    // ==================== 单条操作菜单 ====================
+    // ==================== 单条操作菜单 / 下载确认 ====================
     //
-    // 点文件不再直接弹分享框，而是先给菜单 —— 对齐原版行为。
+    // V50：单击文件 = 「要下载此文件吗？」确认框（原版 webview.lua:2199 同款，
+    // 一步到下载）；长按/「⋯」才进下面的操作菜单（分享/重命名/移动…）。
+    // 演进史：直接弹分享框(V43前) → 操作菜单(V43) → 下载确认(V50，对齐原版)。
     //
     // 按文件夹 / 文件分流，对齐官网菜单（2026-09 实测）：
     // · 文件 ⋯ 菜单：外链分享 / 自定义外链 / 缩略图 / 重命名 / 移动 / 提取码 / 描述 / 短网址 / 直链
     // · 文件夹 ⋯ 菜单：外链分享 / 自定义外链 / 提取码 / 修改资料 / 短网址
     // 关键差异：文件夹**没有**「移动」和「重命名」，提取码走 task=16（不是 task=23）。
+    downloadTarget?.let { df ->
+        AlertDialog(
+            onDismissRequest = { downloadTarget = null },
+            title = { Text("要下载此文件吗？") },
+            text = {
+                Column {
+                    Text(df.name, style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        listOfNotNull(
+                            df.size?.let { "大小：$it" },
+                            df.time?.let { "时间：$it" }
+                        ).joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    downloadTarget = null
+                    viewModel.downloadSingle(df)
+                }) { Text("下载") }
+            },
+            dismissButton = {
+                TextButton(onClick = { downloadTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
     menuFile?.let { file ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { menuFile = null },
@@ -1178,10 +1213,11 @@ private fun ListItem(
                         state.selectionMode -> viewModel.toggleSelect(file.id)
                         // 文件夹：直接进入（这是最自然的预期动作）
                         file.isFolder -> viewModel.enterFolder(file.id, file.name)
-                        // 文件：弹操作菜单，而不是直接取分享。
-                        // 原版就是这样（点文件出菜单：详情/分享/下载/重命名/删除…），
-                        // 一上来只给分享框等于替用户决定了"你要干嘛"。
-                        else -> onOpenMenu(file)
+                        // V50（对齐原版 webview.lua:2199「要下载此文件吗？」）：
+                        // 单击文件 = 下载确认框（文件名/大小/时间 + 下载按钮），
+                        // 一步到下载；长按菜单仍保留全部操作（分享/重命名/删除…）。
+                        // 原交互"单击弹操作菜单"多一步点击，点文件的高频意图就是下载。
+                        else -> downloadTarget = file
                     }
                 },
                 onLongClick = { viewModel.enterSelection(file) }
@@ -1275,9 +1311,7 @@ private fun GridItem(
             .combinedClickable(
                 onClick = {
                     when {
-                        state.selectionMode -> viewModel.toggleSelect(file.id)
-                        file.isFolder -> viewModel.enterFolder(file.id, file.name)
-                        else -> onOpenMenu(file)
+                        else -> downloadTarget = file
                     }
                 },
                 onLongClick = { viewModel.enterSelection(file) }
