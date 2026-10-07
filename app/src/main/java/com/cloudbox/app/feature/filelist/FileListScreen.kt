@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
@@ -604,7 +605,7 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            GridItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) {
+                            GridItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle, onDownload = { downloadTarget = it }) {
                                 menuFile = it
                                 // 顺手查一次星标状态，菜单项文案据此切换
                                 viewModel.refreshStarredState(it)
@@ -618,7 +619,7 @@ fun FileListScreen(
                 } else {
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                         items(state.displayFiles, key = { "${it.isFolder}_${it.id}" }) { file ->
-                            ListItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle) {
+                            ListItem(file, state, viewModel, showFileTypeLabel, iconPackPath, showDescTag, twoLineTitle, onDownload = { downloadTarget = it }) {
                                 menuFile = it
                                 // 顺手查一次星标状态，菜单项文案据此切换
                                 viewModel.refreshStarredState(it)
@@ -1200,6 +1201,7 @@ private fun ListItem(
     showDescTag: Boolean = true,
     /** V33：标题双行显示（对齐原版 two_line_title） */
     twoLineTitle: Boolean = false,
+    onDownload: (CloudFile) -> Unit,
     onOpenMenu: (CloudFile) -> Unit
 ) {
     val selected = file.id in state.selected
@@ -1217,7 +1219,7 @@ private fun ListItem(
                         // 单击文件 = 下载确认框（文件名/大小/时间 + 下载按钮），
                         // 一步到下载；长按菜单仍保留全部操作（分享/重命名/删除…）。
                         // 原交互"单击弹操作菜单"多一步点击，点文件的高频意图就是下载。
-                        else -> downloadTarget = file
+                        else -> onDownload(file)
                     }
                 },
                 onLongClick = { viewModel.enterSelection(file) }
@@ -1302,6 +1304,7 @@ private fun GridItem(
     @Suppress("UNUSED_PARAMETER") showDescTag: Boolean = true,
     /** V33：标题双行（网格项固定单行，保留参数以与列表项一致） */
     @Suppress("UNUSED_PARAMETER") twoLineTitle: Boolean = false,
+    onDownload: (CloudFile) -> Unit,
     onOpenMenu: (CloudFile) -> Unit
 ) {
     val selected = file.id in state.selected
@@ -1311,7 +1314,7 @@ private fun GridItem(
             .combinedClickable(
                 onClick = {
                     when {
-                        else -> downloadTarget = file
+                        else -> onDownload(file)
                     }
                 },
                 onLongClick = { viewModel.enterSelection(file) }
