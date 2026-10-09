@@ -4371,3 +4371,42 @@ material-icons-core（extended 才有，本仓未引入）→ 换 List
 不受影响（历轮皆此状态），**切勿 rebase --abort**（ORIG_HEAD=b986d73
 会把 HEAD 甩回 9/1 的 V4 提交）；推送统一用 push origin HEAD:main。
 文档追加禁用 heredoc（多行解析吞过一次），用 python 追加。
+
+### 45.17 V51：布局对齐蓝云（TA「那你要是按照蓝云的布局搞呢」驱动，2026-10-09，5dbf494+1bd1f05=v0.1.212）
+
+**背景**：V50 出包当晚 TA 质疑「好多功能都没有」（多账号/扫码/设置页截图）→ 全量
+盘点定位三层差距：入口藏太深 / 设置页结构不同（11 段平铺 vs 蓝云 6 组多级）/ 真缺
+（会员个性化 1984 行、更新日志页 1495 行，未做）。TA 拍板「按蓝云的布局搞」。
+
+**四项结构改动（8 文件 +575/-230）**：
+
+1. **抽屉加「扫描二维码」「切换账户」一级入口**（对齐原版侧滑卡片清单：
+   home.lua 侧滑*卡片 50 个 id——切换账户/收藏/分享/回收站/下载/链接/扫码/设置/关于/退出）
+   · 扫码 → Routes.RESOLVE 加 `&scan={scan}` 参数 → ResolveScreen `autoScan=true`
+     进页 LaunchedEffect 唤起 ScanActivity（对齐 qr.lua：扫到即解析）
+   · 切换账户 → MainScreen 弹「选择已有账号登录」：RadioButton 列表点选 cookie 直切
+     （MainViewModel 新增 accounts/switchMsg StateFlow + loadAccounts/switchAccount/
+     removeAccount）、「添加账号」→ 登录页、每行可删
+2. **设置页 6 组多级导航**（TA 截图对拍）：显示与布局/行为与权限/文件与上传/
+   连接与下载/通知与提醒/隐私与数据——一级 6 张 SettingsGroupCard（组名+摘要+
+   右箭头），二级组页平铺现有条目（深色+界面显示+图标包 | 剪贴板/删除确认+应用通知
+   | 上传伪装+网页上传 | UA/域名/手动域+保存位置+下载行为 | 通知栏+收藏夹 | Cookie
+   +数据管理）。**全部现有设置一条未丢只重排**；BackHandler 组页→主页；版本号尾巴
+   只在主页显示
+3. **去重**：设置页「账号管理」段删除（挪抽屉切换账户）；「账号中心设置」段删除
+   （task=7/8/10/15 账号页全有原生实现）
+4. **登录页「选择已有账号登录」**（对齐 login.lua:141 附近）：savedAccounts 列表
+   cookie 直切进主页；失效预填 uid 走密码表单（staleReason 文案复用）
+
+**过程教训（两连）**：
+- **陈旧 rebase 陷阱**：仓库残留 V4 时代 detached-HEAD rebase（orig-head=b986d73
+  游离提交 onto=V3 基座）。**git rebase --abort 会把 HEAD 重置回 orig-head 毁工作区**
+  ——正确姿势=双备份（diff patch+文件 cp）后 `rm -rf .git/rebase-merge` 外科清除，
+  HEAD 原地不动；顺带发现 local main 落后 198 提交（branch -f 拨正）
+- **多文件 python 补丁的半途断言陷阱**：第一个脚本 MainActivity 写成功、
+  ResolveScreen 在 scanLauncher 锚点断言失败——**签名改动丢失**（后续补丁只补了
+  LaunchedEffect）。CI 两错锤实（MainActivity 无 autoScan 参数 + Unresolved
+  reference）。教训：**多文件脚本必须原子——先全部 assert 再统一写盘**，或每文件
+  写完立即校验关键标记
+- 版本号：v0.1.211 被红构建烧掉，212 出包；DEX 六标记全中（选择已有账号登录/
+  显示与布局/扫描二维码/切换账户/行为与权限/SettingsGroupCard）
