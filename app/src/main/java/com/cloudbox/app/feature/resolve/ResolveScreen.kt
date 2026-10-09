@@ -74,6 +74,13 @@ fun ResolveScreen(
         }
     }
 
+    // V51：抽屉「扫描二维码」入口 → 进页自动唤起相机（对齐原版抽屉扫码卡片）
+    LaunchedEffect(autoScan) {
+        if (autoScan) scanLauncher.launch(
+            android.content.Intent(context, com.cloudbox.app.feature.scan.ScanActivity::class.java)
+        )
+    }
+
     LaunchedEffect(initialLink) {
         initialLink?.let {
             viewModel.onInputChange(it)

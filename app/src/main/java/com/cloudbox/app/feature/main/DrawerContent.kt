@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
@@ -53,6 +55,10 @@ fun MainDrawerContent(
     onOpenFavorites: () -> Unit,
     onOpenStarred: () -> Unit,
     onOpenRecycle: () -> Unit,
+    /** V51：抽屉「扫描二维码」（对齐原版侧滑扫码卡片） */
+    onScanQr: () -> Unit = {},
+    /** V51：抽屉「切换账户」（对齐原版侧滑切换账户卡片） */
+    onSwitchAccount: () -> Unit = {},
     onOpenAccount: () -> Unit,
     onOpenAnnouncement: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -88,6 +94,11 @@ fun MainDrawerContent(
         HorizontalDivider()
 
         DrawerEntry("查看全盘文件", Icons.Filled.List, onClick = { onClose(); onOpenFullLoad() })
+        // V51（对齐原版抽屉一级条目）：
+        // · 扫描二维码：原版侧滑扫码卡片，扫到链接即解析（qr.lua 路径）
+        // · 切换账户：原版侧滑切换账户卡片 →「选择已有账号登录」弹窗
+        DrawerEntry("扫描二维码", Icons.Filled.QrCodeScanner, onClick = { onClose(); onScanQr() })
+        DrawerEntry("切换账户", Icons.Filled.SwitchAccount, onClick = { onClose(); onSwitchAccount() })
         // V43（2026-09-30）：底部「解析」tab 拆除后入口收进侧栏，
         // 点击单开 Routes.RESOLVE 独立页（带返回键）。
         DrawerEntry("解析链接", Icons.Filled.Link, onClick = { onClose(); onOpenResolve() })

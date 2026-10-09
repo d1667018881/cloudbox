@@ -2,7 +2,10 @@ package com.cloudbox.app.feature.login
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -81,6 +84,52 @@ fun LoginScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(32.dp))
+
+            // V51：「选择已有账号登录」（对齐原版 login.lua）——
+            // 已保存账号直接 cookie 切换，失效则预填账号名走密码登录
+            if (state.savedAccounts.isNotEmpty()) {
+                Text(
+                    "选择已有账号登录",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(8.dp))
+                state.savedAccounts.forEach { acc ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.trySwitchAccount(acc.uid) }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.AccountCircle, null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            acc.uid,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(start = 12.dp)
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "上次活跃 " + java.text.SimpleDateFormat(
+                                "MM-dd", java.util.Locale.getDefault()
+                            ).format(java.util.Date(acc.lastActiveAt)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                HorizontalDivider()
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "或使用账号密码登录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+            }
 
             OutlinedTextField(
                 value = state.uid,

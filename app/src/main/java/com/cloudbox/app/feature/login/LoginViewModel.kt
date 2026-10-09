@@ -20,7 +20,9 @@ data class LoginUiState(
     val rememberPwd: Boolean = true,
     val loading: Boolean = false,
     val error: String? = null,
-    val alreadyLoggedIn: Boolean = false
+    val alreadyLoggedIn: Boolean = false,
+    /** V51：已保存的其他账号（「选择已有账号登录」用，对齐原版 login.lua） */
+    val savedAccounts: List<com.cloudbox.app.core.domain.model.AccountInfo> = emptyList()
 )
 
 @HiltViewModel
@@ -35,6 +37,12 @@ class LoginViewModel @Inject constructor(
     var onLoginSuccess: (() -> Unit)? = null
 
     init {
+        // V51：加载已保存账号（登录页展示「选择已有账号登录」入口）
+        viewModelScope.launch {
+            runCatching {
+                _uiState.update { it.copy(savedAccounts = authRepository.allAccounts()) }
+            }
+        }
         viewModelScope.launch {
             // 持续观察当前账号：App 启动时 ensureSession 可能异步静默重登，
             // 用 collect 而不是 first() 才能在其完成后自动跳转主页。
@@ -73,6 +81,25 @@ class LoginViewModel @Inject constructor(
     fun onPwdChange(value: String) = _uiState.update { it.copy(pwd = value, error = null) }
 
     fun onRememberChange(value: Boolean) = _uiState.update { it.copy(rememberPwd = value) }
+
+    /** V51：点已保存账号 → cookie 直接切换（对齐原版「选择已有账号登录」）。
+     *  切换成功即进主页；失败（Cookie 失效）预填账号名让用户输密码。 */
+    fun trySwitchAccount(uid: String) {
+        viewModelScope.launch {
+            val ok = authRepository.switchAccount(uid)
+            if (ok) {
+                _uiState.update { it.copy(alreadyLoggedIn = true) }
+                onLoginSuccess?.invoke()
+            } else {
+                _uiState.update {
+                    it.copy(
+                        uid = uid,
+                        error = "账号「$uid」的 Cookie 已失效，请重新输入密码登录"
+                    )
+                }
+            }
+        }
+    }
 
     fun login() {
         val state = _uiState.value

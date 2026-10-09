@@ -1,6 +1,7 @@
 package com.cloudbox.app.feature.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.AlertDialog
@@ -58,6 +65,9 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+
+    // V51：设置页 6 组多级导航 —— null = 主页（6 张组卡），1..6 = 组页
+    var group by remember { mutableStateOf<Int?>(null) }
     var uaDialog by remember { mutableStateOf(false) }
     var resolverDialog by remember { mutableStateOf(false) }
     // V49：手动域替换 / 第三方下载器
@@ -134,6 +144,9 @@ fun SettingsScreen(
         }
     }
 
+    // V51：组页按系统返回键 → 回设置主页（而不是直接退出设置）
+    androidx.activity.compose.BackHandler(enabled = group != null) { group = null }
+
     // 打开伪装后缀对话框时，把当前配置填进输入框（只填一次，不覆盖用户正在编辑的内容）
     LaunchedEffect(spoofDialog) {
         if (spoofDialog && spoofInput.isBlank()) spoofInput = state.spoofSuffixList
@@ -177,9 +190,11 @@ fun SettingsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("设置") },
+                title = { Text(groupTitles[group] ?: "设置") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+                    IconButton(onClick = { if (group == null) onBack() else group = null }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    }
                 }
             )
         }
@@ -190,145 +205,62 @@ fun SettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
         ) {
-            SectionTitle("账号管理（多账号）")
-            state.accounts.forEach { acc ->
-                val isCurrent = acc.uid == state.currentUid
-                Row(
-                    Modifier.fillMaxWidth().clickable { if (!isCurrent) viewModel.switchAccount(acc.uid) }
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = isCurrent, onClick = { if (!isCurrent) viewModel.switchAccount(acc.uid) })
-                    Column(Modifier.weight(1f)) {
-                        Text(acc.uid, style = MaterialTheme.typography.bodyLarge)
-                        Text("最近活跃：${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(acc.lastActiveAt))}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    TextButton(onClick = { viewModel.removeAccount(acc.uid) }) { Text("删除") }
-                }
-            }
-            HorizontalDivider()
+            // ==================== V51：设置页 6 组多级导航（对齐蓝云，TA 截图 2026-10-08） ====================
+            // 一级 = 6 张组卡（同蓝云），二级 = 组页平铺该组全部条目。
+            // 变更：账号管理段挪抽屉「切换账户」；账号中心设置归账号页（去重）。
+            if (group == null) {
+            SettingsGroupCard(
+                title = "显示与布局",
+                subtitle = "外观 · 主页 · 对话框 · 控件",
+                icon = Icons.Filled.Palette,
+                onClick = { group = 1 }
+            )
 
-            SectionTitle("Cookie")
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                Button(onClick = viewModel::exportCookies, modifier = Modifier.weight(1f)) { Text("导出到剪贴板") }
-                Spacer(Modifier.height(0.dp))
-                Spacer(Modifier.padding(start = 8.dp))
-                Button(onClick = viewModel::restoreCookiesFromClipboard, modifier = Modifier.weight(1f)) { Text("从剪贴板恢复") }
-            }
-            HorizontalDivider()
+            SettingsGroupCard(
+                title = "行为与权限",
+                subtitle = "加载 · 无障碍 · 权限",
+                icon = Icons.Filled.Tune,
+                onClick = { group = 2 }
+            )
 
-            SectionTitle("网络与解析")
-            SettingRow("User-Agent（桌面 UA 伪装）", state.userAgent.take(30)) { uaDialog = true }
-            SettingRow("第三方直链解析服务", state.thirdPartyResolver.ifEmpty { "未配置（使用内置解析）" }) { resolverDialog = true }
-            SettingRow("域名配置", "远程/手动覆盖/连通性测试") { onOpenDomainConfig() }
-            // V49（对齐原版 link_replacement / home_func.lua「链接转换」）：
-            // 自动救护只认已知尾缀；蓝奏云换全新尾缀时用户手动填新域自救
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f).clickable { domainDialog = true }) {
-                    Text("手动域替换", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "解析链接时强制换成此域（自动救护不认识新域名时的逃生口）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (state.linkReplacementNew.isNotBlank()) {
-                        Text(
-                            "当前：${state.linkReplacementNew}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-                Switch(
-                    checked = state.linkReplacementEnabled,
-                    onCheckedChange = viewModel::saveLinkReplacement
-                )
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    Modifier.weight(1f).clickable { spoofDialog = true }
-                ) {
-                    Text("上传后缀伪装", style = MaterialTheme.typography.bodyLarge)
-                    Text("开启后，下列格式上传时改名为 .zip，下载时自动还原。默认关闭（点击编辑列表）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("当前：${state.spoofSuffixList}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary)
-                }
-                Switch(checked = state.suffixSpoof, onCheckedChange = viewModel::saveSuffixSpoof)
-            }
-            // 上传通道：**没有开关**。App 一律自己拼 multipart 直传（原版就这么做，
-            // 自检也实测通过）。网页上传降级为下面这个手动入口，只在需要时点开。
-            SettingRow(
-                "打开官方网页上传页（备用）",
-                "传超大文件、或原生通道被风控挡住时才用；日常上传不用它"
-            ) {
-                context.startActivity(
-                    android.content.Intent(
-                        context,
-                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
-                    ).putExtra(
-                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
-                        -1L
-                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-            HorizontalDivider()
+            SettingsGroupCard(
+                title = "文件与上传",
+                subtitle = "文件处理 · 上传 · 文件选择",
+                icon = Icons.Filled.CloudUpload,
+                onClick = { group = 3 }
+            )
 
-            // ============ V34（第五批）：下载与通知（对齐原版 download_folder / send_message） ============
-            SectionTitle("下载与通知")
-            SettingRow(
-                "下载保存位置",
-                if (state.downloadFolder.isBlank()) {
-                    "内部存储/Download（默认）"
-                } else {
-                    "内部存储/Download/${state.downloadFolder}"
-                }
-            ) { folderDialog = true }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("通知栏提醒", style = MaterialTheme.typography.bodyLarge)
-                    Text("下载/上传完成时弹出系统通知（对齐原版「通知栏提醒」）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = state.sendMessage, onCheckedChange = viewModel::saveSendMessage)
-            }
-            SettingRow(
-                "管理应用通知",
-                "系统通知当前${if (notificationsEnabled) "已开启" else "已关闭"}，点击去系统设置"
-            ) {
-                runCatching {
-                    context.startActivity(
-                        android.content.Intent(
-                            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
-                        ).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
-                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }
-            }
-            HorizontalDivider()
+            SettingsGroupCard(
+                title = "连接与下载",
+                subtitle = "连接 · 直链解析 · 下载",
+                icon = Icons.Filled.CloudDownload,
+                onClick = { group = 4 }
+            )
 
-            // ==================== 账号中心设置（task=7/8/10/15，对齐原版 account.lua） ====================
-            SectionTitle("账号中心设置")
-            SettingRow("外链标题与简介", "个人主页展示的标题/简介（task=10）") { extLinkDialog = true }
-            SettingRow("个人分享链访问码", "给个人主页分享链加一道码（task=7）") { linkCodeDialog = true }
-            SettingRow("显示发布者", "是否在分享页露出昵称（task=15）") { publisherDialog = true }
-            SettingRow("修改登录密码", "需验证旧密码，改后请重新登录（task=8）") { pwdDialog = true }
-            HorizontalDivider()
+            SettingsGroupCard(
+                title = "通知与提醒",
+                subtitle = "通知 · 提醒",
+                icon = Icons.Filled.Notifications,
+                onClick = { group = 5 }
+            )
 
+            SettingsGroupCard(
+                title = "隐私与数据",
+                subtitle = "隐私 · 备份与恢复 · 数据",
+                icon = Icons.Filled.PrivacyTip,
+                onClick = { group = 6 }
+            )
+            Spacer(Modifier.height(24.dp))
+            // 版本号取 BuildConfig（CI 注入），**不要**硬编码字面量。
+            // 这里原本写死 "v0.1.143"，发到 v0.1.154 时还停在旧值 ——
+            // 用户报问题时按这行说法给版本号，我们就会去查错的版本。
+            Text("云匣 v${com.cloudbox.app.BuildConfig.VERSION_NAME} · 仅供个人学习使用",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp))
+            } else {
+            // ────── 显示与布局 ──────
+            if (group == 1) {
             SectionTitle("深色模式")
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                 listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEach { (mode, label) ->
@@ -340,54 +272,6 @@ fun SettingsScreen(
             }
             HorizontalDivider()
 
-            // ==================== 下载行为 ====================
-            SectionTitle("下载行为")
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("移动网络下载前提醒", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "在流量下点下载时先问一句，避免误触消耗流量",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.warnMobileNetwork,
-                    onCheckedChange = viewModel::saveWarnMobileNetwork
-                )
-            }
-            // V49（对齐原版 use_third_party_downloader / custom_download_manager*）：
-            // 解析出的直链交给用户指定的下载器（ADM/1DM 等），不进内置队列
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f).clickable { downloaderDialog = true }) {
-                    Text("第三方下载器", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "解析后把直链交给指定下载器（ADM/1DM 等）下载",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (state.customDownloaderPack.isNotBlank()) {
-                        Text(
-                            "当前：${state.customDownloaderPack}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-                Switch(
-                    checked = state.useThirdPartyDownloader,
-                    onCheckedChange = viewModel::saveUseThirdPartyDownloader
-                )
-            }
-            HorizontalDivider()
-
-            // ==================== 界面显示（对齐原版 v1.3.4.9 自定义设置页） ====================
             SectionTitle("界面显示")
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -451,37 +335,7 @@ fun SettingsScreen(
                 }
                 Switch(checked = state.twoLineTitle, onCheckedChange = viewModel::saveTwoLineTitle)
             }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("剪贴板识别分享链", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "复制蓝奏云链接后回到 App 自动提示解析",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = state.getClipboard, onCheckedChange = viewModel::saveGetClipboard)
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("删除二次确认", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "删除文件 / 文件夹前先确认一次",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = state.deleteConfirm, onCheckedChange = viewModel::saveDeleteConfirm)
-            }
-            HorizontalDivider()
 
-            // ==================== 图标包（对齐原版 customize_settings.lua） ====================
             SectionTitle("图标包")
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -532,8 +386,207 @@ fun SettingsScreen(
                 ) { Text("恢复内置图标") }
             }
             HorizontalDivider()
+            }
 
-            // ==================== 收藏夹（对齐原版 v1.3.4.9 消息设置页） ====================
+            // ────── 行为与权限 ──────
+            if (group == 2) {
+            SectionTitle("行为")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("剪贴板识别分享链", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "复制蓝奏云链接后回到 App 自动提示解析",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.getClipboard, onCheckedChange = viewModel::saveGetClipboard)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("删除二次确认", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "删除文件 / 文件夹前先确认一次",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.deleteConfirm, onCheckedChange = viewModel::saveDeleteConfirm)
+            }
+            HorizontalDivider()
+
+            SectionTitle("权限")
+            SettingRow(
+                "管理应用通知",
+                "系统通知当前${if (notificationsEnabled) "已开启" else "已关闭"}，点击去系统设置"
+            ) {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                        ).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            }
+            HorizontalDivider()
+            }
+
+            // ────── 文件与上传 ──────
+            if (group == 3) {
+            SectionTitle("上传")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    Modifier.weight(1f).clickable { spoofDialog = true }
+                ) {
+                    Text("上传后缀伪装", style = MaterialTheme.typography.bodyLarge)
+                    Text("开启后，下列格式上传时改名为 .zip，下载时自动还原。默认关闭（点击编辑列表）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("当前：${state.spoofSuffixList}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                Switch(checked = state.suffixSpoof, onCheckedChange = viewModel::saveSuffixSpoof)
+            }
+            // 上传通道：**没有开关**。App 一律自己拼 multipart 直传（原版就这么做，
+            // 自检也实测通过）。网页上传降级为下面这个手动入口，只在需要时点开。
+            SettingRow(
+                "打开官方网页上传页（备用）",
+                "传超大文件、或原生通道被风控挡住时才用；日常上传不用它"
+            ) {
+                context.startActivity(
+                    android.content.Intent(
+                        context,
+                        com.cloudbox.app.feature.upload.WebViewUploadActivity::class.java
+                    ).putExtra(
+                        com.cloudbox.app.feature.upload.WebViewUploadActivity.EXTRA_FOLDER_ID,
+                        -1L
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            HorizontalDivider()
+
+            // ============ V34（第五批）：下载与通知（对齐原版 download_folder / send_message） ============
+            }
+
+            // ────── 连接与下载 ──────
+            if (group == 4) {
+            SectionTitle("连接")
+            SettingRow("User-Agent（桌面 UA 伪装）", state.userAgent.take(30)) { uaDialog = true }
+            SettingRow("第三方直链解析服务", state.thirdPartyResolver.ifEmpty { "未配置（使用内置解析）" }) { resolverDialog = true }
+            SettingRow("域名配置", "远程/手动覆盖/连通性测试") { onOpenDomainConfig() }
+            // V49（对齐原版 link_replacement / home_func.lua「链接转换」）：
+            // 自动救护只认已知尾缀；蓝奏云换全新尾缀时用户手动填新域自救
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f).clickable { domainDialog = true }) {
+                    Text("手动域替换", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "解析链接时强制换成此域（自动救护不认识新域名时的逃生口）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.linkReplacementNew.isNotBlank()) {
+                        Text(
+                            "当前：${state.linkReplacementNew}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Switch(
+                    checked = state.linkReplacementEnabled,
+                    onCheckedChange = viewModel::saveLinkReplacement
+                )
+            }
+
+            SectionTitle("下载")
+            SettingRow(
+                "下载保存位置",
+                if (state.downloadFolder.isBlank()) {
+                    "内部存储/Download（默认）"
+                } else {
+                    "内部存储/Download/${state.downloadFolder}"
+                }
+            ) { folderDialog = true }
+
+            SectionTitle("下载行为")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("移动网络下载前提醒", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "在流量下点下载时先问一句，避免误触消耗流量",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.warnMobileNetwork,
+                    onCheckedChange = viewModel::saveWarnMobileNetwork
+                )
+            }
+            // V49（对齐原版 use_third_party_downloader / custom_download_manager*）：
+            // 解析出的直链交给用户指定的下载器（ADM/1DM 等），不进内置队列
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f).clickable { downloaderDialog = true }) {
+                    Text("第三方下载器", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "解析后把直链交给指定下载器（ADM/1DM 等）下载",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.customDownloaderPack.isNotBlank()) {
+                        Text(
+                            "当前：${state.customDownloaderPack}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Switch(
+                    checked = state.useThirdPartyDownloader,
+                    onCheckedChange = viewModel::saveUseThirdPartyDownloader
+                )
+            }
+            HorizontalDivider()
+
+            // ==================== 界面显示（对齐原版 v1.3.4.9 自定义设置页） ====================
+            }
+
+            // ────── 通知与提醒 ──────
+            if (group == 5) {
+            SectionTitle("通知")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("通知栏提醒", style = MaterialTheme.typography.bodyLarge)
+                    Text("下载/上传完成时弹出系统通知（对齐原版「通知栏提醒」）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = state.sendMessage, onCheckedChange = viewModel::saveSendMessage)
+            }
+
             SectionTitle("收藏夹")
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -575,6 +628,19 @@ fun SettingsScreen(
             HorizontalDivider()
 
             // ==================== 数据管理（对齐原版 privacy_settings 的备份/重置） ====================
+            }
+
+            // ────── 隐私与数据 ──────
+            if (group == 6) {
+            SectionTitle("Cookie")
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Button(onClick = viewModel::exportCookies, modifier = Modifier.weight(1f)) { Text("导出到剪贴板") }
+                Spacer(Modifier.height(0.dp))
+                Spacer(Modifier.padding(start = 8.dp))
+                Button(onClick = viewModel::restoreCookiesFromClipboard, modifier = Modifier.weight(1f)) { Text("从剪贴板恢复") }
+            }
+            HorizontalDivider()
+
             SectionTitle("数据管理")
             DataActionRow(
                 title = "备份数据",
@@ -636,14 +702,9 @@ fun SettingsScreen(
             )
             HorizontalDivider()
 
-            Spacer(Modifier.height(24.dp))
-            // 版本号取 BuildConfig（CI 注入），**不要**硬编码字面量。
-            // 这里原本写死 "v0.1.143"，发到 v0.1.154 时还停在旧值 ——
-            // 用户报问题时按这行说法给版本号，我们就会去查错的版本。
-            Text("云匣 v${com.cloudbox.app.BuildConfig.VERSION_NAME} · 仅供个人学习使用",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp))
+            }
+            }
+
         }
     }
 
@@ -1178,6 +1239,47 @@ private fun formatBackupTime(millis: Long): String =
     if (millis <= 0) "未知"
     else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
         .format(java.util.Date(millis))
+
+// V51：6 组标题表（组页 TopAppBar 用）
+private val groupTitles = mapOf(
+    1 to "显示与布局", 2 to "行为与权限", 3 to "文件与上传",
+    4 to "连接与下载", 5 to "通知与提醒", 6 to "隐私与数据"
+)
+
+/** V51：设置主页的组卡（对齐蓝云：图标 + 组名 + 二级页摘要 + 右箭头） */
+@Composable
+private fun SettingsGroupCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon, null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(end = 16.dp)
+        )
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
 
 @Composable
 private fun SectionTitle(text: String) {

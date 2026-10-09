@@ -59,7 +59,7 @@ object Routes {
     const val LOGIN = "login"
     const val MAIN = "main"
     const val DOMAIN_CONFIG = "domain_config"
-    const val RESOLVE = "resolve?link={link}"
+    const val RESOLVE = "resolve?link={link}&scan={scan}"
     const val SEARCH = "search"
     /** 搜索结果的落地页：直接打开某个目录（folderName 仅用于面包屑显示） */
     const val FILELIST = "filelist?folderId={folderId}&folderName={folderName}"
@@ -183,7 +183,21 @@ class MainActivity : ComponentActivity() {
                                 onOpenFullLoad = { navController.navigate(Routes.FULLLOAD) },
                                 onOpenResolve = { link ->
                                     // 路由参数必须 URL 编码（分享链接含 : / 等特殊字符）
-                                    navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link ?: "")))
+                                    navController.navigate(
+                                        Routes.RESOLVE.replace("{link}", Uri.encode(link ?: ""))
+                                            .replace("{scan}", "false")
+                                    )
+                                },
+                                // V51：抽屉「扫描二维码」→ 解析页 + 自动唤起相机
+                                onOpenResolveScan = {
+                                    navController.navigate(
+                                        Routes.RESOLVE.replace("{link}", Uri.encode(""))
+                                            .replace("{scan}", "true")
+                                    )
+                                },
+                                // V51：切换账户弹窗「添加账号」→ 登录页
+                                onAddAccount = {
+                                    navController.navigate(Routes.LOGIN)
                                 },
                                 onLogout = {
                                     navController.navigate(Routes.LOGIN) {
@@ -200,11 +214,20 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(
                             Routes.RESOLVE,
-                            arguments = listOf(navArgument("link") { type = NavType.StringType; defaultValue = "" })
+                            arguments = listOf(
+                                navArgument("link") { type = NavType.StringType; defaultValue = "" },
+                                // V51：抽屉「扫描二维码」直达 —— 进页自动唤起相机
+                                navArgument("scan") { type = NavType.BoolType; defaultValue = false }
+                            )
                         ) { entry ->
                             val link = entry.arguments?.getString("link")?.takeIf { it.isNotBlank() }
                                 ?.let { Uri.decode(it) }
-                            ResolveScreen(onBack = { navController.popBackStack() }, initialLink = link)
+                            val autoScan = entry.arguments?.getBoolean("scan") == true
+                            ResolveScreen(
+                                onBack = { navController.popBackStack() },
+                                initialLink = link,
+                                autoScan = autoScan
+                            )
                         }
                         composable(Routes.SEARCH) {
                             SearchScreen(
@@ -241,7 +264,10 @@ class MainActivity : ComponentActivity() {
                                 onOpenRecycle = { navController.navigate(Routes.RECYCLE) },
                                 onOpenAnnouncement = { navController.navigate(Routes.ANNOUNCEMENT) },
                                 onOpenSharedLink = { link ->
-                                    navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(link)))
+                                    navController.navigate(
+                                        Routes.RESOLVE.replace("{link}", Uri.encode(link))
+                                            .replace("{scan}", "false")
+                                    )
                                 },
                                 initialFolderId = entry.arguments?.getLong("folderId"),
                                 initialFolderName = entry.arguments?.getString("folderName").orEmpty()
@@ -254,7 +280,10 @@ class MainActivity : ComponentActivity() {
                             FavoritesScreen(
                                 onBack = { navController.popBackStack() },
                                 onOpenShare = { url ->
-                                    navController.navigate(Routes.RESOLVE.replace("{link}", Uri.encode(url)))
+                                    navController.navigate(
+                                        Routes.RESOLVE.replace("{link}", Uri.encode(url))
+                                            .replace("{scan}", "false")
+                                    )
                                 }
                             )
                         }
