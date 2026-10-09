@@ -50,6 +50,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun ResolveScreen(
     onBack: () -> Unit,
     initialLink: String? = null,
+    /** V51：true = 进页自动唤起扫码（抽屉「扫描二维码」入口专用） */
+    autoScan: Boolean = false,
     viewModel: ResolveViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
