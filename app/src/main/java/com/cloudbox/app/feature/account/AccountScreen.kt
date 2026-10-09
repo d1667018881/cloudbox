@@ -18,6 +18,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Person
@@ -73,14 +76,28 @@ private enum class AccountDialog { PASSWORD, EXTERNAL_LINK, PUBLISHER, SHARE_COD
 fun AccountScreen(
     onBack: () -> Unit,
     onLogout: () -> Unit = onBack,
+    /** V52：切换区块「添加账号」→ 登录页 */
+    onAddAccount: () -> Unit = {},
     viewModel: AccountViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    // V52：账号切换区块（原抽屉「切换账户」并入——TA 2026-10-09 指示）
+    val switchAccounts by viewModel.accounts.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.loadAccounts() }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<AccountDialog?>(null) }
     // 退出登录确认（与 MainScreen 抽屉退出同款：不可撤销，先问一句）
     var confirmLogout by remember { mutableStateOf(false) }
+
+    // V52：切换成功 → snackbar 提示后回主页（主页 key(uid) 自动重建文件列表）
+    val switchedUid by viewModel.switched.collectAsState(initial = null as String?)
+    androidx.compose.runtime.LaunchedEffect(switchedUid) {
+        switchedUid?.let {
+            snackbar.showSnackbar("已切换到 $it")
+            onBack()
+        }
+    }
 
     fun copyToClipboard(label: String, text: String) {
         val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
@@ -170,6 +187,60 @@ fun AccountScreen(
                 }
             }
             HorizontalDivider()
+
+            // ── V52 账号切换（原抽屉「切换账户」并入）：已存账号一点即切 ──
+            if (switchAccounts.size > 1 || switchAccounts.isNotEmpty()) {
+                Text(
+                    "账号切换",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                )
+                switchAccounts.forEach { acc ->
+                    val isCurrent = acc.uid == p?.uid
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !isCurrent) { viewModel.switchAccount(acc.uid) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (isCurrent) Icons.Filled.CheckCircle else Icons.Filled.AccountCircle,
+                            null,
+                            tint = if (isCurrent) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Column(Modifier.padding(start = 12.dp)) {
+                            Text(
+                                acc.uid + if (isCurrent) "（当前）" else "",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                "上次活跃 " + java.text.SimpleDateFormat(
+                                    "MM-dd HH:mm", java.util.Locale.getDefault()
+                                ).format(java.util.Date(acc.lastActiveAt)),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (!isCurrent) {
+                            TextButton(onClick = { viewModel.removeAccount(acc.uid) }) {
+                                Text("删除", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+                TextButton(
+                    onClick = onAddAccount,
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
+                    Icon(Icons.Filled.Add, null, Modifier.padding(end = 4.dp))
+                    Text("添加账号")
+                }
+                HorizontalDivider()
+            }
 
             // ── 9 项功能列表（对齐蓝云） ──
             AccountItem("个人中心", Icons.Filled.Person) {

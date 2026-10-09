@@ -195,10 +195,6 @@ class MainActivity : ComponentActivity() {
                                             .replace("{scan}", "true")
                                     )
                                 },
-                                // V51：切换账户弹窗「添加账号」→ 登录页
-                                onAddAccount = {
-                                    navController.navigate(Routes.LOGIN)
-                                },
                                 onLogout = {
                                     navController.navigate(Routes.LOGIN) {
                                         popUpTo(Routes.MAIN) { inclusive = true }
@@ -324,6 +320,8 @@ class MainActivity : ComponentActivity() {
                         composable(Routes.ACCOUNT) {
                             com.cloudbox.app.feature.account.AccountScreen(
                                 onBack = { navController.popBackStack() },
+                                // V52：切换区块「添加账号」→ 登录页
+                                onAddAccount = { navController.navigate(Routes.LOGIN) },
                                 // V47：账号面板自带的退出登录（与抽屉退出同款导航）
                                 onLogout = {
                                     navController.navigate(Routes.LOGIN) {

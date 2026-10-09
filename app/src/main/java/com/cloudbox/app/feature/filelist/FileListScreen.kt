@@ -197,7 +197,6 @@ fun FileListScreen(
     var showNewFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<CloudFile?>(null) }
     var moveTarget by remember { mutableStateOf(false) }
-    var passwdTarget by remember { mutableStateOf<CloudFile?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
     // V32：从已安装应用上传的选择器
     var showAppPicker by remember { mutableStateOf(false) }
@@ -861,7 +860,7 @@ fun FileListScreen(
                         Icons.Filled.Key
                     ) {
                         menuFile = null
-                        passwdTarget = file
+                        viewModel.loadPasswdForEdit(file)
                     }
                     if (!file.isFolder) {
                         // 官网文件夹菜单无「移动」（已实测确认）
@@ -977,12 +976,13 @@ fun FileListScreen(
         )
     }
     if (showBatchPwd) {
-        SimpleInputDialog(
-            title = "批量设置提取码（留空关闭）",
-            // 文件夹也支持提取码（官网 task=16），不再是"会被跳过"
-            placeholder = "2-6 位密码；文件和文件夹均生效",
-            onDismiss = { showBatchPwd = false },
-            onConfirm = { pwd -> viewModel.setPasswdSelected(pwd); showBatchPwd = false }
+        // V52：批量也换成开关式（多文件没法逐个读回，不预填；关闭=开关）
+        com.cloudbox.app.feature.filelist.dialog.PasswdDialog(
+            title = "批量设置提取码",
+            initialPwd = "",
+            initialOn = true,
+            onConfirm = { _, pwd -> viewModel.setPasswdSelected(pwd); showBatchPwd = false },
+            onDismiss = { showBatchPwd = false }
         )
     }
     if (showBatchDesc) {
@@ -994,12 +994,19 @@ fun FileListScreen(
             onConfirm = { desc -> viewModel.setDescSelected(desc); showBatchDesc = false }
         )
     }
-    passwdTarget?.let { file ->
-        SimpleInputDialog(
-            title = "设置提取码（留空关闭）",
-            placeholder = "2-6 位密码",
-            onDismiss = { passwdTarget = null },
-            onConfirm = { pwd -> viewModel.setPasswd(file, pwd); passwdTarget = null }
+    // V52（TA 真机反馈）：提取码弹窗对齐蓝云「设置密码弹窗」——
+    // 读回当前码预填 + 启用开关（关闭靠开关，不再用「留空」误导）
+    state.passwdTarget?.let { file ->
+        com.cloudbox.app.feature.filelist.dialog.PasswdDialog(
+            title = if (file.isFolder) "设置文件夹提取码" else "设置提取码",
+            initialPwd = state.passwdDraft,
+            initialOn = state.passwdOn,
+            loading = state.passwdLoading,
+            onConfirm = { _, pwd ->
+                viewModel.setPasswd(file, pwd)
+                viewModel.dismissPasswdEdit()
+            },
+            onDismiss = viewModel::dismissPasswdEdit
         )
     }
     state.descTarget?.let { file ->

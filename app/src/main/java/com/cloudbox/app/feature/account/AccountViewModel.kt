@@ -111,6 +111,43 @@ class AccountViewModel @Inject constructor(
 
     fun dismissMessage() = _uiState.update { it.copy(message = null) }
 
+    // ==================== V52：账号切换（原抽屉「切换账户」并入，TA 2026-10-09 指示） ====================
+
+    private val _accounts = MutableStateFlow<List<com.cloudbox.app.core.domain.model.AccountInfo>>(emptyList())
+
+    /** 已保存账号列表（切换区块数据源） */
+    val accounts: StateFlow<List<com.cloudbox.app.core.domain.model.AccountInfo>> = _accounts.asStateFlow()
+
+    private val _switched = MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    /** 切换成功（uid）——Screen 消费后回主页并刷新（主页 key(uid) 重建文件列表） */
+    val switched = _switched
+
+    fun loadAccounts() {
+        viewModelScope.launch {
+            runCatching { _accounts.value = authRepository.allAccounts() }
+        }
+    }
+
+    /** 切换账号：cookie 直切（对齐蓝云「选择已有账号登录」） */
+    fun switchAccount(uid: String) {
+        viewModelScope.launch {
+            if (authRepository.switchAccount(uid)) {
+                _switched.tryEmit(uid)
+            } else {
+                postMessage("切换失败（账号「$uid」的 Cookie 可能已失效）")
+            }
+        }
+    }
+
+    /** 删除账号槽位（含 Cookie） */
+    fun removeAccount(uid: String) {
+        viewModelScope.launch {
+            authRepository.logout(uid)
+            _accounts.value = authRepository.allAccounts()
+        }
+    }
+
     /** Screen 侧动作（如复制分享链）的回执提示 */
     fun postMessage(text: String) = _uiState.update { it.copy(message = text) }
 

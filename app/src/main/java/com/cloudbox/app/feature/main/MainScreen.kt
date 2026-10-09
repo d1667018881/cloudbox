@@ -1,17 +1,12 @@
 package com.cloudbox.app.feature.main
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -21,6 +16,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,8 +59,6 @@ fun MainScreen(
     onOpenResolve: (String?) -> Unit,
     /** V51：抽屉「扫描二维码」→ 解析页自动唤起相机 */
     onOpenResolveScan: () -> Unit = {},
-    /** V51：切换账户弹窗「添加账号」→ 登录页 */
-    onAddAccount: () -> Unit = {},
     onLogout: () -> Unit,
     /** 从其他 App 分享进来的文件/链接（未消费时非空），透传给网盘页消费 */
     pendingShare: com.cloudbox.app.common.ShareIntentHandler.SharedContent? = null,
@@ -101,17 +95,6 @@ fun MainScreen(
     }
 
     var confirmLogout by remember { mutableStateOf(false) }
-    // V51：抽屉「切换账户」弹窗（对齐原版 home_func.lua「选择已有账号登录」）
-    var showSwitchAccount by remember { mutableStateOf(false) }
-    val switchAccounts by mainViewModel.accounts.collectAsState()
-    val switchMsg by mainViewModel.switchMsg.collectAsState()
-    LaunchedEffect(switchMsg) {
-        switchMsg?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            mainViewModel.consumeSwitchMsg()
-            showSwitchAccount = false
-        }
-    }
     // 退出登录不可撤销（会清掉该账号保存的密码与 Cookie），所以先问一句。
     // ⚠️ V33 修复：此前 `confirmLogout` 从来没有被置 true —— 确认框是**死代码**，
     //    点退出是直接执行的。现在所有退出入口都先把它置 true。
@@ -133,62 +116,6 @@ fun MainScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmLogout = false }) { Text("取消") }
-            }
-        )
-    }
-
-    // V51：切换账户弹窗 —— 已存账号列表（点击切换 / 长按或按钮删除）+ 添加新账号。
-    // 对齐原版「选择已有账号登录」：cookie 直接切，无密码输入（失效时切完在
-    // 网盘页会收到登录态错误，走退出重登）。
-    if (showSwitchAccount) {
-        AlertDialog(
-            onDismissRequest = { showSwitchAccount = false },
-            title = { Text("选择已有账号登录") },
-            text = {
-                Column {
-                    if (switchAccounts.isEmpty()) {
-                        Text("还没有已保存的账号")
-                    } else {
-                        switchAccounts.forEach { acc ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = acc.uid == account?.uid,
-                                    onClick = {
-                                        if (acc.uid != account?.uid) mainViewModel.switchAccount(acc.uid)
-                                    }
-                                )
-                                Column(
-                                    Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            if (acc.uid != account?.uid) mainViewModel.switchAccount(acc.uid)
-                                        }
-                                ) {
-                                    Text(acc.uid, style = MaterialTheme.typography.bodyLarge)
-                                    Text(
-                                        "最近活跃：" + java.text.SimpleDateFormat(
-                                            "MM-dd HH:mm", java.util.Locale.getDefault()
-                                        ).format(java.util.Date(acc.lastActiveAt)),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                TextButton(onClick = { mainViewModel.removeAccount(acc.uid) }) { Text("删除") }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSwitchAccount = false; onAddAccount() }) { Text("添加账号") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSwitchAccount = false }) { Text("关闭") }
             }
         )
     }
@@ -256,9 +183,8 @@ fun MainScreen(
                 onClose = { scope.launch { drawerState.close() } },
                 onOpenFullLoad = onOpenFullLoad,
                 onOpenResolve = { onOpenResolve(null) },
-                // V51（对齐原版抽屉条目）：扫码/切换账户一级入口
+                // V51：扫码一级入口（切换账户已并入管理账号页，V52）
                 onScanQr = { onOpenResolveScan() },
-                onSwitchAccount = { showSwitchAccount = true; mainViewModel.loadAccounts() },
                 onOpenDownload = onOpenDownload,
                 onOpenFavorites = onOpenFavorites,
                 onOpenStarred = onOpenStarred,
@@ -278,6 +204,9 @@ fun MainScreen(
     // 只剩网盘一页后，底部导航栏失去存在意义，整个 Scaffold 简化为单页。
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // V52：key(account.uid) —— 切换账号后整个文件列表重建，
+            // FileListViewModel 重新创建并加载新账号的网盘根目录
+            key(account?.uid) {
             FileListScreen(
                 onOpenSearch = onOpenSearch,
                 onOpenRecycle = onOpenRecycle,
@@ -290,6 +219,7 @@ fun MainScreen(
                 onShareConsumed = onShareConsumed,
                 onOpenSharedLink = { link -> onOpenResolve(link) }
             )
+            }
         }
     }
 }

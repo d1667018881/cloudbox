@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -777,23 +778,81 @@ fun SettingsScreen(
         )
     }
     if (downloaderDialog) {
+        // V52：已装下载器候选（ACTION_SEND text/plain —— 蓝云同款 intent 的
+        // 反向：谁能接这个 intent 谁就是候选下载器，点选自动填包名+Activity）
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val candidates = remember {
+            runCatching {
+                val pm = context.packageManager
+                val probe = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain")
+                pm.queryIntentActivities(probe, 0)
+                    .filter { it.activityInfo.packageName != context.packageName }
+                    .sortedBy { it.loadLabel(pm).toString().lowercase() }
+            }.getOrDefault(emptyList())
+        }
         AlertDialog(
             onDismissRequest = { downloaderDialog = false },
             title = { Text("第三方下载器") },
             text = {
                 Column {
                     Text(
-                        "开启后，解析页点「下载」会把直链交给下面的下载器而不是内置队列。" +
-                            "包名如 com.dv.adm；Activity 可留空（= 包内任一能收下载 Intent 的页面）。" +
-                            "发送失败会自动回落内置下载。",
+                        "开启后，下载会把直链以文本分享交给下面的下载器（ADM/1DM 等）。" +
+                            "优先从已装应用里选；选完自动填包名和 Activity。",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "选择已装应用（能接收链接分享的都会列出）",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    // 候选列表：固定高度可滚（弹窗内容超高会被裁）
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        if (candidates.isEmpty()) {
+                            Text(
+                                "没找到能接收链接的应用",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        candidates.forEach { ri ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        dlPackInput = ri.activityInfo.packageName
+                                        dlActivityInput = ri.activityInfo.name
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    ri.loadLabel(ri.activityInfo.applicationInfo),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(Modifier.weight(1f))
+                                if (ri.activityInfo.packageName == dlPackInput) {
+                                    Text(
+                                        "已选",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = dlPackInput,
                         onValueChange = { dlPackInput = it },
                         singleLine = true,
-                        label = { Text("包名") },
+                        label = { Text("包名（也可手动填）") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))

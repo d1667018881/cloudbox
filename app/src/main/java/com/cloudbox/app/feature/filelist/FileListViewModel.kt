@@ -41,6 +41,11 @@ data class FileListUiState(
     val sortMode: SortMode = SortMode.DEFAULT,
     /** 描述编辑弹窗的目标文件（null = 未打开） */
     val descTarget: CloudFile? = null,
+    /** V52：提取码编辑（读回当前码预填，对齐蓝云「设置密码弹窗」） */
+    val passwdTarget: CloudFile? = null,
+    val passwdDraft: String = "",
+    val passwdOn: Boolean = false,
+    val passwdLoading: Boolean = false,
     /** 打开描述弹窗时读回的原描述（task=12），用于回填输入框 */
     val descDraft: String = "",
     /** 正在读取原描述（读取期间弹窗仍显示，输入框给个加载态） */
@@ -109,7 +114,9 @@ class FileListViewModel @Inject constructor(
     /** 星标文件夹（自盘常用目录聚合，对齐原版） */
     private val starredFolderRepository: StarredFolderRepository,
     /** 收藏（V44：分享弹窗星标此前没接库——点了等于没点，收藏夹永远空） */
-    private val shareRepository: ShareRepository
+    private val shareRepository: ShareRepository,
+    /** V52：第三方下载器分流要发 Intent（startActivity 需要 Context） */
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FileListUiState())
@@ -329,6 +336,32 @@ class FileListViewModel @Inject constructor(
      * 官网实测：文件走 task=23（`f_pwdgo`），文件夹走 task=16（`fol_pwdgo`），
      * id 字段也分别是 file_id / folder_id，不能混用。
      */
+    /**
+     * V52：打开提取码弹窗前读回当前码（蓝云读「数据文字」= 分享信息缓存）。
+     * CloudBox 用 getFileShare 现拉（pwd + onof）；失败按空码处理，不阻塞。
+     */
+    fun loadPasswdForEdit(file: CloudFile) {
+        _uiState.update {
+            it.copy(passwdTarget = file, passwdDraft = "", passwdOn = false, passwdLoading = true)
+        }
+        viewModelScope.launch {
+            val share = runCatching { fileRepository.getFileShare(file.id).getOrNull() }.getOrNull()
+            _uiState.update { st ->
+                if (st.passwdTarget?.id == file.id) {
+                    st.copy(
+                        passwdDraft = share?.pwd.orEmpty(),
+                        passwdOn = share?.onof == "1",
+                        passwdLoading = false
+                    )
+                } else st
+            }
+        }
+    }
+
+    fun dismissPasswdEdit() = _uiState.update {
+        it.copy(passwdTarget = null, passwdDraft = "", passwdOn = false, passwdLoading = false)
+    }
+
     fun setPasswd(file: CloudFile, pwd: String) {
         viewModelScope.launch {
             val result = if (file.isFolder) {
@@ -677,6 +710,18 @@ class FileListViewModel @Inject constructor(
                     val pwd = if (share.onof == "1") share.pwd else ""
                     directLinkRepository.resolve(share.shareUrl, pwd)
                         .onSuccess { link ->
+                            // V52：批量下载同样接第三方分流（蓝云对每个 url 逐个
+                            // startActivity，这里同语义：SENT 即跳过内置）
+                            if (settingsStore.useThirdPartyDownloader.first() &&
+                                com.cloudbox.app.common.ThirdPartyDownloader.handOff(
+                                    link.url, link.fileName.ifBlank { file.name }, appContext,
+                                    settingsStore.customDownloaderPack.first(),
+                                    settingsStore.customDownloaderActivity.first()
+                                ) == com.cloudbox.app.common.HandOffResult.SENT
+                            ) {
+                                ok++
+                                return@onSuccess
+                            }
                             // V48：enqueue 带预检可能抛 ApiError——包 runCatching 防协程崩溃
                             runCatching {
                                 downloadRepository.enqueue(
@@ -798,6 +843,18 @@ class FileListViewModel @Inject constructor(
                 // 下载场景必须拿"finalize 过的 CDN 直链"（时效约 30 分钟内有效）
                 directLinkRepository.resolve(share.shareUrl, pwd, force = true)
                     .onSuccess { link ->
+                        // V52：网盘页下载同样接第三方分流（TA 主路径——此前只有
+                        // 解析页分流，网盘页点下载永远走内置，被当成了"系统下载"）
+                        if (settingsStore.useThirdPartyDownloader.first() &&
+                            com.cloudbox.app.common.ThirdPartyDownloader.handOff(
+                                link.url, link.fileName.ifBlank { file.name }, appContext,
+                                settingsStore.customDownloaderPack.first(),
+                                settingsStore.customDownloaderActivity.first()
+                            ) == com.cloudbox.app.common.HandOffResult.SENT
+                        ) {
+                            _uiState.update { it.copy(message = "已交给第三方下载器：${file.name}") }
+                            return@launch
+                        }
                         // V48：enqueue 带预检，可能抛 ApiError（链接被反爬拦截）——
                         // 不包 runCatching 会绕过 onFailure 直接炸协程
                         runCatching {
