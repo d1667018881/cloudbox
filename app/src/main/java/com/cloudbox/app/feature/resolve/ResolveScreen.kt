@@ -180,7 +180,7 @@ fun ResolveScreen(
 
             LazyColumn(Modifier.weight(1f)) {
                 items(state.results, key = { it.key }) { item ->
-                    ResolveItemRow(item, viewModel)
+                    ResolveItemRow(item, viewModel, onDownload = { tryDownload { viewModel.download(item) } })
                 }
             }
         }
@@ -190,7 +190,9 @@ fun ResolveScreen(
 @Composable
 private fun ResolveItemRow(
     item: ResolveItem,
-    viewModel: ResolveViewModel
+    viewModel: ResolveViewModel,
+    /** V53：下载点击（父层做第三方下载器按需选择拦截） */
+    onDownload: () -> Unit = {}
 ) {
     // 在 composable 上下文中获取剪贴板实例（LocalClipboardManager 是 composable 属性）
     val clipboard = LocalClipboardManager.current
@@ -203,7 +205,7 @@ private fun ResolveItemRow(
                 Text(link.url, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row {
-                    IconButton(onClick = { tryDownload { viewModel.download(item) } }) {
+                    IconButton(onClick = onDownload) {
                         Icon(Icons.Filled.Download, "下载", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = { clipboard.setText(AnnotatedString(link.url)) }) {
