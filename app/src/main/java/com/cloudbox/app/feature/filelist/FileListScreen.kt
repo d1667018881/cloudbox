@@ -191,6 +191,17 @@ fun FileListScreen(
     val iconPackPath by viewModel.settingsStore.iconPackPath.collectAsState(initial = "")
     val showDescTag by viewModel.settingsStore.showDescTag.collectAsState(initial = true)
     val twoLineTitle by viewModel.settingsStore.twoLineTitle.collectAsState(initial = false)
+    // V53：第三方下载器按需选择——开关开了但没配包名时，下载动作先弹选择器
+    val useThirdParty by viewModel.settingsStore.useThirdPartyDownloader.collectAsState(initial = false)
+    val dlPack by viewModel.settingsStore.customDownloaderPack.collectAsState(initial = "")
+    var showDownloaderPick by remember { mutableStateOf(false) }
+    var pendingDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun tryDownload(action: () -> Unit) {
+        if (useThirdParty && dlPack.isBlank()) {
+            pendingDownload = action
+            showDownloaderPick = true
+        } else action()
+    }
     val deleteConfirmPref by viewModel.settingsStore.deleteConfirm.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
@@ -495,7 +506,7 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        ActionChip("批量下载", Icons.Filled.Download) { viewModel.downloadSelected() }
+                        ActionChip("批量下载", Icons.Filled.Download) { tryDownload { viewModel.downloadSelected() } }
                         ActionChip("设提取码", Icons.Filled.Lock) { showBatchPwd = true }
                         ActionChip("改资料", Icons.Filled.Edit) { showBatchDesc = true }
                     }
@@ -791,7 +802,7 @@ fun FileListScreen(
             confirmButton = {
                 TextButton(onClick = {
                     downloadTarget = null
-                    viewModel.downloadSingle(df)
+                    tryDownload { viewModel.downloadSingle(df) }
                 }) { Text("下载") }
             },
             dismissButton = {
@@ -888,7 +899,7 @@ fun FileListScreen(
                     if (!file.isFolder) {
                         MenuAction("下载到本地", Icons.Filled.Download) {
                             menuFile = null
-                            viewModel.downloadSingle(file)
+                            tryDownload { viewModel.downloadSingle(file) }
                         }
                     }
                     MenuAction("复制文件名", Icons.Filled.ContentCopy) {
@@ -996,6 +1007,25 @@ fun FileListScreen(
             onConfirm = { desc -> viewModel.setDescSelected(desc); showBatchDesc = false }
         )
     }
+    if (showDownloaderPick) {
+        com.cloudbox.app.common.DownloaderPickerDialog(
+            onDismiss = {
+                showDownloaderPick = false
+                // 本次用内置（不配置，VM 侧 NOT_CONFIGURED 分流回落）
+                pendingDownload?.invoke()
+                pendingDownload = null
+            },
+            onSelected = { pack, act ->
+                showDownloaderPick = false
+                // 落库完成后再放行下载，防止 VM 读到旧配置
+                viewModel.saveCustomDownloader(pack, act) {
+                    pendingDownload?.invoke()
+                    pendingDownload = null
+                }
+            }
+        )
+    }
+
     // V52（TA 真机反馈）：提取码弹窗对齐蓝云「设置密码弹窗」——
     // 读回当前码预填 + 启用开关（关闭靠开关，不再用「留空」误导）
     state.passwdTarget?.let { file ->

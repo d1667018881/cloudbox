@@ -96,7 +96,16 @@ class DownloadViewModel @Inject constructor(
 
     fun openTask(task: DownloadTask) {
         val uri = DownloadHelper.getCompletedFileUri(context, task.downloadId)
-        DownloadHelper.openFile(context, uri, task.mimeType)
+        if (uri == null) {
+            // V53（TA 真机「点打开按钮打不开」）：此前 uri 为空静默 return，
+            // 用户点了毫无反馈。DM 记录被清理（假文件拦截/系统清理）都会走到这
+            _message.value = "文件已被系统清理或任务已失效，无法打开（可长按删除该记录）"
+            return
+        }
+        // V53：网盘页入队的任务 mimeType=null（enqueue 没传），ACTION_VIEW 带
+        // "*/*" 多数设备没有应用能接 → 表现也是「打不开」。按扩展名推断补齐
+        val mime = task.mimeType ?: DownloadHelper.guessMimeType(task.fileName)
+        DownloadHelper.openFile(context, uri, mime)
     }
 
     /** 状态文本 */

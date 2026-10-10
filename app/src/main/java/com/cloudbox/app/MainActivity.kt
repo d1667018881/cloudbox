@@ -158,14 +158,24 @@ class MainActivity : ComponentActivity() {
                         navController = navController,
                         startDestination = resolvedStart
                     ) {
-                        composable(Routes.LOGIN) {
+                        composable(
+                            Routes.LOGIN + "?add={add}",
+                            arguments = listOf(
+                                androidx.navigation.navArgument("add") {
+                                    defaultValue = false
+                                    type = androidx.navigation.NavType.BoolType
+                                }
+                            )
+                        ) { entry ->
                             LoginScreen(
                                 onLoginSuccess = {
                                     navController.navigate(Routes.MAIN) {
                                         popUpTo(Routes.LOGIN) { inclusive = true }
                                     }
                                 },
-                                onOpenDomainConfig = { navController.navigate(Routes.DOMAIN_CONFIG) }
+                                onOpenDomainConfig = { navController.navigate(Routes.DOMAIN_CONFIG) },
+                                // V53：login?add=true = 添加账号（不弹回主页）
+                                addAccount = entry.arguments?.getBoolean("add") == true
                             )
                         }
                         composable(Routes.MAIN) {
@@ -320,8 +330,8 @@ class MainActivity : ComponentActivity() {
                         composable(Routes.ACCOUNT) {
                             com.cloudbox.app.feature.account.AccountScreen(
                                 onBack = { navController.popBackStack() },
-                                // V52：切换区块「添加账号」→ 登录页
-                                onAddAccount = { navController.navigate(Routes.LOGIN) },
+                                // V52：切换区块「添加账号」→ 登录页（V53：add 模式不弹回主页）
+                                onAddAccount = { navController.navigate(Routes.LOGIN + "?add=true") },
                                 // V47：账号面板自带的退出登录（与抽屉退出同款导航）
                                 onLogout = {
                                     navController.navigate(Routes.LOGIN) {

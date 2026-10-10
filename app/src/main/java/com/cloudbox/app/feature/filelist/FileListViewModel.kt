@@ -350,12 +350,22 @@ class FileListViewModel @Inject constructor(
             _uiState.update { st ->
                 if (st.passwdTarget?.id == file.id) {
                     st.copy(
-                        passwdDraft = share?.pwd.orEmpty(),
+                        // pwd 只在 onof=="1" 时是真码；否则是服务端给的无效随机值
+                        //（downloadSelected 同款判定），预填只会误导
+                        passwdDraft = if (share?.onof == "1") share?.pwd.orEmpty() else "",
                         passwdOn = share?.onof == "1",
                         passwdLoading = false
                     )
                 } else st
             }
+        }
+    }
+
+    /** V53：下载器按需选择后落库（DataStore 串行，onDone 在提交后才放行下载） */
+    fun saveCustomDownloader(pack: String, activity: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            settingsStore.setCustomDownloader(pack, activity)
+            onDone()
         }
     }
 

@@ -12,6 +12,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,16 @@ fun PasswdDialog(
 ) {
     var enable by remember { mutableStateOf(initialOn) }
     var code by remember { mutableStateOf(initialPwd) }
+    // V53（TA 真机实锤「有的码也显示关」）：弹窗先于读回渲染——passwdTarget
+    // 一置位弹窗就进组合树，此刻 initialPwd 还是空串，remember 冻结了初值；
+    // 异步读完 draft 更新进来时 remember 不会重跑 → 永远显示「关+空」。
+    // 读回完成（loading→false）后同步一次内部态。
+    LaunchedEffect(loading, initialPwd, initialOn) {
+        if (!loading) {
+            enable = initialOn
+            code = initialPwd
+        }
+    }
     var warned by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,

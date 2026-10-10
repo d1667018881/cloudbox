@@ -33,7 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -55,6 +57,17 @@ fun ResolveScreen(
     viewModel: ResolveViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    // V53：第三方下载器按需选择（与 FileListScreen 同款）
+    val useThirdParty by viewModel.settingsStore.useThirdPartyDownloader.collectAsState(initial = false)
+    val dlPack by viewModel.settingsStore.customDownloaderPack.collectAsState(initial = "")
+    var showDownloaderPick by remember { mutableStateOf(false) }
+    var pendingDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun tryDownload(action: () -> Unit) {
+        if (useThirdParty && dlPack.isBlank()) {
+            pendingDownload = action
+            showDownloaderPick = true
+        } else action()
+    }
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -190,7 +203,7 @@ private fun ResolveItemRow(
                 Text(link.url, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row {
-                    IconButton(onClick = { viewModel.download(item) }) {
+                    IconButton(onClick = { tryDownload { viewModel.download(item) } }) {
                         Icon(Icons.Filled.Download, "下载", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = { clipboard.setText(AnnotatedString(link.url)) }) {
@@ -206,5 +219,23 @@ private fun ResolveItemRow(
                     color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+
+    // V53：第三方下载器按需选择
+    if (showDownloaderPick) {
+        com.cloudbox.app.common.DownloaderPickerDialog(
+            onDismiss = {
+                showDownloaderPick = false
+                pendingDownload?.invoke()
+                pendingDownload = null
+            },
+            onSelected = { pack, act ->
+                showDownloaderPick = false
+                viewModel.saveCustomDownloader(pack, act) {
+                    pendingDownload?.invoke()
+                    pendingDownload = null
+                }
+            }
+        )
     }
 }

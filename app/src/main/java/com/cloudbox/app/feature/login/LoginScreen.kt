@@ -50,6 +50,8 @@ import androidx.compose.material3.Checkbox
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
     onOpenDomainConfig: () -> Unit,
+    /** V53：添加账号模式——抑制「已登录→弹回主页」（否则从账号页点添加账号会被闪回网盘首页） */
+    addAccount: Boolean = false,
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -57,7 +59,9 @@ fun LoginScreen(
     var showCookieImportDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.alreadyLoggedIn) {
-        if (state.alreadyLoggedIn) onLoginSuccess()
+        // addAccount 模式下当前账号本来就登着——不弹回主页，
+        // 让用户在「选择已有账号登录」/登录表单里完成新账号
+        if (state.alreadyLoggedIn && !addAccount) onLoginSuccess()
     }
 
     Scaffold { padding ->

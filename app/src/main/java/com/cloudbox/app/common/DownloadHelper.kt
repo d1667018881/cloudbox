@@ -8,6 +8,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 
 /**
@@ -51,6 +52,19 @@ object DownloadHelper {
             }.onFailure {
                 Toast.makeText(context, "无法打开文件", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    /**
+     * V53：按文件名扩展名推断 MIME（网盘页入队的任务 mimeType=null，
+     * ACTION_VIEW 带通配 MIME 多数设备没有应用能接 = 「打不开」）。
+     */
+    fun guessMimeType(fileName: String): String? {
+        val ext = fileName.substringAfterLast(".").lowercase()
+        if (ext.isEmpty()) return "*/*"
+        return when (ext) {
+            "apk" -> "application/vnd.android.package-archive"
+            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
         }
     }
 

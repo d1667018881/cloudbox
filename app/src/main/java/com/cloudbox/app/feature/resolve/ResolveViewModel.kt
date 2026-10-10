@@ -45,7 +45,8 @@ class ResolveViewModel @Inject constructor(
     private val fileRepository: FileRepository,
     private val shareRepository: ShareRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
-    private val settingsStore: com.cloudbox.app.core.data.local.datastore.SettingsStore
+    /** V53 去 private：Screen 侧按需读取（第三方下载器开关+包名） */
+    val settingsStore: com.cloudbox.app.core.data.local.datastore.SettingsStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ResolveUiState())
@@ -236,6 +237,14 @@ class ResolveViewModel @Inject constructor(
             }.onFailure { e ->
                 _uiState.update { it.copy(message = "下载失败：${e.message}") }
             }
+        }
+    }
+
+    /** V53：下载器按需选择后落库（与 FileListViewModel 同款） */
+    fun saveCustomDownloader(pack: String, activity: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            settingsStore.setCustomDownloader(pack, activity)
+            onDone()
         }
     }
 
