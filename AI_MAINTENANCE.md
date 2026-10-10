@@ -4455,3 +4455,40 @@ material-icons-core（extended 才有，本仓未引入）→ 换 List
   核对一轮能省一轮 CI
 
 版本号：213(删)/214/215/216 连烧四号，217 出包。DEX 五标记全中。
+
+### 45.19 V53：TA 验收第二轮三连修（2026-10-11 00:33 反馈→当日出包，b443d63..45aa476=v0.1.221）
+
+**三条反馈的根因与修法**：
+
+1. **添加账号闪回网盘首页**：LoginScreen 有「alreadyLoggedIn→onLoginSuccess」
+   自动弹回（本意=已登录用户启动直达主页），从账号页导航到登录页时同样触发。
+   修=路由加 `login?add={add}` 可选参数，add 模式抑制自动弹回
+2. **提取码「有的也显示关+空」**：PasswdDialog 先于异步读回进入组合树，
+   `remember{}` 冻结了空初值，draft 更新后 remember 不重跑——弹窗永远显示
+   初版空态。修=LaunchedEffect(loading) 读回完成后同步内部态；附带修掉
+   onof!=1 时 pwd 是服务端随机占位值也被预填的语义错误（对齐
+   downloadSelected 的 onof=="1" 判定）
+3. **第三方下载器「还是系统下载」+「打开打不开」**：
+   - 真相=开关开了但包名没配 → V52 的 NOT_CONFIGURED 分流回落内置=系统
+     DownloadManager（TA 看到的"系统下载"就是内置队列的系统通知）。
+     修=按需选择器：所有下载入口（网盘单/批量/解析页）在 on-but-unconfigured
+     时弹 DownloaderPickerDialog（列 ACTION_SEND text/plain 接收者，选完落库
+     并放行挂起的下载；「用内置下载」跳过一次）。saveCustomDownloader 的
+     onDone 在 DataStore 提交后才回调，防 VM 读到旧配置竞态
+   - 打开打不开两层：DM 记录被清理→getCompletedFileUri 返 null→静默 return
+     （改=Toast 说明）；mimeType=null+通配 MIME 无应用能接（改=guessMimeType
+     按扩展名推断，APK 走安装器）
+
+**教训**：
+- **Compose 状态注入时序**：异步数据填充的弹窗初值，remember 只在进组合树时
+  跑一次——必须 LaunchedEffect 同步（「弹窗先渲染、数据后到」的标准坑）
+- **python 补丁的锚点唯一性**：ResolveScreen 里 `val state by collectAsState`
+  出现多次（ResolveScreen+ResolveItemRow 都有），replace(first) 插进了错误的
+  函数——**多函数文件插代码必须先 rg 锚点命中数，唯一才动手**；两轮 CI 红的
+  代价
+- **块注释里 */ 序列第三坑**：KDoc 里写 `"*/*"`，序列 `*/` 提前终止注释
+  （真编译器同款行为，precheck 状态机正确报出）。同族雷：`/*` 开嵌套层级
+  （V52）、KDoc 内 MIME 通配/正则/URL 都可能踩。规矩：**注释里永远别写
+  斜杠+星号的任意组合**
+
+版本号：218/219/220 连烧三号，221 出包。DEX 四标记全中。
