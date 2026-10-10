@@ -4410,3 +4410,48 @@ material-icons-core（extended 才有，本仓未引入）→ 换 List
   写完立即校验关键标记
 - 版本号：v0.1.211 被红构建烧掉，212 出包；DEX 六标记全中（选择已有账号登录/
   显示与布局/扫描二维码/切换账户/行为与权限/SettingsGroupCard）
+
+### 45.18 V52：TA 验收六连修（2026-10-09 深夜反馈→10-10 出包，40ab5ee..e8cf1e2=v0.1.217）
+
+**六条反馈处置**：
+1. **切换账户闪一下不变**：根因=switchAccount 成功但 FileList 不响应账号变化。
+   修两层——`FileListScreen(accountSwitchKey)` → `hiltViewModel(key=...)` 按 key
+   分槽换 VM 实例（**key() 只管重组不重置 ViewModelStore，必须 hiltViewModel(key)**
+   才真重建）；切换 UI 并入管理账号页（TA 指示「并到最上面那个管理账号」），抽屉
+   条目删；AccountScreen 顶部「账号切换」区块（当前标记+点选切+删除+添加账号）
+2. **提取码「看不到现值+留空不能确认」**：SimpleInputDialog 一刀切 isNotBlank 挡了
+   空值+无回显。蓝云真语义（home_file.lua:2840）=读回当前码预填+**开关式**
+   （开+空=请输入；关=提交 onof=0）——CloudBox API 层 shows=0 早就支持关闭，
+   纯 UI 层拧巴。新 PasswdDialog（开关+预填 via getFileShare）替换单文件+批量
+   两处；SimpleInputDialog 保留不动（别处还在用）
+3. **第三方下载器「没有选项直接系统下载+疑似双下」**：V49 的 ACTION_VIEW 空包名
+   被系统下载器接管（「没有选项」真相）；改蓝云 ty_core.lua:4524 同款
+   **ACTION_SEND text/plain + EXTRA_TEXT + setClassName 强制组件**。三分流：
+   NOT_CONFIGURED=回落内置附指引 / SENT=不进内置 / **FAILED=提示改配置不回落**
+   （防双下）。**网盘页单文件+批量此前完全没接分流**（TA 主路径！）——一并接上。
+   设置弹窗加「选择已装应用」（queryIntentActivities 反查 ACTION_SEND+text/plain，
+   点选自动填 pack+activity）
+4. **幽灵 v0.1.213**：纯文档提交触发出包（workflow 对 push 无 paths 过滤）——
+   release+tag 已删，红点随之消失。**待办：给 workflow 加 paths-ignore 排除 *.md**
+5. **设置细分差蓝云**：24 键 vs 蓝云 99 键对照完毕。高价值缺口（下轮专项）：
+   ringtone 下载完成铃声、show_divider 分割线、check_update 检测更新开关、
+   precise_search、auto_user_agent、open_link_history、hide_status_bar、
+   black_background、home_title、动画时长、滑动关对话框。已有等价项：
+   排序(SortMode)、两行标题、收藏自动检查、auto_load、UA、图标包等
+6. 证书坏域救护/文件夹解析等 V48d 项本轮无反馈=默认正常
+
+**过程教训（四连红 CI 的代价）**：
+- **Kotlin 块注释嵌套**（全新坑）：KDoc 里写 `"text/*"`，`/*` 开启嵌套注释层级
+  （Kotlin 支持、Java 不支持），无配对 `*/` → 全文件变注释 → EOF 报
+  Unclosed comment。**KDoc 内严禁出现 `/*` 字面量**（MIME 通配符、正则、URL 都
+  可能踩）。自查脚本：逐字符状态机数嵌套深度（不能只数出现次数）
+- **python 多文件补丁+root 属主混合坑**：Write 创建的新文件=root 属主，后续
+  python 以 z 用户写不进（PermissionError），Edit 工具可写——混用工具链时
+  先 `chown` 或统一用 Edit
+- **Hilt key 语义**：`key(){}` composable 包装≠VM 重建；`hiltViewModel(key=)`
+  才按 ViewModelStore 分槽
+- **符号级自查要过一遍**：`p?.uid`（作用域外变量）、UserProfile 无 uid 字段、
+  ResolveInfo.loadLabel 返回 CharSequence（Text() 只收 String）——rg 声明
+  核对一轮能省一轮 CI
+
+版本号：213(删)/214/215/216 连烧四号，217 出包。DEX 五标记全中。
