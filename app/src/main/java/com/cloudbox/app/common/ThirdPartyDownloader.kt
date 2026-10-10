@@ -8,7 +8,8 @@ import android.content.Intent
  *
  * 蓝云原版语义：
  * ```
- * Intent().setAction(ACTION_SEND).setType("text/*")
+ * Intent().setAction(ACTION_SEND)
+ *   .setType("text/plain")   // 原版用通配 MIME 等价（避免写出会嵌套的注释序列）
  *   .putExtra(EXTRA_TEXT, url)
  *   .setClassName(custom_downloader_pack, custom_downloader_activity)
  * ```
