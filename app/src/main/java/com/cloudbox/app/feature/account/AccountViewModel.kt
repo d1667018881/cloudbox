@@ -123,9 +123,17 @@ class AccountViewModel @Inject constructor(
     /** 切换成功（uid）——Screen 消费后回主页并刷新（主页 key(uid) 重建文件列表） */
     val switched = _switched
 
+    private val _currentUid = MutableStateFlow<String?>(null)
+
+    /** 当前登录账号 uid（切换区块「当前」标记用） */
+    val currentUid: StateFlow<String?> = _currentUid.asStateFlow()
+
     fun loadAccounts() {
         viewModelScope.launch {
-            runCatching { _accounts.value = authRepository.allAccounts() }
+            runCatching {
+                _accounts.value = authRepository.allAccounts()
+                _currentUid.value = authRepository.currentAccount.first()?.uid
+            }
         }
     }
 

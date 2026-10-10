@@ -833,7 +833,7 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    ri.loadLabel(ri.activityInfo.applicationInfo),
+                                    ri.loadLabel(context.packageManager),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Spacer(Modifier.weight(1f))

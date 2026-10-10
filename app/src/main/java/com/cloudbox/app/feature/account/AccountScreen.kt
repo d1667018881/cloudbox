@@ -83,6 +83,7 @@ fun AccountScreen(
     val state by viewModel.uiState.collectAsState()
     // V52：账号切换区块（原抽屉「切换账户」并入——TA 2026-10-09 指示）
     val switchAccounts by viewModel.accounts.collectAsState()
+    val currentUid by viewModel.currentUid.collectAsState()
     androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.loadAccounts() }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -197,7 +198,7 @@ fun AccountScreen(
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
                 )
                 switchAccounts.forEach { acc ->
-                    val isCurrent = acc.uid == p?.uid
+                    val isCurrent = acc.uid == currentUid
                     Row(
                         Modifier
                             .fillMaxWidth()

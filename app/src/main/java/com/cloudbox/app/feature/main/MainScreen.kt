@@ -208,6 +208,7 @@ fun MainScreen(
             // FileListViewModel 重新创建并加载新账号的网盘根目录
             key(account?.uid) {
             FileListScreen(
+                accountSwitchKey = account?.uid ?: "",
                 onOpenSearch = onOpenSearch,
                 onOpenRecycle = onOpenRecycle,
                 onOpenDownload = onOpenDownload,

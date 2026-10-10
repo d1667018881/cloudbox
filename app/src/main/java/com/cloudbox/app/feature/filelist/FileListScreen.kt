@@ -120,7 +120,9 @@ fun FileListScreen(
     initialFolderId: Long? = null,
     /** 初始目录名（面包屑显示用；搜索跳转时未必知道真实名） */
     initialFolderName: String = "",
-    viewModel: FileListViewModel = hiltViewModel(),
+    /** V52：账号切换键——hiltViewModel 按 key 分槽，切号后 VM 全新实例=列表真重建 */
+    accountSwitchKey: String = "",
+    viewModel: FileListViewModel = hiltViewModel(key = accountSwitchKey.ifBlank { "default" }),
     uploadViewModel: com.cloudbox.app.feature.upload.UploadViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
