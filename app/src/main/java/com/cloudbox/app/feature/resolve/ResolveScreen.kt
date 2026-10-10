@@ -68,6 +68,24 @@ fun ResolveScreen(
             showDownloaderPick = true
         } else action()
     }
+    // V53：第三方下载器按需选择弹窗（必须挂在 ResolveScreen 作用域——
+    // 首版误插进 ResolveItemRow 尾部，作用域不通报 unresolved）
+    if (showDownloaderPick) {
+        com.cloudbox.app.common.DownloaderPickerDialog(
+            onDismiss = {
+                showDownloaderPick = false
+                pendingDownload?.invoke()
+                pendingDownload = null
+            },
+            onSelected = { pack, act ->
+                showDownloaderPick = false
+                viewModel.saveCustomDownloader(pack, act) {
+                    pendingDownload?.invoke()
+                    pendingDownload = null
+                }
+            }
+        )
+    }
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -223,21 +241,4 @@ private fun ResolveItemRow(
         }
     }
 
-    // V53：第三方下载器按需选择
-    if (showDownloaderPick) {
-        com.cloudbox.app.common.DownloaderPickerDialog(
-            onDismiss = {
-                showDownloaderPick = false
-                pendingDownload?.invoke()
-                pendingDownload = null
-            },
-            onSelected = { pack, act ->
-                showDownloaderPick = false
-                viewModel.saveCustomDownloader(pack, act) {
-                    pendingDownload?.invoke()
-                    pendingDownload = null
-                }
-            }
-        )
-    }
 }
