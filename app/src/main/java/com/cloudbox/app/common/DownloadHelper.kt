@@ -47,6 +47,10 @@ object DownloadHelper {
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, mimeType ?: "*/*")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    // V54：DownloadViewModel 的 context 是 ApplicationContext，
+                    // 不加 NEW_TASK 的 startActivity 会静默抛 AndroidRuntimeException
+                    // ——被 runCatching 吞掉后只剩「无法打开文件」Toast（TA 实锤）
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
             }.onFailure {
@@ -103,7 +107,11 @@ object DownloadHelper {
             Toast.makeText(context, "需要开启「安装未知应用」权限", Toast.LENGTH_LONG).show()
             runCatching {
                 context.startActivity(
-                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).apply {
+                        // V54：同样缺 NEW_TASK——从 ApplicationContext 发不出去，
+                        // 表现=只有 Toast 不弹授权页（TA 实锤）
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
                 )
             }
             return

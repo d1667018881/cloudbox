@@ -195,12 +195,13 @@ fun FileListScreen(
     val useThirdParty by viewModel.settingsStore.useThirdPartyDownloader.collectAsState(initial = false)
     val dlPack by viewModel.settingsStore.customDownloaderPack.collectAsState(initial = "")
     var showDownloaderPick by remember { mutableStateOf(false) }
-    var pendingDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
-    fun tryDownload(action: () -> Unit) {
+    // V54：闭包参数 true=「用内置下载」按钮（仅本次走内置）；false=正常分流
+    var pendingDownload by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+    fun tryDownload(action: (useBuiltIn: Boolean) -> Unit) {
         if (useThirdParty && dlPack.isBlank()) {
             pendingDownload = action
             showDownloaderPick = true
-        } else action()
+        } else action(false)
     }
     val deleteConfirmPref by viewModel.settingsStore.deleteConfirm.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
@@ -506,7 +507,7 @@ fun FileListScreen(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        ActionChip("批量下载", Icons.Filled.Download) { tryDownload { viewModel.downloadSelected() } }
+                        ActionChip("批量下载", Icons.Filled.Download) { tryDownload { b -> viewModel.downloadSelected(b) } }
                         ActionChip("设提取码", Icons.Filled.Lock) { showBatchPwd = true }
                         ActionChip("改资料", Icons.Filled.Edit) { showBatchDesc = true }
                     }
@@ -802,7 +803,7 @@ fun FileListScreen(
             confirmButton = {
                 TextButton(onClick = {
                     downloadTarget = null
-                    tryDownload { viewModel.downloadSingle(df) }
+                    tryDownload { b -> viewModel.downloadSingle(df, b) }
                 }) { Text("下载") }
             },
             dismissButton = {
@@ -899,7 +900,7 @@ fun FileListScreen(
                     if (!file.isFolder) {
                         MenuAction("下载到本地", Icons.Filled.Download) {
                             menuFile = null
-                            tryDownload { viewModel.downloadSingle(file) }
+                            tryDownload { b -> viewModel.downloadSingle(file, b) }
                         }
                     }
                     MenuAction("复制文件名", Icons.Filled.ContentCopy) {
@@ -1009,17 +1010,23 @@ fun FileListScreen(
     }
     if (showDownloaderPick) {
         com.cloudbox.app.common.DownloaderPickerDialog(
-            onDismiss = {
+            // V54：取消 = 纯取消（返回键/点外部/取消按钮都不触发下载）；
+            // 「用内置下载」= pendingDownload(true) 仅本次内置；选应用 =
+            // 落库完成后 pendingDownload(false) 正常分流
+            onCancel = {
                 showDownloaderPick = false
-                // 本次用内置（不配置，VM 侧 NOT_CONFIGURED 分流回落）
-                pendingDownload?.invoke()
+                pendingDownload = null
+            },
+            onUseBuiltIn = {
+                showDownloaderPick = false
+                pendingDownload?.invoke(true)
                 pendingDownload = null
             },
             onSelected = { pack, act ->
                 showDownloaderPick = false
                 // 落库完成后再放行下载，防止 VM 读到旧配置
                 viewModel.saveCustomDownloader(pack, act) {
-                    pendingDownload?.invoke()
+                    pendingDownload?.invoke(false)
                     pendingDownload = null
                 }
             }

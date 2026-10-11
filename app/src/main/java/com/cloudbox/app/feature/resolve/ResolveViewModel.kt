@@ -182,7 +182,7 @@ class ResolveViewModel @Inject constructor(
      * acw 挑战，会把挑战页当文件存成 4.7K 假文件）。点下载时用 force 重解析，
      * 拿 finalize 过的 CDN 直链再入队。重解析失败回落旧链（保底能下载）。
      */
-    fun download(item: ResolveItem) {
+    fun download(item: ResolveItem, forceBuiltIn: Boolean = false) {
         val oldLink = item.link ?: return
         viewModelScope.launch {
             // 移动网络提醒：流量是用户的钱，默认先问一句（设置页可关）
@@ -197,10 +197,11 @@ class ResolveViewModel @Inject constructor(
             val link = directLinkRepository.resolve(item.shareUrl, pwd, force = true)
                 .getOrNull() ?: oldLink
 
-            // V52（TA 真机反馈重做，对齐蓝云 ty_core.lua:4524）：
-            // ACTION_SEND + setClassName 强制指定下载器；配置不齐回落内置（附提示）；
-            // 配了但打不开**不回落**（蓝云同款语义——防「系统下载+内置」双轨下载）。
-            if (settingsStore.useThirdPartyDownloader.first()) {
+            // V54（TA 真机实锤「取消也下了」）：未配置**不再回落内置**——
+            // 取消选择弹窗后下载悄悄进系统队列就是这条落差。现在三分流全停：
+            // SENT=第三方独占 / FAILED=提示重配 / NOT_CONFIGURED=提示去配置。
+            // forceBuiltIn=true 仅由选择弹窗「用内置下载」显式触发，跳过分流。
+            if (!forceBuiltIn && settingsStore.useThirdPartyDownloader.first()) {
                 when (com.cloudbox.app.common.ThirdPartyDownloader.handOff(
                     link.url, link.fileName, context,
                     settingsStore.customDownloaderPack.first(),
@@ -214,11 +215,11 @@ class ResolveViewModel @Inject constructor(
                         _uiState.update { it.copy(message = "第三方下载器打开失败，请在设置中重新配置") }
                         return@launch
                     }
-                    // NOT_CONFIGURED：落到下面的内置队列，并给出指引
                     com.cloudbox.app.common.HandOffResult.NOT_CONFIGURED -> {
                         _uiState.update {
-                            it.copy(message = "第三方下载器未配置包名，本次用内置下载（设置→连接与下载→第三方下载器）")
+                            it.copy(message = "第三方下载器未配置包名：设置 → 连接与下载 → 第三方下载器")
                         }
+                        return@launch
                     }
                 }
             }

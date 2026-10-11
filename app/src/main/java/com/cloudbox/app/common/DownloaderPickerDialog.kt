@@ -27,12 +27,16 @@ import androidx.compose.ui.unit.dp
  * 列出设备上所有能接 ACTION_SEND 文本分享的应用（ADM/1DM/浏览器等），
  * 点选即存配置并继续刚才的下载，不用去设置页翻。
  *
- * 「用内置下载」= 本次不配置，继续走内置队列（VM 的 NOT_CONFIGURED
- * 分流会回落内置并附提示）。
+ * V54（TA 真机实锤「取消也下了」）取消语义修正：
+ * - onDismissRequest（返回键/点弹窗外）= 纯取消，**不触发任何下载**
+ * - 「取消」按钮 = 纯取消
+ * - 「用内置下载」= 仅本次走内置队列（显式动作）
+ * - 点选应用 = 保存配置并把挂起的下载交给第三方
  */
 @Composable
 fun DownloaderPickerDialog(
-    onDismiss: () -> Unit,
+    onCancel: () -> Unit,
+    onUseBuiltIn: () -> Unit,
     onSelected: (pack: String, activity: String) -> Unit
 ) {
     val context = LocalContext.current
@@ -46,7 +50,7 @@ fun DownloaderPickerDialog(
         }.getOrDefault(emptyList())
     }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = onCancel,
         title = { Text("选择第三方下载器") },
         text = {
             Column {
@@ -94,9 +98,11 @@ fun DownloaderPickerDialog(
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            TextButton(onClick = onUseBuiltIn) { Text("用内置下载") }
+        },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("用内置下载") }
+            TextButton(onClick = onCancel) { Text("取消") }
         }
     )
 }

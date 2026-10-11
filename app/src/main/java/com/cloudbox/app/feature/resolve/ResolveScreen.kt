@@ -61,26 +61,31 @@ fun ResolveScreen(
     val useThirdParty by viewModel.settingsStore.useThirdPartyDownloader.collectAsState(initial = false)
     val dlPack by viewModel.settingsStore.customDownloaderPack.collectAsState(initial = "")
     var showDownloaderPick by remember { mutableStateOf(false) }
-    var pendingDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
-    fun tryDownload(action: () -> Unit) {
+    // V54：闭包参数 true=「用内置下载」按钮（仅本次走内置）；false=正常分流
+    var pendingDownload by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+    fun tryDownload(action: (useBuiltIn: Boolean) -> Unit) {
         if (useThirdParty && dlPack.isBlank()) {
             pendingDownload = action
             showDownloaderPick = true
-        } else action()
+        } else action(false)
     }
     // V53：第三方下载器按需选择弹窗（必须挂在 ResolveScreen 作用域——
     // 首版误插进 ResolveItemRow 尾部，作用域不通报 unresolved）
     if (showDownloaderPick) {
         com.cloudbox.app.common.DownloaderPickerDialog(
-            onDismiss = {
+            onCancel = {
                 showDownloaderPick = false
-                pendingDownload?.invoke()
+                pendingDownload = null
+            },
+            onUseBuiltIn = {
+                showDownloaderPick = false
+                pendingDownload?.invoke(true)
                 pendingDownload = null
             },
             onSelected = { pack, act ->
                 showDownloaderPick = false
                 viewModel.saveCustomDownloader(pack, act) {
-                    pendingDownload?.invoke()
+                    pendingDownload?.invoke(false)
                     pendingDownload = null
                 }
             }
@@ -198,7 +203,7 @@ fun ResolveScreen(
 
             LazyColumn(Modifier.weight(1f)) {
                 items(state.results, key = { it.key }) { item ->
-                    ResolveItemRow(item, viewModel, onDownload = { tryDownload { viewModel.download(item) } })
+                    ResolveItemRow(item, viewModel, onDownload = { tryDownload { b -> viewModel.download(item, b) } })
                 }
             }
         }
