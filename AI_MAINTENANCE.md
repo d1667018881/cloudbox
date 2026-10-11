@@ -4492,3 +4492,31 @@ material-icons-core（extended 才有，本仓未引入）→ 换 List
   斜杠+星号的任意组合**
 
 版本号：218/219/220 连烧三号，221 出包。DEX 四标记全中。
+
+### 45.20 V54：取消语义重定义 + 授权页打不开（2026-10-11 12:08 反馈→当日出包，ac5ece9=v0.1.223）
+
+**两条反馈**：
+
+1. **「取消/等几秒也下了」**：V53 选择弹窗的 onDismissRequest 接的也是
+   「用内置下载」路径（返回键/点外部=触发内置下载），叠加 VM 侧 NOT_CONFIGURED
+   静默回落 enqueue——用户任何取消动作都会启动下载。修：
+   - 弹窗契约重定义：onCancel（含 onDismissRequest）=纯取消不触发任何下载；
+     「用内置下载」=显式按钮仅本次走内置（forceBuiltIn=true 穿透
+     downloadSingle/downloadSelected/download 三函数）；
+     选应用=落库后继续
+   - VM 侧 NOT_CONFIGURED 改为提示+停住（不再回落 enqueue），同时兜住
+     Screen collectAsState initial 值竞态（进页面立刻点下载时拦截器可能
+     还没读到真实开关值）
+2. **「安装包只有 Toast 不弹授权」**：ACTION_MANAGE_UNKNOWN_APP_SOURCES 跳转
+   intent 缺 FLAG_ACTIVITY_NEW_TASK——从 ApplicationContext startActivity
+   直接抛 AndroidRuntimeException，被 runCatching 吞掉只剩 Toast。同款补了
+   openFile 的 ACTION_VIEW（打开任意文件同样中招过）
+
+**教训**：
+- **取消语义必须显式设计**：任何「取消/关闭」动作接到有副作用路径都是坑——
+  onDismissRequest 与确认按钮是不同意图，分开接；「用内置」这种降级动作必须
+  显式标注（按钮文案），不能藏在取消里
+- **ApplicationContext 发 Activity intent 必须 NEW_TASK**（铁律），runCatching
+  会把这类 RuntimeException 静默吞掉——Toast 出了但页面没跳=先查 flag
+
+版本号：222 烧一号，223 出包。DEX 两标记中（用内置下载/未配置提示文案）。
