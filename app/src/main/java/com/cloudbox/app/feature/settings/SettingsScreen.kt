@@ -780,16 +780,11 @@ fun SettingsScreen(
     if (downloaderDialog) {
         // V52：已装下载器候选（ACTION_SEND text/plain —— 蓝云同款 intent 的
         // 反向：谁能接这个 intent 谁就是候选下载器，点选自动填包名+Activity）
+        // V55：改走 DownloaderCandidates——默认只显示疑似下载器（白名单+关键词），
+        // 过滤掉微信/QQ 等不相关应用（TA 真机「弹出好多不相关的应用」）
         val context = androidx.compose.ui.platform.LocalContext.current
         val candidates = remember {
-            runCatching {
-                val pm = context.packageManager
-                val probe = android.content.Intent(android.content.Intent.ACTION_SEND)
-                    .setType("text/plain")
-                pm.queryIntentActivities(probe, 0)
-                    .filter { it.activityInfo.packageName != context.packageName }
-                    .sortedBy { it.loadLabel(pm).toString().lowercase() }
-            }.getOrDefault(emptyList())
+            com.cloudbox.app.common.DownloaderCandidates.queryFiltered(context)
         }
         AlertDialog(
             onDismissRequest = { downloaderDialog = false },

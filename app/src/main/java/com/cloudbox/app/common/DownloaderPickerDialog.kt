@@ -1,6 +1,5 @@
 package com.cloudbox.app.common
 
-import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +13,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,15 +42,14 @@ fun DownloaderPickerDialog(
     onSelected: (pack: String, activity: String) -> Unit
 ) {
     val context = LocalContext.current
-    val candidates = remember {
-        runCatching {
-            val pm = context.packageManager
-            val probe = Intent(Intent.ACTION_SEND).setType("text/plain")
-            pm.queryIntentActivities(probe, 0)
-                .filter { it.activityInfo.packageName != context.packageName }
-                .sortedBy { it.loadLabel(pm).toString().lowercase() }
-        }.getOrDefault(emptyList())
+    // V55：默认只显示「像下载器」的应用（白名单+关键词），过滤掉微信/QQ 等
+    // 不相关分享目标；「显示全部」兜底冷门下载器。过滤后为空自动回落全量。
+    val allCandidates = remember { com.cloudbox.app.common.DownloaderCandidates.queryAll(context) }
+    val filtered = remember(allCandidates) {
+        allCandidates.filter { com.cloudbox.app.common.DownloaderCandidates.isDownloaderish(it, context) }
     }
+    var showAll by remember { mutableStateOf(filtered.isEmpty()) }
+    val candidates = if (showAll) allCandidates else filtered
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("选择第三方下载器") },
@@ -93,6 +94,18 @@ fun DownloaderPickerDialog(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+                    }
+                    // V55：兜底切换——用户的下载器不在过滤结果里时展开全量
+                    if (filtered.isNotEmpty() && allCandidates.size > filtered.size) {
+                        TextButton(
+                            onClick = { showAll = !showAll },
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            Text(
+                                if (showAll) "只显示疑似下载器" else "没找到？显示全部应用",
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                     }
                 }
