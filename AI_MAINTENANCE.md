@@ -4520,3 +4520,24 @@ material-icons-core（extended 才有，本仓未引入）→ 换 List
   会把这类 RuntimeException 静默吞掉——Toast 出了但页面没跳=先查 flag
 
 版本号：222 烧一号，223 出包。DEX 两标记中（用内置下载/未配置提示文案）。
+
+### 45.21 V55：下载器选择器过滤（2026-10-12 02:45 反馈→当日出包，0a02ddb=v0.1.225）
+
+**反馈**：「选择下载软件的地方弹出好多不相关的应用」。
+
+**根因**：候选=ACTION_SEND text/plain 反查的全部接收者（微信/QQ/笔记/
+浏览器全在内）——intent 是蓝云原版交互没错，但「全列」是我 V53 自作主张。
+
+**修法**：公共 `DownloaderCandidates` helper（两处选择器共用）：
+- 已知下载器包名白名单：com.dv.adm / idm.internet.download.manager(.plus) /
+  org.zloy.android.downloader
+- 关键词匹配：包名或应用标签小写包含 download/downloader/adm/idm/aria2/
+  torrent/magnet/motrix/xdm
+- 下载时弹窗：默认只显示过滤结果+底部「没找到？显示全部应用」切换
+  （过滤结果为空自动显示全量）；设置页选择器直接用过滤查询
+
+**教训**：「反向查询谁接这个 intent」≠「该给用户看什么」——查询是技术
+正确性，展示是产品决策，两码事。凡候选列表必有筛选层，全量列表只在用户
+显式要求时出现。
+
+版本号：224 烧一号，225 出包。DEX 两标记中。
