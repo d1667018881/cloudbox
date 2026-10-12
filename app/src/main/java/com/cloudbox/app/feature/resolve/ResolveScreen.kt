@@ -33,9 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -57,40 +55,6 @@ fun ResolveScreen(
     viewModel: ResolveViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    // V53：第三方下载器按需选择（与 FileListScreen 同款）
-    val useThirdParty by viewModel.settingsStore.useThirdPartyDownloader.collectAsState(initial = false)
-    val dlPack by viewModel.settingsStore.customDownloaderPack.collectAsState(initial = "")
-    var showDownloaderPick by remember { mutableStateOf(false) }
-    // V54：闭包参数 true=「用内置下载」按钮（仅本次走内置）；false=正常分流
-    var pendingDownload by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
-    fun tryDownload(action: (useBuiltIn: Boolean) -> Unit) {
-        if (useThirdParty && dlPack.isBlank()) {
-            pendingDownload = action
-            showDownloaderPick = true
-        } else action(false)
-    }
-    // V53：第三方下载器按需选择弹窗（必须挂在 ResolveScreen 作用域——
-    // 首版误插进 ResolveItemRow 尾部，作用域不通报 unresolved）
-    if (showDownloaderPick) {
-        com.cloudbox.app.common.DownloaderPickerDialog(
-            onCancel = {
-                showDownloaderPick = false
-                pendingDownload = null
-            },
-            onUseBuiltIn = {
-                showDownloaderPick = false
-                pendingDownload?.invoke(true)
-                pendingDownload = null
-            },
-            onSelected = { pack, act ->
-                showDownloaderPick = false
-                viewModel.saveCustomDownloader(pack, act) {
-                    pendingDownload?.invoke(false)
-                    pendingDownload = null
-                }
-            }
-        )
-    }
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -203,7 +167,7 @@ fun ResolveScreen(
 
             LazyColumn(Modifier.weight(1f)) {
                 items(state.results, key = { it.key }) { item ->
-                    ResolveItemRow(item, viewModel, onDownload = { tryDownload { b -> viewModel.download(item, b) } })
+                    ResolveItemRow(item, viewModel, onDownload = { viewModel.download(item) })
                 }
             }
         }

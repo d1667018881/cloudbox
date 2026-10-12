@@ -182,7 +182,7 @@ class ResolveViewModel @Inject constructor(
      * acw 挑战，会把挑战页当文件存成 4.7K 假文件）。点下载时用 force 重解析，
      * 拿 finalize 过的 CDN 直链再入队。重解析失败回落旧链（保底能下载）。
      */
-    fun download(item: ResolveItem, forceBuiltIn: Boolean = false) {
+    fun download(item: ResolveItem) {
         val oldLink = item.link ?: return
         viewModelScope.launch {
             // 移动网络提醒：流量是用户的钱，默认先问一句（设置页可关）
@@ -197,11 +197,10 @@ class ResolveViewModel @Inject constructor(
             val link = directLinkRepository.resolve(item.shareUrl, pwd, force = true)
                 .getOrNull() ?: oldLink
 
-            // V54（TA 真机实锤「取消也下了」）：未配置**不再回落内置**——
-            // 取消选择弹窗后下载悄悄进系统队列就是这条落差。现在三分流全停：
-            // SENT=第三方独占 / FAILED=提示重配 / NOT_CONFIGURED=提示去配置。
-            // forceBuiltIn=true 仅由选择弹窗「用内置下载」显式触发，跳过分流。
-            if (!forceBuiltIn && settingsStore.useThirdPartyDownloader.first()) {
+            // V56 对齐蓝云三分支（ty_core.lua「下载」）：开而未配置 →
+            // ACTION_VIEW 系统选择器（原版「浏览器打开」，每次询问——
+            // 设置帮助文案的出处）；FAILED 提示不回落（防双轨）
+            if (settingsStore.useThirdPartyDownloader.first()) {
                 when (com.cloudbox.app.common.ThirdPartyDownloader.handOff(
                     link.url, link.fileName, context,
                     settingsStore.customDownloaderPack.first(),
@@ -211,14 +210,12 @@ class ResolveViewModel @Inject constructor(
                         _uiState.update { it.copy(message = "已交给第三方下载器：${link.fileName}") }
                         return@launch
                     }
-                    com.cloudbox.app.common.HandOffResult.FAILED -> {
-                        _uiState.update { it.copy(message = "第三方下载器打开失败，请在设置中重新配置") }
+                    com.cloudbox.app.common.HandOffResult.CHOOSER -> {
+                        // 系统选择器已弹出（原版此分支无提示）
                         return@launch
                     }
-                    com.cloudbox.app.common.HandOffResult.NOT_CONFIGURED -> {
-                        _uiState.update {
-                            it.copy(message = "第三方下载器未配置包名：设置 → 连接与下载 → 第三方下载器")
-                        }
+                    com.cloudbox.app.common.HandOffResult.FAILED -> {
+                        _uiState.update { it.copy(message = "第三方下载器打开失败，请在设置中重新配置") }
                         return@launch
                     }
                 }
@@ -238,14 +235,6 @@ class ResolveViewModel @Inject constructor(
             }.onFailure { e ->
                 _uiState.update { it.copy(message = "下载失败：${e.message}") }
             }
-        }
-    }
-
-    /** V53：下载器按需选择后落库（与 FileListViewModel 同款） */
-    fun saveCustomDownloader(pack: String, activity: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
-            settingsStore.setCustomDownloader(pack, activity)
-            onDone()
         }
     }
 

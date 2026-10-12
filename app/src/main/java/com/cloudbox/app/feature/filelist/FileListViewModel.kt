@@ -361,14 +361,6 @@ class FileListViewModel @Inject constructor(
         }
     }
 
-    /** V53：下载器按需选择后落库（DataStore 串行，onDone 在提交后才放行下载） */
-    fun saveCustomDownloader(pack: String, activity: String, onDone: () -> Unit = {}) {
-        viewModelScope.launch {
-            settingsStore.setCustomDownloader(pack, activity)
-            onDone()
-        }
-    }
-
     fun dismissPasswdEdit() = _uiState.update {
         it.copy(passwdTarget = null, passwdDraft = "", passwdOn = false, passwdLoading = false)
     }
@@ -702,7 +694,7 @@ class FileListViewModel @Inject constructor(
      * 未配置直链解析服务时直接拒绝并沿用原版文案 —— 批量下载没有直链就是不可用，
      * 硬跑只会得到一堆失败，不如提前说清楚。
      */
-    fun downloadSelected(forceBuiltIn: Boolean = false) {
+    fun downloadSelected() {
         val s = _uiState.value
         val files = s.files.filter { it.id in s.selected && !it.isFolder }
         if (files.isEmpty()) {
@@ -710,13 +702,13 @@ class FileListViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            // V54：批量同样不静默回落——开关开而未配置直接提示整批停住
-            //（单条版注释同源，见 downloadSingle）
-            if (!forceBuiltIn && settingsStore.useThirdPartyDownloader.first() &&
+            // V56：批量 + 第三方开而未配置——系统选择器是逐条交互（原版无批量），
+            // 一次弹 N 个选择器不可用，提示去配置或关开关
+            if (settingsStore.useThirdPartyDownloader.first() &&
                 settingsStore.customDownloaderPack.first().isBlank()
             ) {
                 _uiState.update {
-                    it.copy(message = "第三方下载器未配置包名：设置 → 连接与下载 → 第三方下载器")
+                    it.copy(message = "批量下载需先在设置中指定第三方下载器（或关闭第三方下载开关）")
                 }
                 return@launch
             }
@@ -731,9 +723,8 @@ class FileListViewModel @Inject constructor(
                     val pwd = if (share.onof == "1") share.pwd else ""
                     directLinkRepository.resolve(share.shareUrl, pwd)
                         .onSuccess { link ->
-                            // V54：批量分流——SENT 计成功；FAILED/NOT_CONFIGURED
-                            // 记失败，均不落内置（防「取消/失败也下了」双轨）
-                            if (!forceBuiltIn && settingsStore.useThirdPartyDownloader.first()) {
+                            // V56：批量分流——配置了才走到这（未配置上面已拦）
+                            if (settingsStore.useThirdPartyDownloader.first()) {
                                 when (
                                     com.cloudbox.app.common.ThirdPartyDownloader.handOff(
                                         link.url, link.fileName.ifBlank { file.name }, appContext,
@@ -745,11 +736,11 @@ class FileListViewModel @Inject constructor(
                                         ok++
                                         return@onSuccess
                                     }
-                                    com.cloudbox.app.common.HandOffResult.FAILED -> {
-                                        fail++
+                                    com.cloudbox.app.common.HandOffResult.CHOOSER -> {
+                                        ok++
                                         return@onSuccess
                                     }
-                                    com.cloudbox.app.common.HandOffResult.NOT_CONFIGURED -> {
+                                    com.cloudbox.app.common.HandOffResult.FAILED -> {
                                         fail++
                                         return@onSuccess
                                     }
@@ -859,12 +850,14 @@ class FileListViewModel @Inject constructor(
                 .onFailure { e -> _uiState.update { it.copy(message = "移动失败：${e.message}") } }
         }
     }
-
     /**
      * 下载单个文件：分享链接 → 直链 → 下载队列。
-     * 与 [downloadSelected] 同一条链路，只是目标只有一个。
+     * V56 对齐蓝云三分支（ty_core.lua「下载」）：
+     * 第三方开关开且已配置 → ACTION_SEND 直投；开而未配置 → ACTION_VIEW
+     * 系统选择器（原版「浏览器打开」，每次询问——设置帮助文案的出处）；
+     * 关 → 内置队列。FAILED 一律提示不回落（防双轨下载）。
      */
-    fun downloadSingle(file: CloudFile, forceBuiltIn: Boolean = false) {
+    fun downloadSingle(file: CloudFile) {
         if (file.isFolder) {
             _uiState.update { it.copy(message = "文件夹不支持直接下载，请进入后选择文件") }
             return
@@ -876,42 +869,27 @@ class FileListViewModel @Inject constructor(
                 // 下载场景必须拿"finalize 过的 CDN 直链"（时效约 30 分钟内有效）
                 directLinkRepository.resolve(share.shareUrl, pwd, force = true)
                     .onSuccess { link ->
-                        // V54（TA 真机实锤「取消也下了」）：开关开而未配置时
-                        // **不再静默回落内置**——那是 V52 NOT_CONFIGURED 分支的
-                        // 落差，表现为用户取消选择弹窗后下载照样进系统队列。
-                        // 真正的拦截在这里（VM 读 DataStore 实时值），Screen 侧
-                        // tryDownload 只是提前弹选择器的 UX 优化，即使
-                        // collectAsState 还在 initial 值也拦得住。
-                        // forceBuiltIn=true 仅由选择弹窗的「用内置下载」显式触发。
-                        if (!forceBuiltIn && settingsStore.useThirdPartyDownloader.first()) {
-                            val pack = settingsStore.customDownloaderPack.first()
-                            when (
-                                com.cloudbox.app.common.ThirdPartyDownloader.handOff(
-                                    link.url, link.fileName.ifBlank { file.name }, appContext,
-                                    pack,
-                                    settingsStore.customDownloaderActivity.first()
-                                )
-                            ) {
+                        if (settingsStore.useThirdPartyDownloader.first()) {
+                            when (com.cloudbox.app.common.ThirdPartyDownloader.handOff(
+                                link.url, link.fileName.ifBlank { file.name }, appContext,
+                                settingsStore.customDownloaderPack.first(),
+                                settingsStore.customDownloaderActivity.first()
+                            )) {
                                 com.cloudbox.app.common.HandOffResult.SENT -> {
                                     _uiState.update { it.copy(message = "已交给第三方下载器：${file.name}") }
+                                    return@launch
+                                }
+                                com.cloudbox.app.common.HandOffResult.CHOOSER -> {
+                                    // 系统选择器已弹出（原版此分支无提示）
                                     return@launch
                                 }
                                 com.cloudbox.app.common.HandOffResult.FAILED -> {
                                     _uiState.update { it.copy(message = "第三方下载器打开失败，请在设置中重新配置") }
                                     return@launch
                                 }
-                                // NOT_CONFIGURED：提示并停住，绝不回落（Screen 弹窗
-                                // 正常时用户根本走不到这；到这=DataStore 竞态兜底）
-                                com.cloudbox.app.common.HandOffResult.NOT_CONFIGURED -> {
-                                    _uiState.update {
-                                        it.copy(message = "第三方下载器未配置包名：设置 → 连接与下载 → 第三方下载器")
-                                    }
-                                    return@launch
-                                }
                             }
                         }
-                        // V48：enqueue 带预检，可能抛 ApiError（链接被反爬拦截）——
-                        // 不包 runCatching 会绕过 onFailure 直接炸协程
+                        // 内置队列
                         runCatching {
                             downloadRepository.enqueue(
                                 url = link.url,
