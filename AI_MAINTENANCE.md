@@ -4606,8 +4606,44 @@ use == true + 未配置                  → 浏览器打开(ACTION_VIEW url) = 
 
 **CI 一红一绿**：V57 首包 SearchViewModel 缺 `first` import（V52 import
 家族坑第 N 犯）——precheck 不查 import，CI 才暴露。d0eb6ae 补一行绿。
-228 烧一号，229=修复包，230 出包（DEX 六标记全中）。
+~~228 烧一号，229=修复包，230 出包（DEX 六标记全中）。~~
+（复审 V58 修正：228 实为 5a48f15 文档提交出的**成功构建同码包**（paths-ignore
+落地前一小时的漏网之鱼），已删 release+tag；229=8945d04 失败构建未出包；
+230=d0eb6ae 修复包。另查出 222/224/226 同为文档空包一并清理。）
 
 **教训**：①「数据源不存在」类结论必须先 rg 现有代码再下（检查更新 V33
 就有，我凭印象判了死刑，TA 反证才翻案）；②precheck 应升级为 import 级
 符号核对（Flow.first 家族已三犯：V49 首犯/V52 两犯/本轮三犯）——待做项。
+
+
+### 45.24 V58：TA 令复审（「你说错的次数有点多」）——查出三真 bug+清四空包（2026-10-12 21:41 指令，8dbf07c）
+
+TA 质疑成立。V57 交付自查全过一遍（本轮会话已两次被 TA 反证翻案：「更新源
+不存在」错、「下载流对拍」三轮跑偏——自查按最坏假设做），查出三处真问题：
+
+1. **铃声 receiver 批量互拆（P1）**：`maybeRingOnComplete` 的
+   `unregisterReceiver` 写在 ID 匹配**之前**——ACTION_DOWNLOAD_COMPLETE 广播
+   会投给所有在册 receiver，批量 N 个任务时**第一个完成就把 N 个监听全拆了**，
+   后续 N-1 个完成静音。修=先匹配再解注册（对齐原版「下载回调」语义——
+   原版根本不解注册，我们比原版还多解一次）；顺手按 targetSdk 34 规范改
+   ContextCompat.registerReceiver + RECEIVER_NOT_EXPORTED（DOWNLOAD_COMPLETE
+   是受保护系统广播，NOT_EXPORTED 安全且全版本兼容）。
+2. **搜索模式默认值回退存量用户（P1）**：V57 按原版 precise_search 默认 true
+   （后缀模式）——但存量用户的关键词（尤其中文）在后缀模式**搜不到任何
+   结果**=主路径体验回退。CloudBox 搜索一直只有模糊模式，按「既有体验默认
+   保留」规矩改默认 false（模糊），后缀经搜索框切换启用。原版 true 是其
+   本地文件管理场景取值，偏差留痕 SettingsStore 注释。
+3. **V40 N1 规矩重犯（P2）**：V57 五键 + resolve_history_json 没进
+   snapshotAll/applySnapshot——恢复备份后这些设置静默回默认。规矩挂着
+   「防重犯」注释还是犯了，教训：新增设置项 checklist 必须是**三件套**
+   （SettingsStore 键+流+setter / KEY 常量 / 快照两处），缺一即违规。
+   已补齐六项。
+
+**附带清理**：release 列表四个空包（222/224/226/228——每次出包后 5 分钟
+推维护文档触发的同码构建，TA 吐槽「后面还有一个一模一样的版本」的实体）
+全部删除（release+tag，API 204×8）；paths-ignore 落地后不再新增。
+
+**教训**：①「反正好几次错了」的信任折损下，交付前自查要按「必有一错」的
+假设做——本轮三处全是 V57 交付前漏查的；②receiver/监听器类代码必须过
+「广播投递给**所有**监听」这一问（一对一心智是本次 bug 根源）；③对拍原版
+默认值≠照抄原版默认值——场景不同时按存量用户体验定，偏差留痕可回退。
