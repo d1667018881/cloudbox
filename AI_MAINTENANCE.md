@@ -4541,3 +4541,36 @@ material-icons-core（extended 才有，本仓未引入）→ 换 List
 显式要求时出现。
 
 版本号：224 烧一号，225 出包。DEX 两标记中。
+
+### 45.22 V56：下载流全链对齐蓝云原版（TA「你要不要看看蓝云上是怎么写的」→v0.1.227）
+
+**对拍结论（ty_core.lua「下载」函数，4369-4539 行逐行核对）——原版只有三分支：**
+
+```
+use_third_party_downloader == false  → 系统下载（内置队列）
+use == true + custom_downloader 配置 → ACTION_SEND + setClassName 直投指定应用
+use == true + 未配置                  → 浏览器打开(ACTION_VIEW url) = 系统选择器
+```
+
+原版**没有应用内选择列表**。未配置时直接 ACTION_VIEW 弹**系统**选择器——
+只有能打开网址的应用才会出现在里面（浏览器/注册了 VIEW http 的下载器），
+这就是原版设置帮助文案「每次下载都需询问选择下载器，不太方便」的出处。
+
+**V53-V55 的应用内选择弹窗（ACTION_SEND 反查全量+白名单过滤）是对齐失败
+的自造路线**，V56 整体移除（-291 行）：
+- ThirdPartyDownloader：NOT_CONFIGURED → CHOOSER（未配置时 ACTION_VIEW
+  系统选择器，原版「浏览器打开」同款；ApplicationContext 补 NEW_TASK）；
+  SEND 的 MIME 对齐原版通配文本型
+- 下载时弹窗整个删除（DownloaderPickerDialog.kt 删文件）；两 Screen 的
+  tryDownload 拦截、两 VM 的 saveCustomDownloader 全部回退
+- 批量 + 开而未配置：提示去配置（系统选择器逐条交互，一次弹 N 个不可用；
+  原版本就没有批量）
+- 设置页内的候选选择器保留（只是配置手段的便利性，V55 过滤仍在）
+
+**教训（对拍三层口径的第三层）**：功能对拍≠交互对拍——「第三方下载器」这个
+键值层面对了，但「未配置时的行为」原版走系统选择器、我自造了应用内列表，
+用户感知完全不同。**凡原版有对应功能的，先读原版交互再动手，别凭
+「这样更好用」自由发挥**；TA 的「你要不要看看蓝云怎么写的」= 对拍纪律
+的提醒。V53 三连修里「按需选择器」方案本身就是跑偏的起点。
+
+版本号：226 烧一号，227 出包。DEX 验证：新文案 HIT、旧弹窗文案双 MISS。
