@@ -100,7 +100,8 @@ class SearchRepositoryImpl @Inject constructor(
             // V56 搜索模式（原版 precise_search）：true=按后缀（搜 zip 列所有
             // .zip 文件），false=名称模糊（默认，搜索词任意位置包含）
             // 索引 LIKE 查询（中文/英文统一可用，见 SearchIndexDao 注释）
-            val indexed = if (suffixMode) db.searchIndexDao().searchBySuffix(uid, kw)
+            // 前导点容错：用户输 ".zip" 与 "zip" 同义（SQL 已自带 %. 前缀）
+            val indexed = if (suffixMode) db.searchIndexDao().searchBySuffix(uid, kw.removePrefix("."))
                 else db.searchIndexDao().searchIndex(uid, kw)
             // 缓存兜底：索引未同步时也能搜到最近浏览过的目录（后缀模式同样吃缓存）
             val fromCache = if (suffixMode) emptyList()

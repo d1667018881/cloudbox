@@ -118,8 +118,8 @@ data class SettingsUiState(
     val openLinkHistory: Boolean = true,
     /** 列表分割线（原版 show_divider，默认开） */
     val showDivider: Boolean = true,
-    /** 搜索模式：true=后缀（原版 precise_search 默认开），false=模糊 */
-    val preciseSearch: Boolean = true,
+    /** 搜索模式：true=后缀，false=模糊（复审修正后默认模糊，同 SettingsStore） */
+    val preciseSearch: Boolean = false,
     /** 更新红点（原版 check_update；CloudBox 默认开——分发依赖 GitHub Releases） */
     val checkUpdate: Boolean = true,
     // ==================== V33：备份增强 ====================

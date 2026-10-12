@@ -77,7 +77,14 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private val keyResolveHistoryJson = stringPreferencesKey("resolve_history_json")
     /** 列表分割线。对齐原版 show_divider（默认开） */
     private val keyShowDivider = booleanPreferencesKey("show_divider")
-    /** 搜索模式：true=按后缀（原版 precise_search 默认开），false=名称模糊 */
+    /**
+     * 搜索模式：true=按后缀，false=名称模糊。
+     *
+     * 复审修正（V58）：默认取 **false**（模糊）——原版 precise_search 默认 true
+     * 是其**本地文件管理**场景的取值；CloudBox 的搜索是既有主路径（一直只有
+     * 模糊），存量用户的关键词（尤其中文）在后缀模式下会搜不到任何结果=
+     * 体验回退。既有体验默认保留（TA 10/3 规矩），后缀模式经搜索框切换启用。
+     */
     private val keyPreciseSearch = booleanPreferencesKey("precise_search")
     /** 有新版本时显示红点。对齐原版 check_update（默认关） */
     private val keyCheckUpdate = booleanPreferencesKey("check_update")
@@ -359,7 +366,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     suspend fun setShowDivider(enabled: Boolean) = edit { p -> p[keyShowDivider] = enabled }
 
-    val preciseSearch: Flow<Boolean> = context.settingsDataStore.data.map { it[keyPreciseSearch] ?: true }
+    val preciseSearch: Flow<Boolean> = context.settingsDataStore.data.map { it[keyPreciseSearch] ?: false }
 
     suspend fun setPreciseSearch(enabled: Boolean) = edit { p -> p[keyPreciseSearch] = enabled }
 
@@ -467,6 +474,13 @@ class SettingsStore @Inject constructor(private val context: Context) {
             p[keyUseThirdPartyDownloader]?.let { put(KEY_USE_THIRD_PARTY_DOWNLOADER, it.toString()) }
             p[keyCustomDownloaderPack]?.let { put(KEY_CUSTOM_DOWNLOADER_PACK, it) }
             p[keyCustomDownloaderActivity]?.let { put(KEY_CUSTOM_DOWNLOADER_ACTIVITY, it) }
+            // V57（V58 复审补）：五开关 + 解析历史数据
+            p[keyRingtone]?.let { put(KEY_RINGTONE, it.toString()) }
+            p[keyOpenLinkHistory]?.let { put(KEY_OPEN_LINK_HISTORY, it.toString()) }
+            p[keyResolveHistoryJson]?.let { put(KEY_RESOLVE_HISTORY_JSON, it) }
+            p[keyShowDivider]?.let { put(KEY_SHOW_DIVIDER, it.toString()) }
+            p[keyPreciseSearch]?.let { put(KEY_PRECISE_SEARCH, it.toString()) }
+            p[keyCheckUpdate]?.let { put(KEY_CHECK_UPDATE, it.toString()) }
         }
     }
 
@@ -505,6 +519,13 @@ class SettingsStore @Inject constructor(private val context: Context) {
         map[KEY_USE_THIRD_PARTY_DOWNLOADER]?.toLooseBool()?.let { p[keyUseThirdPartyDownloader] = it }
         map[KEY_CUSTOM_DOWNLOADER_PACK]?.let { p[keyCustomDownloaderPack] = it.trim() }
         map[KEY_CUSTOM_DOWNLOADER_ACTIVITY]?.let { p[keyCustomDownloaderActivity] = it.trim() }
+        // V57（V58 复审补）：还原
+        map[KEY_RINGTONE]?.toLooseBool()?.let { p[keyRingtone] = it }
+        map[KEY_OPEN_LINK_HISTORY]?.toLooseBool()?.let { p[keyOpenLinkHistory] = it }
+        map[KEY_RESOLVE_HISTORY_JSON]?.let { p[keyResolveHistoryJson] = it }
+        map[KEY_SHOW_DIVIDER]?.toLooseBool()?.let { p[keyShowDivider] = it }
+        map[KEY_PRECISE_SEARCH]?.toLooseBool()?.let { p[keyPreciseSearch] = it }
+        map[KEY_CHECK_UPDATE]?.toLooseBool()?.let { p[keyCheckUpdate] = it }
     }
 
     /** 域名清洗：去掉 scheme/路径尾巴，只留 host（备份码可能被手工编辑） */
@@ -576,5 +597,13 @@ class SettingsStore @Inject constructor(private val context: Context) {
         const val KEY_USE_THIRD_PARTY_DOWNLOADER = "use_third_party_downloader"
         const val KEY_CUSTOM_DOWNLOADER_PACK = "custom_downloader_pack"
         const val KEY_CUSTOM_DOWNLOADER_ACTIVITY = "custom_downloader_activity"
+        // V57（复审 V58 补快照——V40 N1 规矩重犯，立规矩挂注释也没防住，
+        // 教训：新增设置项的 checklist 必须含「快照两处 + KEY 常量」三件套）
+        const val KEY_RINGTONE = "ringtone"
+        const val KEY_OPEN_LINK_HISTORY = "open_link_history"
+        const val KEY_RESOLVE_HISTORY_JSON = "resolve_history_json"
+        const val KEY_SHOW_DIVIDER = "show_divider"
+        const val KEY_PRECISE_SEARCH = "precise_search"
+        const val KEY_CHECK_UPDATE = "check_update"
     }
 }

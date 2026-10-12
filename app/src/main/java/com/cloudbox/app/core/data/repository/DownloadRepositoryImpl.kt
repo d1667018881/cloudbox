@@ -245,15 +245,21 @@ class DownloadRepositoryImpl @Inject constructor(
      * （RingtoneManager TYPE_NOTIFICATION），不是来电铃。
      *
      * 边界与原版一致：广播只有 App 进程活着才收得到（进程被杀则只有
-     * 系统完成通知的声音）；收完即解注册，不泄漏 receiver。
+     * 系统完成通知的声音）；自己的任务完成即解注册，不匹配的广播不解
+     * （防批量互拆，见 onReceive 内注释；未完成任务的 receiver 随进程
+     * 结束回收——与原版注册后永不解注册相比反而更保守）。
      */
     private suspend fun maybeRingOnComplete(downloadId: Long) {
         val enabled = runCatching { settingsStore.ringtone.first() }.getOrDefault(false)
         if (!enabled) return
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
-                runCatching { context.unregisterReceiver(this) }
+                // 复审修正（V58）：必须先匹配 ID 再解注册——广播会投递给**所有**
+                // 在册 receiver，若先解注册，批量 N 个任务时第一个完成会把其他
+                // N-1 个的监听全拆掉（只有第一个响铃）。不匹配的保持注册直到
+                // 自己的任务完成/进程结束（原版同语义，也不解注册）。
                 if (intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) != downloadId) return
+                runCatching { context.unregisterReceiver(this) }
                 runCatching {
                     val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                     RingtoneManager.getRingtone(context, uri)?.play()
@@ -261,7 +267,12 @@ class DownloadRepositoryImpl @Inject constructor(
             }
         }
         runCatching {
-            context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            // targetSdk 34：运行时注册需带导出标志。DOWNLOAD_COMPLETE 是
+            // 受保护的系统广播（仅系统可发），NOT_EXPORTED 安全且全版本兼容
+            androidx.core.content.ContextCompat.registerReceiver(
+                context, receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
         }
     }
 

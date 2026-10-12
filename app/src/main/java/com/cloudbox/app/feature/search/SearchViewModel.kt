@@ -17,8 +17,8 @@ import javax.inject.Inject
 data class SearchUiState(
     val keyword: String = "",
     val results: List<CloudFile> = emptyList(),
-    /** V56 搜索模式（原版 precise_search 默认 true=按后缀搜） */
-    val suffixMode: Boolean = true,
+    /** V56 搜索模式（复审修正：默认 false=模糊，与设置键默认一致） */
+    val suffixMode: Boolean = false,
     val searching: Boolean = false,
     val syncing: Boolean = false,
     val syncProgress: Int = 0,
@@ -34,7 +34,7 @@ class SearchViewModel @Inject constructor(
 ) : ViewModel() {
 
     init {
-        // V56：装载搜索模式（原版 precise_search，默认后缀模式）
+        // V56：装载搜索模式（复审修正后默认模糊，见 SettingsStore 注释）
         viewModelScope.launch {
             val m = settingsStore.preciseSearch.first()
             _uiState.update { it.copy(suffixMode = m) }
