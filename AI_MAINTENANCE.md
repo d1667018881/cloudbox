@@ -4574,3 +4574,40 @@ use == true + 未配置                  → 浏览器打开(ACTION_VIEW url) = 
 的提醒。V53 三连修里「按需选择器」方案本身就是跑偏的起点。
 
 版本号：226 烧一号，227 出包。DEX 验证：新文案 HIT、旧弹窗文案双 MISS。
+
+### 45.23 V57：蓝云 99 键对拍收尾四件 + 红点开关 + CI 烧号治理（2026-10-12 21:01 TA 拍板，8945d04+d0eb6ae=v0.1.230）
+
+**TA 拍板**：「4 项都做」+ 两处纠错：
+1. **更新红点可做**（TA 反证：「实际现在有检查更新，你不是查的 GitHub 的吗」）——
+   我上轮「没有后端更新源」结论错误，检查更新=GitHub Releases API（V33 就有），
+   红点=UpdateStatusStore（关于入口 V33 已建）。本轮只补 check_update 开关
+   （MainActivity 查设置，关=不查+清红点）。**默认值偏离原版**（原版关、
+   CloudBox 开）：分发靠 GitHub Releases，红点是唯一更新信号——偏差理由
+   留痕，若 TA 要求严格对齐改回 false 一行的事
+2. **烧号根因**（TA：「每次给我的安装包，后面还有一个版本，代码还是一模一样的」）
+   = workflow `on: push` 无路径过滤，AI_MAINTENANCE.md 纯文档提交也触发构建
+   烧号（226/229 即此类）。修=paths-ignore '**.md' + docs/**，此后 run_number
+   只被真代码提交消耗
+
+**四件实现（全部原版源码对齐后动手）**：
+- **ringtone 铃声**（默认关）：enqueue 后注册一次性 ACTION_DOWNLOAD_COMPLETE
+  广播，EXTRA_DOWNLOAD_ID 匹配才响系统通知铃声——原版「下载回调」
+  （ty_core:4212）同款；receiver 自解注册；进程被杀=只有系统 DM 通知声
+  （与原版同局限）。suspend 读设置不用 runBlocking（enqueue 本身 suspend）
+- **解析历史**（默认开）：DataStore JSON 数组（上限 50 条防膨胀），同 url
+  挪最前；解析页无结果时展示（有结果收起），点击=回填+直接解析，单条删除
+  +清空；记录时机=resolve() 完成（无论成败——原版语义「打开过的链接」）
+- **show_divider**（默认开）：列表视图条目分割线受开关控制（原代码无条件
+  画线=无开关，本轮补闸门；网格视图无分割线概念不动）
+- **precise_search 搜索模式**（默认 true=后缀）：DAO 加 searchBySuffix
+  （LIKE '%.kw'），SearchScreen 输入框 trailingIcon 文字切换「后缀/模糊」，
+  切换即重搜；后缀模式只吃索引（缓存兜底是名称 LIKE，跳过）。原版=搜索
+  框旁「搜索后缀/模糊搜索」文字按钮（file.lua「切换搜索模式」）
+
+**CI 一红一绿**：V57 首包 SearchViewModel 缺 `first` import（V52 import
+家族坑第 N 犯）——precheck 不查 import，CI 才暴露。d0eb6ae 补一行绿。
+228 烧一号，229=修复包，230 出包（DEX 六标记全中）。
+
+**教训**：①「数据源不存在」类结论必须先 rg 现有代码再下（检查更新 V33
+就有，我凭印象判了死刑，TA 反证才翻案）；②precheck 应升级为 import 级
+符号核对（Flow.first 家族已三犯：V49 首犯/V52 两犯/本轮三犯）——待做项。
