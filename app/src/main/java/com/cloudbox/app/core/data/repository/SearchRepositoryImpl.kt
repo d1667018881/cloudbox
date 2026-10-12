@@ -91,16 +91,20 @@ class SearchRepositoryImpl @Inject constructor(
             }
         }
 
-    override suspend fun search(keyword: String): List<CloudFile> =
+    override suspend fun search(keyword: String, suffixMode: Boolean): List<CloudFile> =
         withContext(Dispatchers.IO) {
             val uid = accountStore.currentUid() ?: return@withContext emptyList()
             val kw = escapeLike(keyword.trim())
             if (kw.isEmpty()) return@withContext emptyList()
 
+            // V56 搜索模式（原版 precise_search）：true=按后缀（搜 zip 列所有
+            // .zip 文件），false=名称模糊（默认，搜索词任意位置包含）
             // 索引 LIKE 查询（中文/英文统一可用，见 SearchIndexDao 注释）
-            val indexed = db.searchIndexDao().searchIndex(uid, kw)
-            // 缓存兜底：索引未同步时也能搜到最近浏览过的目录
-            val fromCache = db.fileCacheDao().searchLike(uid, kw)
+            val indexed = if (suffixMode) db.searchIndexDao().searchBySuffix(uid, kw)
+                else db.searchIndexDao().searchIndex(uid, kw)
+            // 缓存兜底：索引未同步时也能搜到最近浏览过的目录（后缀模式同样吃缓存）
+            val fromCache = if (suffixMode) emptyList()
+                else db.fileCacheDao().searchLike(uid, kw)
 
             // 两个列表类型不同，分别转换后合并去重
             val merged = LinkedHashMap<Long, CloudFile>()

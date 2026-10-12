@@ -92,7 +92,25 @@ fun SearchScreen(
                 onValueChange = viewModel::onKeywordChange,
                 label = { Text("搜索文件名") },
                 singleLine = true,
+                trailingIcon = {
+                    // V56 搜索模式切换（对齐原版「搜索后缀/模糊搜索」文字按钮：
+                    // 搜索框旁点击切换，原版 ty_core file.lua「切换搜索模式」）
+                    Text(
+                        if (state.suffixMode) "后缀" else "模糊",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clickable { viewModel.toggleMode() }
+                            .padding(horizontal = 8.dp)
+                    )
+                },
                 modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                if (state.suffixMode) "后缀模式：搜 zip 列出所有 .zip 文件"
+                else "模糊模式：文件名包含关键词即命中",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (state.syncing) {
                 Spacer(Modifier.height(8.dp))

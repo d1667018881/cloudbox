@@ -3,6 +3,12 @@ name: Build APK
 on:
   push:
     branches: [main]
+    # V56 烧号治理（TA 实锤「后面还有一个版本，代码还是一模一样的」）：
+    # 纯文档提交（AI_MAINTENANCE.md 等）不再触发构建烧号——run_number 只被
+    # 真代码提交消耗，release 列表不再出现与上一版 APK 相同的补号版本
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
 concurrency:

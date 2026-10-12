@@ -1,8 +1,12 @@
 package com.cloudbox.app.core.data.repository
 
 import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.database.Cursor
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Environment
 import com.cloudbox.app.common.AppConstants
@@ -79,6 +83,7 @@ class DownloadRepositoryImpl @Inject constructor(
             showNotification = showDownloadNotification()
         )
         val id = downloadManager.enqueue(request)
+        maybeRingOnComplete(id)
         db.downloadRecordDao().insert(
             DownloadRecordEntity(
                 downloadId = id,
@@ -116,6 +121,7 @@ class DownloadRepositoryImpl @Inject constructor(
             showNotification = showDownloadNotification()
         )
         val newId = downloadManager.enqueue(request)
+        maybeRingOnComplete(newId)
         // 把旧记录的 downloadId 更新为新任务 id，同时清掉 paused 标记
         db.downloadRecordDao().updateDownloadId(downloadId, newId)
     }
@@ -230,6 +236,34 @@ class DownloadRepositoryImpl @Inject constructor(
      */
     private suspend fun showDownloadNotification(): Boolean =
         runCatching { settingsStore.sendMessage.first() }.getOrDefault(true)
+
+    /**
+     * V56：下载完成铃声（对齐原版 ty_core.lua「下载回调」4212 行）。
+     *
+     * 原版语义：ringtone 开 → enqueue 后注册一次性 ACTION_DOWNLOAD_COMPLETE
+     * 广播，EXTRA_DOWNLOAD_ID 匹配本任务才响——响的是系统默认**通知**铃声
+     * （RingtoneManager TYPE_NOTIFICATION），不是来电铃。
+     *
+     * 边界与原版一致：广播只有 App 进程活着才收得到（进程被杀则只有
+     * 系统完成通知的声音）；收完即解注册，不泄漏 receiver。
+     */
+    private suspend fun maybeRingOnComplete(downloadId: Long) {
+        val enabled = runCatching { settingsStore.ringtone.first() }.getOrDefault(false)
+        if (!enabled) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                runCatching { context.unregisterReceiver(this) }
+                if (intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) != downloadId) return
+                runCatching {
+                    val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    RingtoneManager.getRingtone(context, uri)?.play()
+                }
+            }
+        }
+        runCatching {
+            context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+        }
+    }
 
     /**
      * V48：入队前验证 URL 是文件流。Range: bytes=0-0 读首字节：

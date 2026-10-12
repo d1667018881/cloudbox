@@ -69,6 +69,19 @@ class SettingsStore @Inject constructor(private val context: Context) {
     /** 第三方下载器 Activity 全限定名（可空=只约束包名）。对齐原版 custom_download_manager_activity */
     private val keyCustomDownloaderActivity = stringPreferencesKey("custom_downloader_activity")
 
+    // ---- V56（2026-10-12 蓝云 99 键对拍收尾，TA 拍板四项 + 红点） ----
+    /** 下载完成播放系统通知铃声。对齐原版 ringtone（默认关） */
+    private val keyRingtone = booleanPreferencesKey("ringtone")
+    /** 解析历史记录开关 + 数据（JSON 数组，上限 50 条防膨胀）。对齐原版 open_link_history（默认开） */
+    private val keyOpenLinkHistory = booleanPreferencesKey("open_link_history")
+    private val keyResolveHistoryJson = stringPreferencesKey("resolve_history_json")
+    /** 列表分割线。对齐原版 show_divider（默认开） */
+    private val keyShowDivider = booleanPreferencesKey("show_divider")
+    /** 搜索模式：true=按后缀（原版 precise_search 默认开），false=名称模糊 */
+    private val keyPreciseSearch = booleanPreferencesKey("precise_search")
+    /** 有新版本时显示红点。对齐原版 check_update（默认关） */
+    private val keyCheckUpdate = booleanPreferencesKey("check_update")
+
     // ---- V34（第五批）：下载位置与通知（对齐原版 download_folder / send_message） ----
     /** 系统下载器保存位置：Downloads 下的子目录名（空串 = 直接用 Downloads 根） */
     private val keyDownloadFolder = stringPreferencesKey("download_folder")
@@ -329,6 +342,40 @@ class SettingsStore @Inject constructor(private val context: Context) {
     }
 
     suspend fun setSendMessage(enabled: Boolean) = edit { p -> p[keySendMessage] = enabled }
+
+    // ==================== V56 flows & setters ====================
+
+    val ringtone: Flow<Boolean> = context.settingsDataStore.data.map { it[keyRingtone] ?: false }
+
+    suspend fun setRingtone(enabled: Boolean) = edit { p -> p[keyRingtone] = enabled }
+
+    val openLinkHistory: Flow<Boolean> = context.settingsDataStore.data.map {
+        it[keyOpenLinkHistory] ?: true
+    }
+
+    suspend fun setOpenLinkHistory(enabled: Boolean) = edit { p -> p[keyOpenLinkHistory] = enabled }
+
+    val showDivider: Flow<Boolean> = context.settingsDataStore.data.map { it[keyShowDivider] ?: true }
+
+    suspend fun setShowDivider(enabled: Boolean) = edit { p -> p[keyShowDivider] = enabled }
+
+    val preciseSearch: Flow<Boolean> = context.settingsDataStore.data.map { it[keyPreciseSearch] ?: true }
+
+    suspend fun setPreciseSearch(enabled: Boolean) = edit { p -> p[keyPreciseSearch] = enabled }
+
+    val checkUpdate: Flow<Boolean> = context.settingsDataStore.data.map { it[keyCheckUpdate] ?: false }
+
+    suspend fun setCheckUpdate(enabled: Boolean) = edit { p -> p[keyCheckUpdate] = enabled }
+
+    /**
+     * 解析历史（JSON 数组，最新在前）。原版 open_link_history 上限 50 条，
+     * 超限丢最旧的（防止设置文件无限膨胀——公告缓存 JSON 化同款考量）。
+     */
+    val resolveHistoryJson: Flow<String> = context.settingsDataStore.data.map {
+        it[keyResolveHistoryJson] ?: "[]"
+    }
+
+    suspend fun setResolveHistoryJson(json: String) = edit { p -> p[keyResolveHistoryJson] = json }
 
     // ==================== V49 setters ====================
 

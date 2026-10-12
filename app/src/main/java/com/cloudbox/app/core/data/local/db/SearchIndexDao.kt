@@ -20,6 +20,12 @@ interface SearchIndexDao {
     )
     suspend fun searchIndex(uid: String, query: String): List<SearchIndexEntity>
 
+    /** V56 后缀搜索（原版 precise_search=true「搜索后缀」）：匹配文件扩展名 */
+    @Query(
+        "SELECT * FROM file_search_fts WHERE accountUid=:uid AND name LIKE '%.'||:query ESCAPE '\\' LIMIT 200"
+    )
+    suspend fun searchBySuffix(uid: String, query: String): List<SearchIndexEntity>
+
     /** #22/#23 修复：索引行数计数（isSynced 用，替代全表拉取判空） */
     @Query("SELECT COUNT(*) FROM file_search_fts WHERE accountUid=:uid")
     suspend fun countForAccount(uid: String): Int

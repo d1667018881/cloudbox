@@ -16,6 +16,8 @@ import javax.inject.Inject
 data class SearchUiState(
     val keyword: String = "",
     val results: List<CloudFile> = emptyList(),
+    /** V56 搜索模式（原版 precise_search 默认 true=按后缀搜） */
+    val suffixMode: Boolean = true,
     val searching: Boolean = false,
     val syncing: Boolean = false,
     val syncProgress: Int = 0,
@@ -25,8 +27,29 @@ data class SearchUiState(
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    private val searchRepository: SearchRepository
+    private val searchRepository: SearchRepository,
+    /** V53 去 private：Screen 侧按需读取（搜索模式开关） */
+    val settingsStore: com.cloudbox.app.core.data.local.datastore.SettingsStore
 ) : ViewModel() {
+
+    init {
+        // V56：装载搜索模式（原版 precise_search，默认后缀模式）
+        viewModelScope.launch {
+            val m = settingsStore.preciseSearch.first()
+            _uiState.update { it.copy(suffixMode = m) }
+        }
+    }
+
+    /** V56：切换搜索模式并重搜（原版=搜索框旁按钮切换「搜索后缀/模糊搜索」） */
+    fun toggleMode() {
+        val next = !_uiState.value.suffixMode
+        viewModelScope.launch {
+            settingsStore.setPreciseSearch(next)
+            _uiState.update { it.copy(suffixMode = next) }
+            val kw = _uiState.value.keyword
+            if (kw.isNotBlank()) search(kw)
+        }
+    }
 
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
@@ -39,7 +62,7 @@ class SearchViewModel @Inject constructor(
     fun search(kw: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(searching = true) }
-            val results = searchRepository.search(kw)
+            val results = searchRepository.search(kw, _uiState.value.suffixMode)
             _uiState.update { it.copy(results = results, searching = false) }
         }
     }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -168,6 +169,48 @@ fun ResolveScreen(
             LazyColumn(Modifier.weight(1f)) {
                 items(state.results, key = { it.key }) { item ->
                     ResolveItemRow(item, viewModel, onDownload = { viewModel.download(item) })
+                }
+                // V56：解析历史（原版 open_link_history）——没有结果时展示，
+                // 有结果时收起（不打扰主流程）
+                if (state.results.isEmpty() && state.history.isNotEmpty()) {
+                    item(key = "history_header") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("解析历史", style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                "清空",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.clickable { viewModel.clearHistory() }
+                            )
+                        }
+                    }
+                    items(state.history, key = { "h_${it.url}" }) { entry ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { viewModel.useHistory(entry) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.summary, style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(entry.url, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Text(
+                                "删除",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clickable { viewModel.removeHistory(entry.url) }
+                            )
+                        }
+                    }
                 }
             }
         }

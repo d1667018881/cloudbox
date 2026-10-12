@@ -336,6 +336,20 @@ fun SettingsScreen(
                 }
                 Switch(checked = state.twoLineTitle, onCheckedChange = viewModel::saveTwoLineTitle)
             }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("列表分割线", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "文件列表条目之间的分隔线（原版「间隔线」，仅列表视图）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.showDivider, onCheckedChange = viewModel::saveShowDivider)
+            }
 
             SectionTitle("图标包")
             Row(
@@ -405,6 +419,20 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = state.getClipboard, onCheckedChange = viewModel::saveGetClipboard)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("解析历史", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "自动记录解析过的链接，解析页可点选复用（上限 50 条）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.openLinkHistory, onCheckedChange = viewModel::saveOpenLinkHistory)
             }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -586,6 +614,34 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(checked = state.sendMessage, onCheckedChange = viewModel::saveSendMessage)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("下载完成铃声", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "下载完成时播放系统通知铃声（原版「铃声」，需要 App 在后台存活）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.ringtone, onCheckedChange = viewModel::saveRingtone)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("更新红点", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "发现新版本时在「关于」入口显示红点（关闭则启动时不检查更新）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = state.checkUpdate, onCheckedChange = viewModel::saveCheckUpdate)
             }
 
             SectionTitle("收藏夹")

@@ -365,7 +365,15 @@ class MainActivity : ComponentActivity() {
      */
     private fun checkUpdateAndAnnouncements() {
         appScope.launch {
-            updateRepository.checkUpdate().onSuccess { updateStatusStore.set(it) }
+            // V56（原版 check_update 红点开关）：关 = 不查 + 清红点。
+            // CloudBox 默认开（与原版默认关不同）：分发靠 GitHub Releases，
+            // 红点是用户知道新版的唯一通道——偏差理由见 AI_MAINTENANCE §45.23
+            val enabled = runCatching { settingsStore.checkUpdate.first() }.getOrDefault(true)
+            if (!enabled) {
+                updateStatusStore.clear()
+            } else {
+                updateRepository.checkUpdate().onSuccess { updateStatusStore.set(it) }
+            }
         }
         appScope.launch {
             announcementRepository.fetch().onSuccess { list ->

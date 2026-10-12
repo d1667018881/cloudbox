@@ -27,6 +27,13 @@ data class ResolveItem(
     val error: String? = null
 )
 
+/** 解析历史条目（V56，对齐原版 open_link_history：url + 摘要 + 时间） */
+data class ResolveHistoryEntry(
+    val url: String,
+    val summary: String,
+    val time: Long
+)
+
 /** 解析页 UI 状态 */
 data class ResolveUiState(
     val input: String = "",
@@ -35,7 +42,9 @@ data class ResolveUiState(
     val results: List<ResolveItem> = emptyList(),
     /** 耗时操作的进度提示（文件夹解析要逐文件请求，可能几十秒） */
     val progress: String? = null,
-    val message: String? = null
+    val message: String? = null,
+    /** V56 解析历史（最新在前；开关关=空列表） */
+    val history: List<ResolveHistoryEntry> = emptyList()
 )
 
 @HiltViewModel
@@ -51,6 +60,79 @@ class ResolveViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ResolveUiState())
     val uiState: StateFlow<ResolveUiState> = _uiState.asStateFlow()
+
+    init {
+        // V56：装载解析历史（原版 open_link_history 默认开）
+        viewModelScope.launch { loadHistory() }
+    }
+
+    private suspend fun loadHistory() {
+        val on = settingsStore.openLinkHistory.first()
+        if (!on) return
+        val list = parseHistoryJson(settingsStore.resolveHistoryJson.first())
+        _uiState.update { it.copy(history = list) }
+    }
+
+    /** 解析成功后记录历史（同 url 挪到最前，上限 50 条） */
+    private suspend fun recordHistory(urls: List<String>, out: List<ResolveItem>) {
+        if (!settingsStore.openLinkHistory.first()) return
+        val old = parseHistoryJson(settingsStore.resolveHistoryJson.first())
+        val now = System.currentTimeMillis()
+        val entries = urls.map { u ->
+            val name = out.firstOrNull { it.shareUrl == u && it.link != null }?.link?.fileName
+                ?.ifBlank { null } ?: out.firstOrNull { it.shareUrl == u }?.let { "（无结果）" } ?: u
+            ResolveHistoryEntry(u, name, now)
+        }
+        val merged = (entries + old.filter { e -> e.url !in urls }).take(50)
+        settingsStore.setResolveHistoryJson(writeHistoryJson(merged))
+        _uiState.update { it.copy(history = merged) }
+    }
+
+    /** V56：删除单条历史 */
+    fun removeHistory(url: String) {
+        viewModelScope.launch {
+            val list = parseHistoryJson(settingsStore.resolveHistoryJson.first())
+                .filterNot { it.url == url }
+            settingsStore.setResolveHistoryJson(writeHistoryJson(list))
+            _uiState.update { it.copy(history = if (settingsStore.openLinkHistory.first()) list else emptyList()) }
+        }
+    }
+
+    /** V56：清空历史 */
+    fun clearHistory() {
+        viewModelScope.launch {
+            settingsStore.setResolveHistoryJson("[]")
+            _uiState.update { it.copy(history = emptyList()) }
+        }
+    }
+
+    /** V56：从历史回填（点击条目=填入输入框并直接解析） */
+    fun useHistory(entry: ResolveHistoryEntry) {
+        _uiState.update { it.copy(input = entry.url) }
+        resolve()
+    }
+
+    private fun parseHistoryJson(json: String): List<ResolveHistoryEntry> = runCatching {
+        val arr = org.json.JSONArray(json)
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            ResolveHistoryEntry(
+                url = o.optString("url"),
+                summary = o.optString("summary"),
+                time = o.optLong("time")
+            )
+        }.filter { it.url.isNotBlank() }
+    }.getOrDefault(emptyList())
+
+    private fun writeHistoryJson(list: List<ResolveHistoryEntry>): String = runCatching {
+        val arr = org.json.JSONArray()
+        list.forEach { e ->
+            arr.put(org.json.JSONObject().apply {
+                put("url", e.url); put("summary", e.summary); put("time", e.time)
+            })
+        }
+        arr.toString()
+    }.getOrDefault("[]")
 
     fun onInputChange(v: String) = _uiState.update { it.copy(input = v) }
 
@@ -110,6 +192,8 @@ class ResolveViewModel @Inject constructor(
                 }
             }
             _uiState.update { it.copy(resolving = false, progress = null, results = out) }
+            // V56：解析完成记录历史（无论成败都记——原版语义是"打开过的链接"）
+            runCatching { recordHistory(urls, out) }
         }
     }
 

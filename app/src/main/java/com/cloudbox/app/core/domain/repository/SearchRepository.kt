@@ -9,7 +9,7 @@ interface SearchRepository {
     suspend fun syncAll(progress: (Int, Int) -> Unit): Result<Int>
 
     /** 搜索（FTS 前缀 + LIKE 中文兜底，合并去重） */
-    suspend fun search(keyword: String): List<CloudFile>
+    suspend fun search(keyword: String, suffixMode: Boolean = false): List<CloudFile>
 
     /** 索引是否已同步过 */
     suspend fun isSynced(): Boolean

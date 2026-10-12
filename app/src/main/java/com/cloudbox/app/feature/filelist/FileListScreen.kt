@@ -191,6 +191,8 @@ fun FileListScreen(
     val iconPackPath by viewModel.settingsStore.iconPackPath.collectAsState(initial = "")
     val showDescTag by viewModel.settingsStore.showDescTag.collectAsState(initial = true)
     val twoLineTitle by viewModel.settingsStore.twoLineTitle.collectAsState(initial = false)
+    // V56：列表分割线开关（对齐原版 show_divider，默认开）
+    val showDivider by viewModel.settingsStore.showDivider.collectAsState(initial = true)
     val deleteConfirmPref by viewModel.settingsStore.deleteConfirm.collectAsState(initial = true)
     val uploadState by uploadViewModel.uiState.collectAsState()
     val uploadTimeline by uploadViewModel.timeline.collectAsState()
@@ -625,7 +627,7 @@ fun FileListScreen(
                                 // 顺手查一次星标状态，菜单项文案据此切换
                                 viewModel.refreshStarredState(it)
                             }
-                            HorizontalDivider()
+                            if (showDivider) HorizontalDivider()
                         }
                         // V31：同上。原版没有"加载更多"按钮，滚动到底自动续拉；
                         // "已全部加载"的文案也一并去掉 —— 用户不需要被告知"没有了"。
