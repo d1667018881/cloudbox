@@ -49,12 +49,9 @@ class UpdateRepositoryImpl @Inject constructor(
                 // 兼容两代 tag（v0.1.231 / v1.0.0），major 不同也能比（1.0.0 > 0.1.231）。
                 val remote = parseVersionTriple(tag) ?: return@runCatching null
                 val local = parseVersionTriple(BuildConfig.VERSION_NAME)
-                // Triple 未实现 Comparable——List 逐段比较（字典序，与 Python
-                // 元组比较同语义；V59 第二红教训：跨语言等价验证必须覆盖
-                // 类型系统差异，Python 元组原生可比 ≠ Kotlin Triple 可比）
-                if (local != null && listOf(remote.first, remote.second, remote.third) <=
-                        listOf(local.first, local.second, local.third)
-                ) return@runCatching null
+                // V59 两连红教训固化：Kotlin 的 Triple/List 都没有比较运算符
+                // （Python 元组可比是矩阵验证的语言错觉）——只用纯整数比较。
+                if (local != null && !isNewerVersion(remote, local)) return@runCatching null
                 val remoteCode = remote.first * 10000 + remote.second * 100 + remote.third
 
                 val downloadUrl = json.optJSONArray("assets")?.let { arr ->
@@ -74,6 +71,13 @@ class UpdateRepositoryImpl @Inject constructor(
                 )
             }
         }
+    }
+
+    /** 三段式版本比较：remote 是否**严格新于** local（逐段字典序） */
+    private fun isNewerVersion(remote: Triple<Int, Int, Int>, local: Triple<Int, Int, Int>): Boolean {
+        if (remote.first != local.first) return remote.first > local.first
+        if (remote.second != local.second) return remote.second > local.second
+        return remote.third > local.third
     }
 
     /** 解析 `v1.0.0` / `1.0.0` / `v0.1.231` 形态为三段整数；不合法返回 null。
