@@ -144,7 +144,14 @@ jobs:
           # 经 env 传入而非内插进命令：message 含引号/反引号/$ 也不会被 bash 展开。
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          TAG="v0.1.${{ github.run_number }}"
+          # V59（gru v1.0.90 同款事故根治）：tag 从 **APK 产物真身** 提取
+          # （aapt dump badging），不再用 run_number 公式拼——versionName
+          # 在 gradle/workflow 任何一处改了，tag/资产名自动跟随，永不名实不符。
+          # 产物里的 versionName 来自第 88 行 VERSION_NAME 注入（手动维护规约）。
+          AAPT="$ANDROID_SDK_ROOT/build-tools/$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)/aapt"
+          VN="$("$AAPT" dump badging app/build/outputs/apk/release/app-release.apk | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p" | head -1)"
+          if [ -z "$VN" ]; then echo "aapt 提取 versionName 失败"; exit 1; fi
+          TAG="v$VN"
 
           # ── 资产名：软件名 + 版本号（2026-09-26 用户要求，不再用 gradle 默认的
           #    app-release.apk —— 下载到手机里一堆同名文件分不清谁是谁）。
