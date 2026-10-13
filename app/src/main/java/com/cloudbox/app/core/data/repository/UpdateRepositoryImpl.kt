@@ -49,7 +49,12 @@ class UpdateRepositoryImpl @Inject constructor(
                 // 兼容两代 tag（v0.1.231 / v1.0.0），major 不同也能比（1.0.0 > 0.1.231）。
                 val remote = parseVersionTriple(tag) ?: return@runCatching null
                 val local = parseVersionTriple(BuildConfig.VERSION_NAME)
-                if (local != null && remote <= local) return@runCatching null
+                // Triple 未实现 Comparable——List 逐段比较（字典序，与 Python
+                // 元组比较同语义；V59 第二红教训：跨语言等价验证必须覆盖
+                // 类型系统差异，Python 元组原生可比 ≠ Kotlin Triple 可比）
+                if (local != null && listOf(remote.first, remote.second, remote.third) <=
+                        listOf(local.first, local.second, local.third)
+                ) return@runCatching null
                 val remoteCode = remote.first * 10000 + remote.second * 100 + remote.third
 
                 val downloadUrl = json.optJSONArray("assets")?.let { arr ->
