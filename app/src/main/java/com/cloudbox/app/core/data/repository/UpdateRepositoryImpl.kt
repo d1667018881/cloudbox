@@ -71,14 +71,14 @@ class UpdateRepositoryImpl @Inject constructor(
         }
     }
 
-    companion object {
-        /** 解析 `v1.0.0` / `1.0.0` / `v0.1.231` 形态为三段整数；不合法返回 null */
-        internal fun parseVersionTriple(v: String): Triple<Int, Int, Int>? = runCatching {
-            val m = Regex("""v?(\d+)\.(\d+)\.(\d+)""").find(v.trim()) ?: return@runCatching null
-            val (maj, min, pat) = m.destructured
-            Triple(maj.toInt(), min.toInt(), pat.toInt())
-        }.getOrNull()
-    }
+    /** 解析 `v1.0.0` / `1.0.0` / `v0.1.231` 形态为三段整数；不合法返回 null。
+     *  （V59 教训：类里已有 companion object 常量区——本函数不是常量，
+     *   挂对象还差点造成「Only one companion object」；普通 private 函数即可） */
+    private fun parseVersionTriple(v: String): Triple<Int, Int, Int>? = runCatching {
+        val m = Regex("""v?(\d+)\.(\d+)\.(\d+)""").find(v.trim()) ?: return@runCatching null
+        val (maj, min, pat) = m.destructured
+        Triple(maj.toInt(), min.toInt(), pat.toInt())
+    }.getOrNull()
 
     override suspend fun download(update: AppUpdate, onProgress: (Int) -> Unit): Result<File> =
         withContext(Dispatchers.IO) {
