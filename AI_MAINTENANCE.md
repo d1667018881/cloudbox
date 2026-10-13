@@ -4647,3 +4647,38 @@ TA 质疑成立。V57 交付自查全过一遍（本轮会话已两次被 TA 反
 假设做——本轮三处全是 V57 交付前漏查的；②receiver/监听器类代码必须过
 「广播投递给**所有**监听」这一问（一对一心智是本次 bug 根源）；③对拍原版
 默认值≠照抄原版默认值——场景不同时按存量用户体验定，偏差留痕可回退。
+
+
+### 45.25 V59：版本号切换 1.0.0 + 第三轮自查（2026-10-13 20:13 TA「再检查一次+版本号一点几」，311f0d4/f2ea93a/cc9c1e5 → v1.0.0）
+
+**第三轮自查结论**：V57/V58 修复逐行精读无新问题；precheck 补「用了没 import」
+反向检查（Flow.first 三犯根治）——全仓 141 文件零误报 + V57 真实翻车文件
+（git show 8945d04）回测本地 1 秒拦截；唯一边缘误报（UploadViewModel 的
+List.first）用「链式成员前缀」收紧形态排除。
+
+**版本号规约（TA 2026-10-13 定，「一点几，别老是零点几」）**：
+- VERSION_NAME 手动维护写死 workflow（`1.0.0` 起），patch 逢 9 进位
+  （1.0.9→1.1.0）；versionCode 继续用 run_number 不受影响
+- **更新红点比较改三段式**（旧逻辑拿 tag 末段整数比，v1.0.0 末段是 0
+  会永远不提示）：parseVersionTriple + 逐段整数比较，兼容两代 tag
+  （v0.1.231/v1.0.0），Python 等价用例矩阵 8/8
+- **release tag 改 aapt 产物提取**（gru v1.0.90 同款事故）：TAG 从 APK
+  真身 dump versionName，gradle/workflow 改版本永不名实不符
+
+**CI 三连红（都在 UpdateRepositoryImpl，全部自查提交犯的——讽刺但全记**）：
+1. 类里已有 companion object（RELEASES_LATEST_URL）我插第二个 →
+   「Only one companion object」；修=普通 private 函数
+2. `remote <= local` 对 Triple 用比较运算符 → Kotlin Triple/List 都没有
+   compareTo（**Python 元组可比是矩阵验证的语言错觉**）；两连红后放弃
+   运算符魔法改纯整数逐段比较
+3. tag 公式漏改 → v1.0.0 的 APK 挂在 v0.1.235 tag 下（名实不符，同 gru
+   v1.0.90）；删错 release，tag 改 aapt 产物提取根治
+
+**v1.0.0 验证**：tag/资产/APK versionName 三处对齐 `1.0.0`；DEX 标记
+（isNewerVersion/parseVersionTriple/铃声/历史/红点）全 HIT；zip 完整性 OK。
+
+**教训（跨项目通用）**：①跨语言直觉必须过类型系统关——Python 元组比较/
+Kotlin 运算符重载是本次两连红的根源；②改版本号必须全仓 grep 所有版本
+公式出现点（gradle/workflow tag/资产名/比较逻辑四处），漏一处就是名实不符；
+③precheck 反向 import 检查上线后，该家族错误本地即拦（CI 只剩类型系统/
+作用域类 precheck 覆盖不了的）。
