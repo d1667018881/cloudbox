@@ -43,10 +43,14 @@ class UpdateRepositoryImpl @Inject constructor(
                 val tag = json.optString("tag_name", "")
                 if (tag.isBlank()) return@runCatching null
 
-                // 版本比较用**数字版号**整数比较（tag 的末段 = CI 注入的 run_number = versionCode），
-                // 绝不比字符串：字符串比不出 "0.1.130" 与 "0.1.131" 的新旧（原版也是用 tonumber 比较）。
-                val remoteCode = tag.substringAfterLast('.').toIntOrNull() ?: return@runCatching null
-                if (remoteCode <= BuildConfig.VERSION_CODE) return@runCatching null
+                // 版本比较（V59 三段式，2026-10-13 版本号规约切换 0.1.x → 1.0.0）：
+                // 旧逻辑拿 tag 末段 run_number 整数比——v1.0.0 末段是 0，红点链会断。
+                // 新逻辑：tag 与本地 VERSION_NAME 各解析 (major, minor, patch) 逐段比，
+                // 兼容两代 tag（v0.1.231 / v1.0.0），major 不同也能比（1.0.0 > 0.1.231）。
+                val remote = parseVersionTriple(tag) ?: return@runCatching null
+                val local = parseVersionTriple(BuildConfig.VERSION_NAME)
+                if (local != null && remote <= local) return@runCatching null
+                val remoteCode = remote.first * 10000 + remote.second * 100 + remote.third
 
                 val downloadUrl = json.optJSONArray("assets")?.let { arr ->
                     (0 until arr.length())
@@ -65,6 +69,15 @@ class UpdateRepositoryImpl @Inject constructor(
                 )
             }
         }
+    }
+
+    companion object {
+        /** 解析 `v1.0.0` / `1.0.0` / `v0.1.231` 形态为三段整数；不合法返回 null */
+        internal fun parseVersionTriple(v: String): Triple<Int, Int, Int>? = runCatching {
+            val m = Regex("""v?(\d+)\.(\d+)\.(\d+)""").find(v.trim()) ?: return@runCatching null
+            val (maj, min, pat) = m.destructured
+            Triple(maj.toInt(), min.toInt(), pat.toInt())
+        }.getOrNull()
     }
 
     override suspend fun download(update: AppUpdate, onProgress: (Int) -> Unit): Result<File> =

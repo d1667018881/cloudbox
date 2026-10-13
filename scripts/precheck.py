@@ -239,6 +239,42 @@ def check_imports(path, src):
         if not re.search(r"\b" + re.escape(name) + r"\b", body):
             problems.append(f"{path}:{idx}: 未使用的 import '{fq}'")
 
+    # 3) 「用了没 import」反向检查（V57 三犯后补，2026-10-13）
+    #
+    #    Flow.first 家族已在 V49/V52/V57 烧了三轮 CI——全部同一形态：
+    #    文件里调 `.first()` 但忘了 `import kotlinx.coroutines.flow.first`。
+    #    纯文本无法做类型解析，用收紧条件防误报：
+    #    - .first()：仅当文件已 import 至少一个 kotlinx.coroutines.flow.*
+    #      符号（说明身处 flow 上下文；stdlib 的 Collection.first 无需
+    #      import，无 flow import 的文件用了 .first() 必是 Collection）
+    #      且没有 first 的 import → 疑似漏 import（人核后删）。
+    #      边缘误报（同时用 MutableStateFlow 与 List.first 的文件）可
+    #      接受——提示为「疑似」，不是硬错误。
+    #    - .collectAsState(：只有 compose runtime 一家，无 stdlib 冲突，
+    #      文件里出现调用但没有任何 collectAsState import → 硬报。
+    flow_imported = any(
+        fq.startswith("kotlinx.coroutines.flow.") for _, fq, _ in imports
+    ) or any(
+        fq == "kotlinx.coroutines.flow" or fq.endswith(".flow")
+        for _, fq, _ in imports
+    )
+    has_first_import = any(fq == "kotlinx.coroutines.flow.first" for _, fq, _ in imports)
+    has_cas_import = any("collectAsState" in fq for _, fq, _ in imports)
+
+    #      匹配形态收紧为「链式成员上的 .first()」（形如 store.foo.first()）：
+    #      flow 场景的 first 几乎全是挂载在 Flow 属性链上的；而 stdlib 的
+    #      Collection.first 常见为局部变量（list.first()）。用 `\w+\.\w+\.first()`
+    #      两段前缀区分——单段前缀不报（宁可漏报，见 UploadViewModel 误报案）。
+    if flow_imported and not has_first_import and re.search(r"\w+\.\w+\.first\(\)", body):
+        problems.append(
+            f"{path}: 疑似漏 import kotlinx.coroutines.flow.first —— "
+            f"调用了 .first() 且文件在其他 flow 符号上下文中（三犯坑，V49/V52/V57）"
+        )
+    if not has_cas_import and re.search(r"\.collectAsState\(", body):
+        problems.append(
+            f"{path}: 疑似漏 import androidx.compose.runtime.collectAsState"
+        )
+
     return problems
 
 

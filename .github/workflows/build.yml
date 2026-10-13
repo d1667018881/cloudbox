@@ -85,7 +85,15 @@ jobs:
         id: build
         env:
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: "0.1.${{ github.run_number }}"
+          # V59 版本号规约（TA 2026-10-13 定：「版本号我希望是一点几」）：
+          # 0.1.x 时代结束，从 1.0.0 起手动维护写死在此处。
+          # 每次**带代码变更**的发布：这里 +1（1.0.0 → 1.0.1 …），
+          # patch 逢 9 进位（1.0.9 → 1.1.0）；纯文档提交不触发 CI 不烧号。
+          # versionCode 继续用 run_number 递增，不受影响。
+          # tag/资产名从 APK 产物 aapt 提取（V51 机制），改这里即全自动跟随。
+          # ⚠️ 更新红点比较已改三段式（UpdateRepositoryImpl.parseVersionTriple），
+          # 改版本号必须确认该函数仍兼容（v0.1.231 旧 tag 也能比）。
+          VERSION_NAME: "1.0.0"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         # tee 保留完整输出，供下一步失败时留存；PIPESTATUS 保证 gradle 的真实退出码不被管道吞掉
         #

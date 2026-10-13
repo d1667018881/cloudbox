@@ -9,7 +9,7 @@ plugins {
 // #31 修复：版本号支持 CI 注入（VERSION_CODE/VERSION_NAME 环境变量），
 // 默认值用于本地/无注入场景；CI 每次构建 versionCode 递增，可区分构建
 val ciVersionCode = (System.getenv("VERSION_CODE") ?: "1").toIntOrNull() ?: 1
-val ciVersionName = System.getenv("VERSION_NAME") ?: "0.1.0"
+val ciVersionName = System.getenv("VERSION_NAME") ?: "1.0.0"
 
 android {
     namespace = "com.cloudbox.app"

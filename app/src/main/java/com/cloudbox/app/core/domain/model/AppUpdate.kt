@@ -8,7 +8,7 @@ package com.cloudbox.app.core.domain.model
  * 改连 CloudBox 自己的 GitHub Releases —— CI 每次构建都会发一个带 APK 的 Release。
  */
 data class AppUpdate(
-    /** 远端 versionCode（从 tag `v0.1.<run>` 的末段解析；CI 用 run_number 作 versionCode） */
+    /** 远端合成版号（三段式 major*10000+minor*100+patch，V59 起；仅展示用） */
     val versionCode: Int,
     /** 远端版本名，如 `0.1.166` */
     val versionName: String,
