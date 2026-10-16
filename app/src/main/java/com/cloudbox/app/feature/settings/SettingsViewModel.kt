@@ -112,8 +112,6 @@ data class SettingsUiState(
     /** 通知栏提醒：下载/上传完成是否弹系统通知 */
     val sendMessage: Boolean = true,
     // ==================== V56：蓝云 99 键对拍收尾（TA 拍板四项+红点开关） ====================
-    /** 下载完成播放系统通知铃声（原版 ringtone，默认关） */
-    val ringtone: Boolean = false,
     /** 解析历史记录（原版 open_link_history，默认开） */
     val openLinkHistory: Boolean = true,
     /** 列表分割线（原版 show_divider，默认开） */
@@ -172,8 +170,7 @@ class SettingsViewModel @Inject constructor(
             val deleteConfirmPref = settingsStore.deleteConfirm.first()
             val folderPref = settingsStore.downloadFolder.first()
             val sendMsgPref = settingsStore.sendMessage.first()
-            // V56：铃声 / 解析历史 / 分割线 / 搜索模式 / 更新红点
-            val ringtonePref = settingsStore.ringtone.first()
+            // V56：解析历史 / 分割线 / 搜索模式 / 更新红点（铃声 V60 删除）
             val historyPref = settingsStore.openLinkHistory.first()
             val dividerPref = settingsStore.showDivider.first()
             val precisePref = settingsStore.preciseSearch.first()
@@ -207,7 +204,6 @@ class SettingsViewModel @Inject constructor(
                     customDownloaderPack = thirdDlPack,
                     customDownloaderActivity = thirdDlActivity,
                     sendMessage = sendMsgPref,
-                    ringtone = ringtonePref,
                     openLinkHistory = historyPref,
                     showDivider = dividerPref,
                     preciseSearch = precisePref,
@@ -286,13 +282,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     // ==================== V56 setters ====================
-
-    fun saveRingtone(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsStore.setRingtone(enabled)
-            _uiState.update { it.copy(ringtone = enabled) }
-        }
-    }
 
     fun saveOpenLinkHistory(enabled: Boolean) {
         viewModelScope.launch {

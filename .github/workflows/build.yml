@@ -93,7 +93,7 @@ jobs:
           # tag/资产名从 APK 产物 aapt 提取（V51 机制），改这里即全自动跟随。
           # ⚠️ 更新红点比较已改三段式（UpdateRepositoryImpl.parseVersionTriple），
           # 改版本号必须确认该函数仍兼容（v0.1.231 旧 tag 也能比）。
-          VERSION_NAME: "1.0.0"
+          VERSION_NAME: "1.0.1"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         # tee 保留完整输出，供下一步失败时留存；PIPESTATUS 保证 gradle 的真实退出码不被管道吞掉
         #

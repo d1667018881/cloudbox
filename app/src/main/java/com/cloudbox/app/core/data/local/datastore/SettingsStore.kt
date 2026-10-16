@@ -70,8 +70,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
     private val keyCustomDownloaderActivity = stringPreferencesKey("custom_downloader_activity")
 
     // ---- V56（2026-10-12 蓝云 99 键对拍收尾，TA 拍板四项 + 红点） ----
-    /** 下载完成播放系统通知铃声。对齐原版 ringtone（默认关） */
-    private val keyRingtone = booleanPreferencesKey("ringtone")
     /** 解析历史记录开关 + 数据（JSON 数组，上限 50 条防膨胀）。对齐原版 open_link_history（默认开） */
     private val keyOpenLinkHistory = booleanPreferencesKey("open_link_history")
     private val keyResolveHistoryJson = stringPreferencesKey("resolve_history_json")
@@ -352,10 +350,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
 
     // ==================== V56 flows & setters ====================
 
-    val ringtone: Flow<Boolean> = context.settingsDataStore.data.map { it[keyRingtone] ?: false }
-
-    suspend fun setRingtone(enabled: Boolean) = edit { p -> p[keyRingtone] = enabled }
-
     val openLinkHistory: Flow<Boolean> = context.settingsDataStore.data.map {
         it[keyOpenLinkHistory] ?: true
     }
@@ -474,8 +468,7 @@ class SettingsStore @Inject constructor(private val context: Context) {
             p[keyUseThirdPartyDownloader]?.let { put(KEY_USE_THIRD_PARTY_DOWNLOADER, it.toString()) }
             p[keyCustomDownloaderPack]?.let { put(KEY_CUSTOM_DOWNLOADER_PACK, it) }
             p[keyCustomDownloaderActivity]?.let { put(KEY_CUSTOM_DOWNLOADER_ACTIVITY, it) }
-            // V57（V58 复审补）：五开关 + 解析历史数据
-            p[keyRingtone]?.let { put(KEY_RINGTONE, it.toString()) }
+            // V57（V58 复审补）：开关 + 解析历史数据（ringtone 已 V60 删除）
             p[keyOpenLinkHistory]?.let { put(KEY_OPEN_LINK_HISTORY, it.toString()) }
             p[keyResolveHistoryJson]?.let { put(KEY_RESOLVE_HISTORY_JSON, it) }
             p[keyShowDivider]?.let { put(KEY_SHOW_DIVIDER, it.toString()) }
@@ -520,7 +513,6 @@ class SettingsStore @Inject constructor(private val context: Context) {
         map[KEY_CUSTOM_DOWNLOADER_PACK]?.let { p[keyCustomDownloaderPack] = it.trim() }
         map[KEY_CUSTOM_DOWNLOADER_ACTIVITY]?.let { p[keyCustomDownloaderActivity] = it.trim() }
         // V57（V58 复审补）：还原
-        map[KEY_RINGTONE]?.toLooseBool()?.let { p[keyRingtone] = it }
         map[KEY_OPEN_LINK_HISTORY]?.toLooseBool()?.let { p[keyOpenLinkHistory] = it }
         map[KEY_RESOLVE_HISTORY_JSON]?.let { p[keyResolveHistoryJson] = it }
         map[KEY_SHOW_DIVIDER]?.toLooseBool()?.let { p[keyShowDivider] = it }
@@ -599,7 +591,8 @@ class SettingsStore @Inject constructor(private val context: Context) {
         const val KEY_CUSTOM_DOWNLOADER_ACTIVITY = "custom_downloader_activity"
         // V57（复审 V58 补快照——V40 N1 规矩重犯，立规矩挂注释也没防住，
         // 教训：新增设置项的 checklist 必须含「快照两处 + KEY 常量」三件套）
-        const val KEY_RINGTONE = "ringtone"
+        // ringtone：V60 删除（TA 2026-10-16 拍板「这个功能其实也可以去掉」；
+        // V57 从原版对拍移植，存在两个版本后移除。旧备份文件里的该字段被忽略，无害）
         const val KEY_OPEN_LINK_HISTORY = "open_link_history"
         const val KEY_RESOLVE_HISTORY_JSON = "resolve_history_json"
         const val KEY_SHOW_DIVIDER = "show_divider"

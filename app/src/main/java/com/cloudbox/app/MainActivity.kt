@@ -241,19 +241,29 @@ class MainActivity : ComponentActivity() {
                                 // 点搜索结果 → 落到对应目录（文件夹本身 / 文件所在目录）。
                                 // 旧实现结果行没有 onClick，搜出来只能看不能进 —— 这就是
                                 // 「搜索能搜不能用」的直接原因。
+                                // V60：搜索页=跳板，落地时 popUpTo 把搜索页弹掉
+                                // （对齐原版心智——蓝云搜索是列表内过滤态，点结果同页
+                                // 跳转目录，无「返回搜索页」概念）。不弹的话文件页搜索
+                                // 入口每用一次栈里就多压一层，返回键按不完，「在搜索和
+                                // 文件页之间来回跳」（TA 10-16 报障）。弹掉后返回=回到
+                                // 进搜索前的位置（主页/上级文件页），一次到位。
                                 onOpenFolder = { id, name ->
                                     navController.navigate(
                                         Routes.FILELIST
                                             .replace("{folderId}", id.toString())
                                             .replace("{folderName}", Uri.encode(name))
-                                    )
+                                    ) {
+                                        popUpTo(Routes.SEARCH) { inclusive = true }
+                                    }
                                 },
                                 onOpenFileInParent = { parentId ->
                                     navController.navigate(
                                         Routes.FILELIST
                                             .replace("{folderId}", parentId.toString())
                                             .replace("{folderName}", "")
-                                    )
+                                    ) {
+                                        popUpTo(Routes.SEARCH) { inclusive = true }
+                                    }
                                 }
                             )
                         }

@@ -620,20 +620,6 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("下载完成铃声", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "下载完成时播放系统通知铃声（原版「铃声」，需要 App 在后台存活）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = state.ringtone, onCheckedChange = viewModel::saveRingtone)
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
                     Text("更新红点", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         "发现新版本时在「关于」入口显示红点（关闭则启动时不检查更新）",
